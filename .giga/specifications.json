@@ -1,0 +1,22 @@
+[
+  {
+    "fileName": "main-overview.mdc",
+    "description": "Complete system overview detailing the infrastructure as code generation architecture, plugin system, and core deployment orchestration components"
+  },
+  {
+    "fileName": "code-generation-algorithms.mdc",
+    "description": "Detailed documentation of the code generation algorithms, including template processing, resource definition conversion, and provider-specific code generation logic"
+  },
+  {
+    "fileName": "resource-data-models.mdc",
+    "description": "Comprehensive documentation of cloud resource data models, validation rules, and relationships between different resource types across providers"
+  },
+  {
+    "fileName": "component-dataflow.mdc",
+    "description": "Documentation of data flow between core components including code generation, plugin registry, and deployment orchestration services"
+  },
+  {
+    "fileName": "plugin-architecture.mdc",
+    "description": "Detailed specification of the plugin architecture, including provider registration, resource type management, and extension points"
+  }
+]

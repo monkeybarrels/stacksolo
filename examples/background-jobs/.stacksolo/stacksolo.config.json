@@ -1,0 +1,36 @@
+{
+  "project": {
+    "name": "jobs",
+    "region": "us-central1",
+    "gcpProjectId": "my-project",
+    "topics": [
+      { "name": "tasks" }
+    ],
+    "crons": [
+      {
+        "name": "daily-cleanup",
+        "schedule": "0 2 * * *",
+        "timezone": "America/New_York",
+        "target": "main/processor",
+        "path": "/cleanup"
+      }
+    ],
+    "networks": [
+      {
+        "name": "main",
+        "functions": [
+          {
+            "name": "processor",
+            "runtime": "nodejs20",
+            "entryPoint": "handler",
+            "memory": "256Mi",
+            "trigger": {
+              "type": "pubsub",
+              "topic": "tasks"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

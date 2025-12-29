@@ -1,0 +1,16 @@
+{
+  "project": {
+    "name": "static-site",
+    "region": "us-central1",
+    "gcpProjectId": "my-project",
+    "buckets": [
+      {
+        "name": "site-assets",
+        "location": "US",
+        "storageClass": "STANDARD",
+        "uniformBucketLevelAccess": true,
+        "publicAccess": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "project": {
+    "name": "webapp",
+    "region": "us-central1",
+    "gcpProjectId": "my-project",
+    "networks": [
+      {
+        "name": "main",
+        "containers": [
+          {
+            "name": "web",
+            "image": "gcr.io/my-project/web:latest",
+            "memory": "1Gi",
+            "allowUnauthenticated": true,
+            "env": {
+              "DATABASE_URL": "@database/main.connectionString"
+            }
+          }
+        ],
+        "databases": [
+          {
+            "name": "main",
+            "databaseVersion": "POSTGRES_15",
+            "tier": "db-f1-micro",
+            "databaseName": "app"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@stacksolo/runtime",
+  "version": "0.1.0",
+  "description": "Runtime helpers for StackSolo-deployed applications - config validation, database, and storage utilities",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "@google-cloud/storage": ">=7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@google-cloud/storage": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.27",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "stacksolo",
+    "runtime",
+    "config",
+    "gcp",
+    "cloud"
+  ],
+  "license": "MIT"
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@stacksolo/cli",
+  "version": "0.1.0",
+  "description": "CLI for StackSolo - deploy infrastructure from the command line",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "stacksolo": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumi/gcp": "^7.0.0",
+    "@stacksolo/api": "workspace:*",
+    "@stacksolo/blueprint": "workspace:*",
+    "@stacksolo/core": "workspace:*",
+    "@stacksolo/registry": "workspace:*",
+    "@stacksolo/shared": "workspace:*",
+    "@stacksolo/plugin-gcp": "workspace:*",
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "inquirer": "^9.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.27",
+    "@types/inquirer": "^9.0.7",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "cli",
+    "stacksolo",
+    "infrastructure",
+    "pulumi",
+    "deploy"
+  ],
+  "license": "MIT"
+}

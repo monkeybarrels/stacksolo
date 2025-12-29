@@ -1,0 +1,26 @@
+{
+  "project": {
+    "name": "simple-api",
+    "region": "us-central1",
+    "gcpProjectId": "my-project",
+    "secrets": [
+      { "name": "api-key" }
+    ],
+    "networks": [
+      {
+        "name": "main",
+        "containers": [
+          {
+            "name": "api",
+            "image": "gcr.io/my-project/api:latest",
+            "memory": "512Mi",
+            "allowUnauthenticated": true,
+            "env": {
+              "API_KEY": "@secret/api-key"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

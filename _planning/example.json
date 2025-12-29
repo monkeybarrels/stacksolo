@@ -1,0 +1,23 @@
+{
+  "project": {
+    "name": "my-app",
+    "region": "us-central1",
+    
+    "serviceAccount": {
+      "name": "my-app-sa",
+      "createKey": true
+    },
+    "topics": [],
+    "buckets": [],
+    "networks": [
+      {
+        "name": "main",
+        "resources": [
+          { "type": "container", "name": "web", "image": "./" },
+          { "type": "database", "name": "db", "engine": "postgres" },
+          { "type": "bucket", "name": "uploads" }
+        ]
+      }
+    ]
+  }
+}

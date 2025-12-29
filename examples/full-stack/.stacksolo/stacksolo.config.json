@@ -1,0 +1,57 @@
+{
+  "project": {
+    "name": "fullstack",
+    "region": "us-central1",
+    "gcpProjectId": "my-project",
+    "secrets": [
+      { "name": "jwt-secret" }
+    ],
+    "buckets": [
+      {
+        "name": "uploads",
+        "storageClass": "STANDARD"
+      }
+    ],
+    "networks": [
+      {
+        "name": "main",
+        "subnets": [
+          {
+            "name": "private",
+            "ipCidrRange": "10.0.1.0/24"
+          }
+        ],
+        "containers": [
+          {
+            "name": "api",
+            "image": "gcr.io/my-project/api:latest",
+            "memory": "1Gi",
+            "allowUnauthenticated": true,
+            "env": {
+              "DATABASE_URL": "@database/db.connectionString",
+              "REDIS_HOST": "@cache/sessions.host",
+              "JWT_SECRET": "@secret/jwt-secret",
+              "BUCKET_NAME": "@bucket/uploads.name"
+            }
+          }
+        ],
+        "databases": [
+          {
+            "name": "db",
+            "databaseVersion": "POSTGRES_15",
+            "tier": "db-g1-small",
+            "databaseName": "app",
+            "enablePublicIp": false
+          }
+        ],
+        "caches": [
+          {
+            "name": "sessions",
+            "tier": "BASIC",
+            "memorySizeGb": 1
+          }
+        ]
+      }
+    ]
+  }
+}
