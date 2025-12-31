@@ -8,7 +8,7 @@ import type {
   DatabaseConfig,
   CacheConfig,
 } from '@stacksolo/blueprint';
-import type { DockerComposeConfig, DockerService, GeneratedFile } from './types.js';
+import type { DockerComposeConfig, DockerService, GeneratedFile } from './types';
 
 interface DockerGeneratorResult {
   dockerCompose: GeneratedFile | null;

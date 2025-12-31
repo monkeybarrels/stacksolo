@@ -20,18 +20,18 @@ export class CodegenService {
         continue;
       }
 
-      const pulumiCode = resourceType.generatePulumi({
+      const generated = resourceType.generate({
         name: resource.name,
         ...resource.config,
       });
 
-      pulumiCode.imports.forEach((imp) => allImports.add(imp));
+      generated.imports.forEach((imp) => allImports.add(imp));
       allCode.push(`// ${resource.name} (${resourceType.name})`);
-      allCode.push(pulumiCode.code);
+      allCode.push(generated.code);
       allCode.push('');
 
-      if (pulumiCode.outputs) {
-        allOutputs.push(...pulumiCode.outputs);
+      if (generated.outputs) {
+        allOutputs.push(...generated.outputs);
       }
     }
 

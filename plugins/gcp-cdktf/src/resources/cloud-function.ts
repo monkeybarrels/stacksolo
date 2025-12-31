@@ -90,7 +90,7 @@ export const cloudFunction = defineResource({
     allowUnauthenticated: true,
   },
 
-  generatePulumi: (config: ResourceConfig) => {
+  generate: (config: ResourceConfig) => {
     const varName = toVariableName(config.name);
     const fnConfig = config as {
       name: string;

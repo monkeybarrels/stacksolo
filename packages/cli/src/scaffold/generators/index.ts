@@ -6,15 +6,15 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { StackSoloConfig } from '@stacksolo/blueprint';
-import { generateEnvFiles } from './env.js';
-import { generateDockerCompose } from './docker-compose.js';
-import { generateServiceScaffolds } from './services.js';
-import type { ScaffoldOptions, ScaffoldResult, GeneratedFile } from './types.js';
+import { generateEnvFiles } from './env';
+import { generateDockerCompose } from './docker-compose';
+import { generateServiceScaffolds } from './services';
+import type { ScaffoldOptions, ScaffoldResult, GeneratedFile } from './types';
 
-export { generateEnvFiles } from './env.js';
-export { generateDockerCompose } from './docker-compose.js';
-export { generateServiceScaffolds } from './services.js';
-export type { ScaffoldOptions, ScaffoldResult, GeneratedFile } from './types.js';
+export { generateEnvFiles } from './env';
+export { generateDockerCompose } from './docker-compose';
+export { generateServiceScaffolds } from './services';
+export type { ScaffoldOptions, ScaffoldResult, GeneratedFile } from './types';
 
 /**
  * Generate all scaffold files from config
@@ -28,6 +28,7 @@ export function generateScaffold(
   let envVarCount = 0;
   let dockerServiceCount = 0;
   let serviceDirectoryCount = 0;
+  let uiDirectoryCount = 0;
 
   const generateEnv = !options.dockerOnly && !options.servicesOnly;
   const generateDocker = !options.envOnly && !options.servicesOnly;
@@ -53,11 +54,13 @@ export function generateScaffold(
     }
   }
 
-  // Generate service scaffolds
+  // Generate service scaffolds (containers, functions, UIs)
   if (generateServices) {
     const servicesResult = generateServiceScaffolds(config);
     files.push(...servicesResult.files);
-    serviceDirectoryCount = servicesResult.services.length;
+    // Count services excluding UIs
+    serviceDirectoryCount = servicesResult.services.filter(s => s.type !== 'ui').length;
+    uiDirectoryCount = servicesResult.uiCount;
   }
 
   return {
@@ -67,6 +70,7 @@ export function generateScaffold(
       envVars: envVarCount,
       dockerServices: dockerServiceCount,
       serviceDirectories: serviceDirectoryCount,
+      uiDirectories: uiDirectoryCount,
     },
   };
 }

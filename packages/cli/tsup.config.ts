@@ -12,13 +12,18 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
-  // Don't bundle workspace dependencies - they need to be resolved at runtime
+  // Mark these as external - they have native dependencies or special requirements
   external: [
+    '@stacksolo/plugin-gcp',
     '@stacksolo/api',
+    '@stacksolo/registry',
+    'better-sqlite3',
+  ],
+  // Bundle workspace dependencies for clean imports (no .js extensions needed)
+  noExternal: [
+    '@stacksolo/blueprint',
     '@stacksolo/core',
     '@stacksolo/shared',
     '@stacksolo/plugin-gcp-cdktf',
   ],
-  // Bundle everything else including local imports
-  noExternal: [],
 });

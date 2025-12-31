@@ -15,7 +15,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import * as path from 'path';
-import { getRegionsForProvider } from '../regions';
+import { getRegionsForProvider } from '../../regions';
 import {
   isGcloudInstalled,
   checkGcloudAuth,
@@ -31,14 +31,15 @@ import {
   checkOrgPolicy,
   fixOrgPolicy,
   checkAndFixCloudBuildPermissions,
-} from '../gcp';
+} from '../../gcp';
 import {
   generateConfig,
   createStacksoloDir,
   createConfigFile,
   scaffoldTemplates,
   type ProjectType,
-} from '../templates';
+  type UIFramework,
+} from '../../templates';
 
 const BANNER = `
   ███████╗████████╗ █████╗  ██████╗██╗  ██╗███████╗ ██████╗ ██╗      ██████╗
@@ -60,6 +61,16 @@ const PROJECT_TYPES: Array<{
     description: 'Serverless API using Cloud Functions behind a load balancer',
   },
   {
+    value: 'ui-api',
+    name: 'UI + API',
+    description: 'Static UI (React/Vue/Svelte) + Cloud Function API behind a load balancer',
+  },
+  {
+    value: 'ui-only',
+    name: 'UI Only',
+    description: 'Static UI site served via Cloud Storage + CDN',
+  },
+  {
     value: 'container-api',
     name: 'Container API',
     description: 'Containerized API using Cloud Run behind a load balancer',
@@ -71,8 +82,35 @@ const PROJECT_TYPES: Array<{
   },
   {
     value: 'static-api',
-    name: 'Static Site + API',
-    description: 'Static frontend with serverless API backend',
+    name: 'Static Site + API (Container)',
+    description: 'Static frontend container with serverless API backend',
+  },
+];
+
+const UI_FRAMEWORKS: Array<{
+  value: UIFramework;
+  name: string;
+  description: string;
+}> = [
+  {
+    value: 'react',
+    name: 'React',
+    description: 'React with Vite and TypeScript',
+  },
+  {
+    value: 'vue',
+    name: 'Vue',
+    description: 'Vue 3 with Vite and TypeScript',
+  },
+  {
+    value: 'sveltekit',
+    name: 'SvelteKit',
+    description: 'SvelteKit with static adapter',
+  },
+  {
+    value: 'html',
+    name: 'Plain HTML',
+    description: 'Simple HTML/CSS/JS - no build step',
   },
 ];
 
@@ -413,6 +451,7 @@ export const initCommand = new Command('init')
     console.log(chalk.cyan.bold('\n  Step 5: Project Type\n'));
 
     let projectType: ProjectType = (options.template as ProjectType) || 'function-api';
+    let uiFramework: UIFramework | undefined;
 
     if (!options.template && !options.yes) {
       const { selectedType } = await inquirer.prompt([
@@ -429,6 +468,24 @@ export const initCommand = new Command('init')
         },
       ]);
       projectType = selectedType;
+
+      // Ask for UI framework if ui-api or ui-only
+      if (projectType === 'ui-api' || projectType === 'ui-only') {
+        const { selectedFramework } = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'selectedFramework',
+            message: 'Which UI framework?',
+            choices: UI_FRAMEWORKS.map((f) => ({
+              name: `${f.name}\n      ${chalk.gray(f.description)}`,
+              value: f.value,
+              short: f.name,
+            })),
+            default: 'react',
+          },
+        ]);
+        uiFramework = selectedFramework;
+      }
     }
 
     // =========================================
@@ -539,6 +596,7 @@ export const initCommand = new Command('init')
       gcpProjectId: projectId,
       region,
       projectType,
+      uiFramework,
       needsDatabase,
       databaseVersion,
       needsBucket,
@@ -557,13 +615,30 @@ export const initCommand = new Command('init')
     generateSpinner.text = 'Created stacksolo.config.json';
 
     // Scaffold templates
-    const templateDir = projectType === 'function-cron' ? 'worker' : 'api';
-    const scaffoldedFiles = await scaffoldTemplates(cwd, projectType);
+    const scaffoldedFiles = await scaffoldTemplates(cwd, projectType, uiFramework);
     generateSpinner.succeed('Project files created');
+
+    // Determine the main directories created based on project type
+    const createdDirs: string[] = [];
+    if (projectType === 'function-api') {
+      createdDirs.push('functions/api');
+    } else if (projectType === 'container-api') {
+      createdDirs.push('containers/api');
+    } else if (projectType === 'function-cron') {
+      createdDirs.push('functions/worker');
+    } else if (projectType === 'static-api') {
+      createdDirs.push('functions/api', 'containers/web');
+    } else if (projectType === 'ui-api') {
+      createdDirs.push('functions/api', 'apps/web');
+    } else if (projectType === 'ui-only') {
+      createdDirs.push('apps/web');
+    }
 
     console.log(chalk.green('\n  ✓ Created .stacksolo/'));
     console.log(chalk.green('  ✓ Created stacksolo.config.json'));
-    console.log(chalk.green(`  ✓ Created ${templateDir}/ template`));
+    for (const dir of createdDirs) {
+      console.log(chalk.green(`  ✓ Created ${dir}/ template`));
+    }
 
     for (const file of scaffoldedFiles) {
       console.log(chalk.gray(`      ${file}`));
@@ -576,7 +651,9 @@ export const initCommand = new Command('init')
     console.log(chalk.bold.green('\n  Done! Your project is ready.\n'));
 
     console.log(chalk.gray('  Next steps:\n'));
-    console.log(chalk.white(`    1. Edit ${templateDir}/index.ts with your code`));
+    const mainCodeDir = createdDirs[0];
+    const mainCodeFile = mainCodeDir.startsWith('apps/') ? 'src/App.tsx' : 'index.ts';
+    console.log(chalk.white(`    1. Edit ${mainCodeDir}/${mainCodeFile} with your code`));
     console.log(chalk.white('    2. Run: ') + chalk.cyan('stacksolo deploy'));
     console.log('');
   });

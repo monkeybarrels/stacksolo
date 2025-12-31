@@ -6,22 +6,29 @@
  */
 
 import { Command } from 'commander';
-import { initCommand } from './commands/init';
-import { configCommand } from './commands/config';
-import { scaffoldCommand } from './commands/scaffold';
-import { deployCommand } from './commands/deploy';
-import { destroyCommand } from './commands/destroy';
-import { statusCommand } from './commands/status';
-import { envCommand } from './commands/env';
-import { serveCommand } from './commands/serve';
-import { registerCommand } from './commands/register';
-import { listCommand } from './commands/list';
-import { outputCommand } from './commands/output';
-import { unregisterCommand } from './commands/unregister';
-import { buildCommand } from './commands/build';
-import { logsCommand } from './commands/logs';
-import { resetCommand } from './commands/reset';
-import { infraCommand } from './commands/infra';
+import {
+  // Project commands
+  initCommand,
+  scaffoldCommand,
+  // Infrastructure commands
+  deployCommand,
+  destroyCommand,
+  statusCommand,
+  outputCommand,
+  logsCommand,
+  resetCommand,
+  infraCommand,
+  listCommand,
+  // Development commands
+  buildCommand,
+  installCommand,
+  serveCommand,
+  // Configuration commands
+  configCommand,
+  envCommand,
+  registerCommand,
+  unregisterCommand,
+} from './commands';
 
 const program = new Command();
 
@@ -30,22 +37,29 @@ program
   .description('Deploy cloud infrastructure for your applications')
   .version('0.1.0');
 
-// Register commands
+// Project commands
 program.addCommand(initCommand);
-program.addCommand(configCommand);
 program.addCommand(scaffoldCommand);
+
+// Infrastructure commands
 program.addCommand(deployCommand);
 program.addCommand(destroyCommand);
 program.addCommand(statusCommand);
-program.addCommand(envCommand);
-program.addCommand(serveCommand);
-program.addCommand(registerCommand);
-program.addCommand(listCommand);
 program.addCommand(outputCommand);
-program.addCommand(unregisterCommand);
-program.addCommand(buildCommand);
 program.addCommand(logsCommand);
 program.addCommand(resetCommand);
 program.addCommand(infraCommand);
+program.addCommand(listCommand);
+
+// Development commands
+program.addCommand(buildCommand);
+program.addCommand(installCommand);
+program.addCommand(serveCommand);
+
+// Configuration commands
+program.addCommand(configCommand);
+program.addCommand(envCommand);
+program.addCommand(registerCommand);
+program.addCommand(unregisterCommand);
 
 program.parse();

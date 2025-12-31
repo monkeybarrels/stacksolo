@@ -4,7 +4,7 @@ export type {
   ResourceType,
   AuthMethod,
   ResourceConfig,
-  PulumiCode,
+  GeneratedCode,
   CostEstimate,
   CostBreakdownItem,
   JSONSchema,

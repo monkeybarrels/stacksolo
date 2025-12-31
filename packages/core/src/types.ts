@@ -45,7 +45,7 @@ export interface ResourceType {
   icon: string;
   configSchema: JSONSchema;
   defaultConfig: Record<string, unknown>;
-  generatePulumi: (config: ResourceConfig) => PulumiCode;
+  generate: (config: ResourceConfig) => GeneratedCode;
   estimateCost?: (config: ResourceConfig) => CostEstimate;
 }
 
@@ -54,7 +54,7 @@ export interface ResourceConfig {
   [key: string]: unknown;
 }
 
-export interface PulumiCode {
+export interface GeneratedCode {
   imports: string[];
   code: string;
   outputs?: string[];
@@ -147,6 +147,6 @@ export interface DefineResourceInput {
   icon: string;
   configSchema: JSONSchema;
   defaultConfig: Record<string, unknown>;
-  generatePulumi: (config: ResourceConfig) => PulumiCode;
+  generate: (config: ResourceConfig) => GeneratedCode;
   estimateCost?: (config: ResourceConfig) => CostEstimate;
 }

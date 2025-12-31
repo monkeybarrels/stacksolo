@@ -5,7 +5,7 @@ This file provides context for Claude (AI assistant) when working on this codeba
 
 ## Project Overview
 
-StackSolo is a local webapp that helps solo developers scaffold and deploy cloud infrastructure using Pulumi. It's an open source project under MonkeyBarrels (monkeybarrels.com).
+StackSolo is a CLI tool that helps solo developers scaffold and deploy cloud infrastructure using CDKTF (Terraform). It's an open source project under MonkeyBarrels (monkeybarrels.com).
 
 **Domain:** stacksolo.dev
 
@@ -14,7 +14,7 @@ StackSolo is a local webapp that helps solo developers scaffold and deploy cloud
 - **Frontend:** SvelteKit
 - **Backend:** Express + tRPC
 - **Database:** SQLite with Kysely (repository pattern for future Postgres migration)
-- **Infrastructure as Code:** Pulumi Automation API
+- **Infrastructure as Code:** CDKTF (Terraform CDK)
 - **Monorepo:** pnpm workspaces
 - **Language:** TypeScript throughout
 
@@ -85,11 +85,11 @@ defineProvider({
 
 // Resource type example
 defineResource({
-  id: 'gcp:storage_bucket',
-  provider: 'gcp',
+  id: 'gcp-cdktf:storage_bucket',
+  provider: 'gcp-cdktf',
   name: 'Cloud Storage Bucket',
   configSchema: { /* JSON Schema */ },
-  generatePulumi: (config) => ({ imports, code, outputs })
+  generate: (config) => ({ imports, code, outputs })
 })
 ```
 
@@ -115,13 +115,12 @@ interface ProjectRepository {
 
 SQLite implementation now, Postgres later.
 
-### Pulumi Integration
+### CDKTF Integration
 
-Uses Pulumi Automation API (not shell commands) for:
-- Programmatic control
-- Structured output
-- Progress streaming to UI
-- Generated files are standard Pulumi projects users can eject
+Uses CDKTF (Terraform CDK) for infrastructure:
+- TypeScript-based infrastructure code generation
+- Terraform state management
+- Generated files are standard CDKTF/Terraform projects users can eject
 
 ## Database Schema
 
@@ -181,18 +180,18 @@ interface AuthMethod {
 
 ```typescript
 interface ResourceType {
-  id: string                      // 'gcp:storage_bucket'
-  provider: string                // 'gcp'
+  id: string                      // 'gcp-cdktf:storage_bucket'
+  provider: string                // 'gcp-cdktf'
   name: string                    // 'Cloud Storage Bucket'
   description: string
   icon: string
   configSchema: JSONSchema
   defaultConfig: Record<string, any>
-  generatePulumi: (config: ResourceConfig) => PulumiCode
+  generate: (config: ResourceConfig) => GeneratedCode
   estimateCost?: (config: ResourceConfig) => CostEstimate
 }
 
-interface PulumiCode {
+interface GeneratedCode {
   imports: string[]
   code: string
   outputs?: string[]
@@ -219,7 +218,7 @@ The minimum viable version includes:
 ## User Prerequisites
 
 - Node.js 18+
-- Pulumi CLI installed
+- Terraform CLI installed
 - gcloud CLI installed and authenticated
 
 ## Commands
@@ -247,8 +246,8 @@ pnpm lint             # Lint code
 - `packages/core/src/types.ts` - Core interfaces
 - `packages/core/src/registry.ts` - Plugin registry
 - `packages/api/src/repositories/interfaces.ts` - Repository interfaces
-- `plugins/gcp/src/provider.ts` - GCP provider definition
-- `plugins/gcp/src/resources/` - GCP resource type definitions
+- `plugins/gcp-cdktf/src/provider.ts` - GCP CDKTF provider definition
+- `plugins/gcp-cdktf/src/resources/` - GCP CDKTF resource type definitions
 # === END USER INSTRUCTIONS ===
 
 
@@ -272,23 +271,23 @@ Core Infrastructure Automation System delivering cloud resource management throu
 
 ### Infrastructure Code Generation (85/100)
 Location: packages/api/src/services/codegen.service.ts
-- Domain-specific code generation engine converting high-level resource definitions into Pulumi TypeScript
+- Domain-specific code generation engine converting high-level resource definitions into CDKTF TypeScript
 - Infrastructure template management system with provider-specific configurations
 - Dependency resolution for cloud resource relationships
 
 ### Deployment Control System (80/100)
-Location: packages/api/src/services/pulumi.service.ts
-- Infrastructure lifecycle management
+Location: packages/cli/src/commands/infra/deploy.ts
+- Infrastructure lifecycle management via Terraform
 - State tracking for deployed cloud resources
-- Concurrent deployment workspace isolation
+- Conflict detection and auto-cleanup
 - Deployment event coordination
 
 ### Cloud Provider Integration (75/100)
-Location: plugins/gcp/src/resources/storage-bucket.ts
+Location: plugins/gcp-cdktf/src/resources/
 - Provider-specific resource definition implementation
 - Cloud resource naming and validation rules
 - Resource-specific cost estimation
-- Pulumi code generation for provider resources
+- CDKTF code generation for provider resources
 
 ### Plugin Management System (70/100)
 Location: packages/core/src/registry.ts

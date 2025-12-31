@@ -63,6 +63,12 @@ const REFERENCE_OUTPUTS: Record<ReferenceType, Record<string, string>> = {
     id: 'networkId',
     selfLink: 'selfLink',
   },
+  ui: {
+    default: 'url',
+    url: 'url',
+    bucketName: 'bucketName',
+    name: 'name',
+  },
 };
 
 /**
@@ -89,7 +95,7 @@ export function parseReference(ref: string): Reference | null {
   // Validate type
   const validTypes: ReferenceType[] = [
     'secret', 'database', 'bucket', 'cache',
-    'container', 'function', 'topic', 'queue', 'network'
+    'container', 'function', 'topic', 'queue', 'network', 'ui'
   ];
 
   if (!validTypes.includes(typeStr as ReferenceType)) {

@@ -12,7 +12,7 @@ import type {
   ContainerConfig,
   FunctionConfig,
 } from '@stacksolo/blueprint';
-import type { EnvSection, EnvVariable, GeneratedFile } from './types.js';
+import type { EnvSection, EnvVariable, GeneratedFile } from './types';
 
 interface EnvGeneratorResult {
   envLocal: GeneratedFile;

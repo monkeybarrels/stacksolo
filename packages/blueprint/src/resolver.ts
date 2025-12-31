@@ -22,6 +22,7 @@ import type {
   SubnetConfig,
   FirewallRuleConfig,
   LoadBalancerRouteConfig,
+  UIConfig,
 } from './schema.js';
 
 /**
@@ -464,7 +465,7 @@ function resolveFunction(
     name: fn.name,
     config: {
       name: fn.name,
-      sourceDir: fn.sourceDir || 'functions',
+      sourceDir: fn.sourceDir || `functions/${fn.name}`,
       entryPoint: fn.entryPoint || fn.name,
       runtime: fn.runtime || 'nodejs20',
       memory: fn.memory || '256Mi',
@@ -612,8 +613,10 @@ function resolveCdktfConfig(
   }
 
   const functions = network.functions || [];
-  if (functions.length === 0) {
-    throw new Error('CDKTF backend requires at least one function in the network');
+  const uis = network.uis || [];
+
+  if (functions.length === 0 && uis.length === 0) {
+    throw new Error('CDKTF backend requires at least one function or UI in the network');
   }
 
   // Check for unsupported resources
@@ -691,7 +694,7 @@ function resolveCdktfConfig(
       config: {
         name: functionName,
         location: projectInfo.region,
-        sourceDir: fn.sourceDir || 'api',
+        sourceDir: fn.sourceDir || `functions/${fn.name}`,
         entryPoint: fn.entryPoint || fn.name,
         runtime: fn.runtime || 'nodejs20',
         memory: fn.memory || '256Mi',
@@ -707,26 +710,84 @@ function resolveCdktfConfig(
     });
   }
 
-  // 4. Load Balancer (HTTP) - routes to all functions based on loadBalancer config
-  const routes: LoadBalancerRouteConfig[] = network.loadBalancer?.routes || [{ path: '/*', backend: functions[0].name }];
+  // 4. Static UI Sites (Storage Website + CDN)
+  const uiIds: string[] = [];
+  const uiNames: string[] = [];
 
-  resources.push({
-    id: loadBalancerId,
-    type: 'gcp-cdktf:load_balancer',
-    name: lbName,
-    config: {
-      name: lbName,
-      region: projectInfo.region,
-      routes: routes.map((r: LoadBalancerRouteConfig) => ({
+  for (const ui of uis) {
+    const uiName = `${projectInfo.name}-${ui.name}`;
+    const uiId = `ui-${ui.name}`;
+    uiIds.push(uiId);
+    uiNames.push(uiName);
+
+    resources.push({
+      id: uiId,
+      type: 'gcp-cdktf:storage_website',
+      name: uiName,
+      config: {
+        name: uiName,
+        location: 'US', // Multi-region for CDN
+        sourceDir: ui.sourceDir || `apps/${ui.name}`,
+        framework: ui.framework,
+        buildCommand: ui.buildCommand || 'npm run build',
+        buildOutputDir: ui.buildOutputDir,
+        indexDocument: ui.indexDocument || 'index.html',
+        errorDocument: ui.errorDocument || 'index.html',
+        enableCdn: true,
+        projectId: projectInfo.gcpProjectId,
+      },
+      dependsOn: [],
+      network: network.name,
+    });
+  }
+
+  // 5. Load Balancer (HTTP) - routes to functions and UIs based on loadBalancer config
+  // Build default routes if none specified
+  let routes: LoadBalancerRouteConfig[];
+  if (network.loadBalancer?.routes) {
+    routes = network.loadBalancer.routes;
+  } else if (functions.length > 0) {
+    routes = [{ path: '/*', backend: functions[0].name }];
+  } else if (uis.length > 0) {
+    routes = [{ path: '/*', backend: uis[0].name }];
+  } else {
+    routes = [];
+  }
+
+  // Map routes to either function or UI backends
+  const mappedRoutes = routes.map((r: LoadBalancerRouteConfig) => {
+    // Check if backend is a UI
+    const isUI = uis.some(ui => ui.name === r.backend);
+    if (isUI) {
+      return {
         path: r.path,
-        functionName: `${projectInfo.name}-${r.backend}`,
-      })),
-      // Keep single function for backwards compat
-      functionName: functionNames[0],
-    },
-    dependsOn: functionIds,
-    network: network.name,
+        uiName: `${projectInfo.name}-${r.backend}`,
+      };
+    }
+    // Otherwise it's a function
+    return {
+      path: r.path,
+      functionName: `${projectInfo.name}-${r.backend}`,
+    };
   });
+
+  // Only create load balancer if we have routes
+  if (routes.length > 0) {
+    resources.push({
+      id: loadBalancerId,
+      type: 'gcp-cdktf:load_balancer',
+      name: lbName,
+      config: {
+        name: lbName,
+        region: projectInfo.region,
+        routes: mappedRoutes,
+        // Keep single function for backwards compat (if functions exist)
+        functionName: functionNames.length > 0 ? functionNames[0] : undefined,
+      },
+      dependsOn: [...functionIds, ...uiIds],
+      network: network.name,
+    });
+  }
 
   return {
     project: projectInfo,

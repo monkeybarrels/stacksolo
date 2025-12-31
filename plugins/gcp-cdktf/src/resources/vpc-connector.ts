@@ -59,7 +59,7 @@ export const vpcConnector = defineResource({
     maxThroughput: 300,
   },
 
-  generatePulumi: (config: ResourceConfig) => {
+  generate: (config: ResourceConfig) => {
     const varName = toVariableName(config.name);
     const connectorConfig = config as {
       name: string;

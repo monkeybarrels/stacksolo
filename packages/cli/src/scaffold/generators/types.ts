@@ -39,7 +39,7 @@ export interface DockerComposeConfig {
 
 export interface ServiceScaffold {
   name: string;
-  type: 'container' | 'function';
+  type: 'container' | 'function' | 'ui';
   files: GeneratedFile[];
 }
 
@@ -55,6 +55,7 @@ export interface ScaffoldResult {
     envVars: number;
     dockerServices: number;
     serviceDirectories: number;
+    uiDirectories: number;
   };
 }
 

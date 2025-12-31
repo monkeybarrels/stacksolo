@@ -145,6 +145,16 @@ export interface CacheConfig {
   labels?: Record<string, string>;
 }
 
+export interface UIConfig {
+  name: string;
+  sourceDir: string;              // e.g., './web'
+  framework?: 'react' | 'vue' | 'sveltekit' | 'html';  // Default: detect from package.json
+  buildCommand?: string;          // Default: 'npm run build'
+  buildOutputDir?: string;        // Default: 'dist' or 'build'
+  indexDocument?: string;         // Default: 'index.html'
+  errorDocument?: string;         // Default: 'index.html' (for SPA routing)
+}
+
 export interface SubnetConfig {
   name: string;
   ipCidrRange: string;
@@ -203,6 +213,7 @@ export interface NetworkConfig {
   functions?: FunctionConfig[];
   databases?: DatabaseConfig[];
   caches?: CacheConfig[];
+  uis?: UIConfig[];
 }
 
 // =============================================================================
@@ -279,7 +290,8 @@ export type ReferenceType =
   | 'function'
   | 'topic'
   | 'queue'
-  | 'network';
+  | 'network'
+  | 'ui';
 
 export interface Reference {
   type: ReferenceType;

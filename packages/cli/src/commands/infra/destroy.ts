@@ -10,7 +10,7 @@ import ora from 'ora';
 import inquirer from 'inquirer';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { api, checkApiConnection } from '../api-client.js';
+import { api, checkApiConnection } from '../../api-client';
 
 interface LocalConfig {
   projectId: string;

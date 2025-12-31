@@ -14,7 +14,7 @@ import {
   writeScaffoldFiles,
   createLocalStorageDirs,
   updateGitignore,
-} from '../scaffold/generators/index.js';
+} from '../../scaffold/generators';
 
 const STACKSOLO_DIR = '.stacksolo';
 const CONFIG_FILENAME = 'stacksolo.config.json';
@@ -84,6 +84,7 @@ export const scaffoldCommand = new Command('scaffold')
       console.log(chalk.gray(`    Environment variables: ${result.summary.envVars}`));
       console.log(chalk.gray(`    Docker services: ${result.summary.dockerServices}`));
       console.log(chalk.gray(`    Service directories: ${result.summary.serviceDirectories}`));
+      console.log(chalk.gray(`    UI directories: ${result.summary.uiDirectories}`));
       console.log('');
       return;
     }
@@ -135,25 +136,43 @@ export const scaffoldCommand = new Command('scaffold')
       console.log(chalk.gray(`    Environment variables: ${result.summary.envVars}`));
       console.log(chalk.gray(`    Docker services: ${result.summary.dockerServices}`));
       console.log(chalk.gray(`    Service directories: ${result.summary.serviceDirectories}`));
+      console.log(chalk.gray(`    UI directories: ${result.summary.uiDirectories}`));
 
       // Show next steps
       console.log(chalk.bold('\n  Next steps:\n'));
 
+      let step = 1;
+
       if (result.summary.dockerServices > 0) {
-        console.log(chalk.white('    1. Start local services:'));
+        console.log(chalk.white(`    ${step}. Start local services:`));
         console.log(chalk.cyan('       docker-compose up -d\n'));
+        step++;
       }
 
       if (result.summary.serviceDirectories > 0) {
-        console.log(chalk.white('    2. Install service dependencies:'));
+        console.log(chalk.white(`    ${step}. Install service dependencies:`));
         console.log(chalk.cyan('       cd services/<name> && npm install\n'));
+        step++;
       }
 
-      console.log(chalk.white('    3. Update .env.local with real secret values\n'));
+      if (result.summary.uiDirectories > 0) {
+        console.log(chalk.white(`    ${step}. Install UI dependencies:`));
+        console.log(chalk.cyan('       cd <ui-dir> && npm install\n'));
+        step++;
+      }
+
+      console.log(chalk.white(`    ${step}. Update .env.local with real secret values\n`));
+      step++;
 
       if (result.summary.serviceDirectories > 0) {
-        console.log(chalk.white('    4. Start developing:'));
+        console.log(chalk.white(`    ${step}. Start API development:`));
         console.log(chalk.cyan('       cd services/<name> && npm run dev\n'));
+        step++;
+      }
+
+      if (result.summary.uiDirectories > 0) {
+        console.log(chalk.white(`    ${step}. Start UI development:`));
+        console.log(chalk.cyan('       cd <ui-dir> && npm run dev\n'));
       }
 
     } catch (error) {

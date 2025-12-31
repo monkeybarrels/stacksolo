@@ -1,0 +1,7 @@
+/**
+ * Project commands
+ * Commands for setting up and scaffolding StackSolo projects
+ */
+
+export { initCommand } from './init';
+export { scaffoldCommand } from './scaffold';

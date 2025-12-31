@@ -7,7 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { getLogPath } from '../logger';
+import { getLogPath } from '../../logger';
 
 export const logsCommand = new Command('logs')
   .description('View debug logs from CLI operations')

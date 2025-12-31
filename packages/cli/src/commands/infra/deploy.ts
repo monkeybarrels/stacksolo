@@ -15,8 +15,8 @@ import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import { parseConfig, resolveConfig, topologicalSort } from '@stacksolo/blueprint';
 import { getRegistry } from '@stacksolo/registry';
-import { deployConfig } from '../services/deploy.service';
-import { createCommandLogger, logFullError, getLogPath } from '../logger';
+import { deployConfig } from '../../services/deploy.service';
+import { createCommandLogger, logFullError, getLogPath } from '../../logger';
 
 const execAsync = promisify(exec);
 
@@ -108,7 +108,7 @@ interface ConflictingResource {
 }
 
 /**
- * Parse conflicting resources from Pulumi error output
+ * Parse conflicting resources from Pulumi/Terraform error output
  * Handles various GCP resource types and their error message formats
  */
 function parseConflictingResources(error: string): ConflictingResource[] {
@@ -121,9 +121,11 @@ function parseConflictingResources(error: string): ConflictingResource[] {
   // 2. projects/PROJECT/global/TYPE/NAME already exists
   // 3. the repository already exists (artifact registry)
   // 4. Service account NAME already exists
+  // 5. Terraform: google_compute_url_map.NAME: Error 409
+  // 6. Terraform: bucket already exists
   const lines = error.split('\n');
   for (const line of lines) {
-    // Match: gcp:TYPE (NAME) - handles multi-line format with \n in name
+    // Match: gcp:TYPE (NAME) - handles multi-line format with \n in name (Pulumi format)
     const pulumiMatch = line.match(/gcp:([^:]+):([^\s]+)\s+\(([^)]+)\)/);
     if (pulumiMatch) {
       const [, provider, resourceType, name] = pulumiMatch;
@@ -202,6 +204,62 @@ function parseConflictingResources(error: string): ConflictingResource[] {
         }
       }
     }
+
+    // Match: bucket already exists (Storage buckets)
+    if (line.includes('already own it') || line.includes('bucket succeeded')) {
+      // Look for google_storage_bucket resource name in nearby context
+      const bucketResourceMatch = error.match(/google_storage_bucket\.([a-zA-Z0-9_-]+)/);
+      if (bucketResourceMatch) {
+        const resourceName = bucketResourceMatch[1];
+        if (!seen.has(resourceName)) {
+          seen.add(resourceName);
+          conflicts.push({
+            type: 'buckets',
+            name: resourceName,
+            fullPath: resourceName,
+          });
+        }
+      }
+    }
+  }
+
+  // Also parse Terraform-specific resource conflict patterns from the full error
+  // Terraform errors look like: with google_compute_url_map.solo-project-lb-urlmap
+  const terraformResourceMatches = error.matchAll(/with\s+google_([a-z_]+)\.([a-zA-Z0-9_-]+)/g);
+  for (const match of terraformResourceMatches) {
+    const [, resourceType, name] = match;
+    // Check if this resource has a 409 error nearby
+    const resourceSection = error.slice(Math.max(0, error.indexOf(match[0]) - 200), error.indexOf(match[0]) + 200);
+    if (resourceSection.includes('409') || resourceSection.includes('already exists')) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        // Map terraform resource types to our types
+        const typeMap: Record<string, string> = {
+          'compute_url_map': 'urlMaps',
+          'compute_target_http_proxy': 'targetHttpProxies',
+          'compute_target_https_proxy': 'targetHttpsProxies',
+          'compute_global_forwarding_rule': 'forwardingRules',
+          'compute_forwarding_rule': 'forwardingRules',
+          'compute_backend_service': 'backendServices',
+          'compute_backend_bucket': 'backendBuckets',
+          'compute_health_check': 'healthChecks',
+          'compute_global_address': 'addresses',
+          'compute_network_endpoint_group': 'networkEndpointGroups',
+          'compute_region_network_endpoint_group': 'networkEndpointGroups',
+          'compute_network': 'networks',
+          'cloudfunctions2_function': 'functions',
+          'cloud_run_service': 'services',
+          'storage_bucket': 'buckets',
+          'vpc_access_connector': 'connectors',
+          'pubsub_topic': 'topics',
+        };
+        conflicts.push({
+          type: typeMap[resourceType] || resourceType,
+          name: name,
+          fullPath: name,
+        });
+      }
+    }
   }
 
   return conflicts;
@@ -225,9 +283,11 @@ function sortResourcesForDeletion(resources: ConflictingResource[]): Conflicting
     'sslCertificates': 85,
     // Then URL maps
     'urlMaps': 80,
-    // Then backend services/buckets
+    // Then backend services/buckets (before NEGs that they depend on)
     'backendServices': 70,
     'backendBuckets': 70,
+    'compute/BackendService': 70,
+    'compute/BackendBucket': 70,
     // Then health checks
     'healthChecks': 60,
     // Then network endpoint groups
@@ -348,7 +408,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
         const networkName = container.network || 'default';
         const registryUrl = `${config.project.region}-docker.pkg.dev/${config.project.gcpProjectId}/${networkName}-registry`;
         const imageTag = `${registryUrl}/${container.name}:${options.tag}`;
-        const sourceDir = (container.config.sourceDir as string) || process.cwd();
+        const sourceDir = (container.config.sourceDir as string) || `containers/${container.name}`;
         const dockerfilePath = path.join(sourceDir, 'Dockerfile');
 
         // Check if Dockerfile exists
@@ -1103,6 +1163,17 @@ async function forceDeleteResource(resource: ConflictingResource, gcpProjectId: 
           `gcloud compute backend-services delete ${name} --global --project=${gcpProjectId} --quiet`
         );
         spinner.succeed(`Deleted Backend Service ${name}`);
+        return true;
+      }
+
+      // Backend Buckets (for CDN)
+      case 'backendBuckets':
+      case 'compute/BackendBucket': {
+        spinner.text = `Deleting Backend Bucket ${name}...`;
+        await execAsync(
+          `gcloud compute backend-buckets delete ${name} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Backend Bucket ${name}`);
         return true;
       }
 

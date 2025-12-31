@@ -40,7 +40,7 @@ export const vpcNetwork = defineResource({
     autoCreateSubnetworks: true,
   },
 
-  generatePulumi: (config: ResourceConfig) => {
+  generate: (config: ResourceConfig) => {
     const varName = toVariableName(config.name);
     const vpcConfig = config as {
       name: string;

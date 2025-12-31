@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { api, checkApiConnection } from '../api-client.js';
+import { api, checkApiConnection } from '../../api-client';
 
 interface LocalConfig {
   projectId: string;

@@ -32,7 +32,7 @@ export function defineResource(input: DefineResourceInput): ResourceType {
     icon: input.icon,
     configSchema: input.configSchema,
     defaultConfig: input.defaultConfig,
-    generatePulumi: input.generatePulumi,
+    generate: input.generate,
     estimateCost: input.estimateCost,
   };
 }

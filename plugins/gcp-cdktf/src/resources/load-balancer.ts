@@ -6,7 +6,8 @@ function toVariableName(name: string): string {
 
 interface RouteConfig {
   path: string;
-  functionName: string;
+  functionName?: string;  // For Cloud Function backend
+  uiName?: string;        // For Storage bucket backend (static UI)
 }
 
 export const loadBalancer = defineResource({
@@ -45,23 +46,28 @@ export const loadBalancer = defineResource({
         },
       },
     },
-    required: ['name', 'region', 'functionName'],
+    required: ['name', 'region'],
   },
 
   defaultConfig: {},
 
-  generatePulumi: (config: ResourceConfig) => {
+  generate: (config: ResourceConfig) => {
     const varName = toVariableName(config.name);
     const lbConfig = config as {
       name: string;
       region: string;
-      functionName: string;
+      functionName?: string;
       routes?: RouteConfig[];
     };
 
-    // Get unique functions from routes (or just use default)
-    const routes = lbConfig.routes || [{ path: '/*', functionName: lbConfig.functionName }];
-    const uniqueFunctions = [...new Set(routes.map(r => r.functionName))];
+    // Get routes (or use default function if specified)
+    const routes = lbConfig.routes || (lbConfig.functionName ? [{ path: '/*', functionName: lbConfig.functionName }] : []);
+
+    // Separate function and UI backends
+    const functionRoutes = routes.filter(r => r.functionName);
+    const uiRoutes = routes.filter(r => r.uiName);
+    const uniqueFunctions = [...new Set(functionRoutes.map(r => r.functionName!))];
+    const uniqueUIs = [...new Set(uiRoutes.map(r => r.uiName!))];
 
     // Generate NEG and Backend for each unique function
     const negBackendCode = uniqueFunctions.map(fnName => {
@@ -88,9 +94,31 @@ const ${fnVar}Backend = new ComputeBackendService(this, '${fnName}-backend', {
 });`;
     }).join('\n\n');
 
-    // Find the default route (/*) or use first function
+    // Note: UI backend buckets are created by storage-website resource
+    // We just reference them here by their variable name pattern: ${uiVar}BackendBucket
+
+    // Helper to get backend reference for a route
+    const getBackendRef = (route: RouteConfig): string => {
+      if (route.functionName) {
+        return `${toVariableName(route.functionName)}Backend.selfLink`;
+      } else if (route.uiName) {
+        return `${toVariableName(route.uiName)}BackendBucket.selfLink`;
+      }
+      return '';
+    };
+
+    // Find the default route (/*)
     const defaultRoute = routes.find(r => r.path === '/*');
-    const defaultFnVar = toVariableName(defaultRoute?.functionName || uniqueFunctions[0]);
+    let defaultBackendRef: string;
+    if (defaultRoute) {
+      defaultBackendRef = getBackendRef(defaultRoute);
+    } else if (uniqueFunctions.length > 0) {
+      defaultBackendRef = `${toVariableName(uniqueFunctions[0])}Backend.selfLink`;
+    } else if (uniqueUIs.length > 0) {
+      defaultBackendRef = `${toVariableName(uniqueUIs[0])}BackendBucket.selfLink`;
+    } else {
+      defaultBackendRef = '';
+    }
 
     // Generate path matchers for non-default routes
     const nonDefaultRoutes = routes.filter(r => r.path !== '/*');
@@ -101,40 +129,34 @@ const ${fnVar}Backend = new ComputeBackendService(this, '${fnName}-backend', {
       urlMapConfig = `// URL Map (Load Balancer routing)
 const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
   name: '${config.name}',
-  defaultService: ${defaultFnVar}Backend.selfLink,
+  defaultService: ${defaultBackendRef},
 });`;
     } else {
-      // Complex case: path-based routing with host rules and path matchers
-      const pathMatcherNames: string[] = [];
-      const pathMatchersCode = nonDefaultRoutes.map((route, idx) => {
-        const fnVar = toVariableName(route.functionName);
-        const matcherName = `path-matcher-${idx}`;
-        pathMatcherNames.push(matcherName);
-        return `    {
-      name: '${matcherName}',
-      defaultService: ${fnVar}Backend.selfLink,
-      pathRule: [{
+      // Complex case: path-based routing
+      // GCP URL maps require ONE path_matcher per host_rule, with all path rules inside
+      const pathRulesCode = nonDefaultRoutes.map((route) => {
+        const backendRef = getBackendRef(route);
+        return `      {
         paths: ['${route.path}'],
-        service: ${fnVar}Backend.selfLink,
-      }],
-    }`;
+        service: ${backendRef},
+      }`;
       }).join(',\n');
 
       urlMapConfig = `// URL Map with path-based routing
 const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
   name: '${config.name}',
-  defaultService: ${defaultFnVar}Backend.selfLink,
+  defaultService: ${defaultBackendRef},
   hostRule: [{
     hosts: ['*'],
-    pathMatcher: 'path-matcher-0',
+    pathMatcher: 'all-paths',
   }],
-  pathMatcher: [
-${pathMatchersCode},
-    {
-      name: 'default-matcher',
-      defaultService: ${defaultFnVar}Backend.selfLink,
-    },
-  ],
+  pathMatcher: [{
+    name: 'all-paths',
+    defaultService: ${defaultBackendRef},
+    pathRule: [
+${pathRulesCode},
+    ],
+  }],
 });`;
     }
 

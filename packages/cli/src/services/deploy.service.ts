@@ -54,11 +54,13 @@ export async function deployConfig(
 
     log(`Resolved ${resolved.resources.length} resources (CDKTF backend)`);
 
-    // CDKTF uses individual resources: vpc_network, vpc_connector, cloud_function, load_balancer
-    // Find all cloud function resources
+    // CDKTF uses individual resources: vpc_network, vpc_connector, cloud_function, load_balancer, storage_website
+    // Find all cloud function and UI resources
     const functionResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:cloud_function');
-    if (functionResources.length === 0) {
-      throw new Error('CDKTF backend requires at least one cloud_function resource');
+    const uiResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:storage_website');
+
+    if (functionResources.length === 0 && uiResources.length === 0) {
+      throw new Error('CDKTF backend requires at least one cloud_function or UI resource');
     }
 
     // Generate CDKTF code for all resources
@@ -105,7 +107,7 @@ export async function deployConfig(
 
     for (const fnResource of functionResources) {
       const fnName = fnResource.config.name as string;
-      const sourceDir = path.resolve(process.cwd(), fnResource.config.sourceDir as string || 'api');
+      const sourceDir = path.resolve(process.cwd(), fnResource.config.sourceDir as string || `functions/${fnName}`);
       const sourceZipPath = path.join(workDir, `${fnName}-source.zip`);
 
       log(`Creating source archive for ${fnName} from ${sourceDir}...`);
@@ -301,6 +303,94 @@ terraform {
     const outputValues: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(outputs)) {
       outputValues[key] = (value as { value: unknown }).value;
+    }
+
+    // Build and upload UI assets to GCS buckets
+    if (uiResources.length > 0) {
+      log('Building and uploading UI assets...');
+
+      for (const uiResource of uiResources) {
+        const uiName = uiResource.config.name as string;
+        const sourceDir = path.resolve(process.cwd(), uiResource.config.sourceDir as string || `apps/${uiName}`);
+        const framework = uiResource.config.framework as string | undefined;
+        const buildCommand = uiResource.config.buildCommand as string || 'npm run build';
+        const buildOutputDir = uiResource.config.buildOutputDir as string;
+
+        log(`Processing UI: ${uiName}`);
+
+        // Check if source directory exists
+        try {
+          await fs.access(sourceDir);
+        } catch {
+          throw new Error(`UI source directory not found: ${sourceDir}`);
+        }
+
+        // Detect framework if not specified
+        let detectedFramework = framework;
+        if (!detectedFramework) {
+          const packageJsonPath = path.join(sourceDir, 'package.json');
+          try {
+            const pkgContent = await fs.readFile(packageJsonPath, 'utf-8');
+            const pkg = JSON.parse(pkgContent);
+            if (pkg.dependencies?.['@sveltejs/kit'] || pkg.devDependencies?.['@sveltejs/kit']) {
+              detectedFramework = 'sveltekit';
+            } else if (pkg.dependencies?.vue || pkg.devDependencies?.vue) {
+              detectedFramework = 'vue';
+            } else if (pkg.dependencies?.react || pkg.devDependencies?.react) {
+              detectedFramework = 'react';
+            }
+          } catch {
+            // No package.json - assume plain HTML
+            detectedFramework = 'html';
+          }
+        }
+
+        // Determine build output directory based on framework
+        let distPath: string;
+        if (buildOutputDir) {
+          distPath = path.join(sourceDir, buildOutputDir);
+        } else if (detectedFramework === 'sveltekit') {
+          distPath = path.join(sourceDir, 'build');
+        } else {
+          distPath = path.join(sourceDir, 'dist');
+        }
+
+        // Skip build for plain HTML
+        if (detectedFramework !== 'html') {
+          // Install dependencies
+          const nodeModulesPath = path.join(sourceDir, 'node_modules');
+          try {
+            await fs.access(nodeModulesPath);
+          } catch {
+            log(`Installing dependencies for ${uiName}...`);
+            await execAsync('npm install', { cwd: sourceDir, timeout: 120000 });
+          }
+
+          // Build the UI
+          log(`Building ${uiName} (${detectedFramework})...`);
+          await execAsync(buildCommand, { cwd: sourceDir, timeout: 120000 });
+        } else {
+          // For plain HTML, the source dir is the dist dir
+          distPath = sourceDir;
+        }
+
+        // Get bucket name from Terraform output
+        // The output name follows pattern: {varName}BucketName
+        const varName = uiName.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
+        const bucketOutputKey = `${varName}BucketName`;
+        const bucketName = outputValues[bucketOutputKey] as string;
+
+        if (!bucketName) {
+          log(`Warning: Could not find bucket name for ${uiName}, skipping upload`);
+          continue;
+        }
+
+        // Upload to GCS using gsutil
+        log(`Uploading ${uiName} to gs://${bucketName}...`);
+        await execAsync(`gsutil -m rsync -r -d "${distPath}" gs://${bucketName}`, { timeout: 300000 });
+
+        log(`UI ${uiName} deployed to gs://${bucketName}`);
+      }
     }
 
     log('Deployment complete!');

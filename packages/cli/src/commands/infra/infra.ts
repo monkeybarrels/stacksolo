@@ -183,7 +183,7 @@ function printInfraDiagram(project: ProjectConfig): void {
       const fnName = `${prefix}-${fn.name}`;
       const runtime = fn.runtime || 'nodejs20';
       const memory = fn.memory || '256Mi';
-      const sourceDir = fn.sourceDir || './api';
+      const sourceDir = fn.sourceDir || `./functions/${fn.name}`;
 
       if (i === 0) {
         console.log(chalk.blue('    │') + chalk.gray(padRight('', 23) + '▼' + padRight('', 25)) + chalk.blue('│'));

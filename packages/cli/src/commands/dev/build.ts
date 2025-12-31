@@ -122,7 +122,7 @@ export const buildCommand = new Command('build')
       const imageTag = `${container.registryUrl}/${container.name}:${options.tag}`;
       const sourceDir = container.sourceDir
         ? path.resolve(process.cwd(), container.sourceDir)
-        : process.cwd();
+        : path.resolve(process.cwd(), `containers/${container.name}`);
 
       // Find Dockerfile
       const dockerfilePath = options.dockerfile
