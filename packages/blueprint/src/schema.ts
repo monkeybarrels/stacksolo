@@ -169,12 +169,28 @@ export interface FirewallRuleConfig {
   description?: string;
 }
 
+export interface LoadBalancerRouteConfig {
+  path: string;
+  backend: string;
+}
+
+export interface LoadBalancerConfig {
+  name: string;
+  routes?: LoadBalancerRouteConfig[];
+}
+
 export interface NetworkConfig {
   name: string;
   description?: string;
   autoCreateSubnetworks?: boolean;
   routingMode?: 'REGIONAL' | 'GLOBAL';
   mtu?: number;
+
+  // Use an existing VPC instead of creating a new one
+  existing?: boolean;
+
+  // Load balancer configuration
+  loadBalancer?: LoadBalancerConfig;
 
   // Subnets
   subnets?: SubnetConfig[];
@@ -197,6 +213,13 @@ export interface ProjectConfig {
   name: string;
   region: string;
   gcpProjectId: string;
+
+  /**
+   * Infrastructure backend to use for deployment.
+   * - "pulumi" (default): Uses Pulumi Automation API
+   * - "cdktf": Uses CDK for Terraform (only supports function-api template)
+   */
+  backend?: 'pulumi' | 'cdktf';
 
   // Global resources
   serviceAccount?: ServiceAccountConfig;

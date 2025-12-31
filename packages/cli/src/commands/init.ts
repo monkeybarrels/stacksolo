@@ -1,86 +1,447 @@
 /**
  * stacksolo init
  *
- * Initialize a new StackSolo project by creating stacksolo.config.json
- * Works standalone without requiring the API server.
+ * Initialize a new StackSolo project with full GCP setup:
+ * 1. Validate GCP authentication
+ * 2. Select/validate GCP project
+ * 3. Check and fix org policy restrictions
+ * 4. Enable required APIs
+ * 5. Select project type and details
+ * 6. Generate config and scaffold templates
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import * as fs from 'fs/promises';
+import ora from 'ora';
 import * as path from 'path';
-import { PROVIDERS, getRegionsForProvider } from '../regions';
-import type { StackSoloConfig } from '@stacksolo/blueprint';
+import { getRegionsForProvider } from '../regions';
+import {
+  isGcloudInstalled,
+  checkGcloudAuth,
+  listProjects,
+  getCurrentProject,
+  setActiveProject,
+  createProject,
+  linkBillingAccount,
+  listBillingAccounts,
+  REQUIRED_APIS,
+  checkApis,
+  enableApis,
+  checkOrgPolicy,
+  fixOrgPolicy,
+  checkAndFixCloudBuildPermissions,
+} from '../gcp';
+import {
+  generateConfig,
+  createStacksoloDir,
+  createConfigFile,
+  scaffoldTemplates,
+  type ProjectType,
+} from '../templates';
 
-const STACKSOLO_DIR = '.stacksolo';
-const CONFIG_FILENAME = 'stacksolo.config.json';
+const BANNER = `
+  ███████╗████████╗ █████╗  ██████╗██╗  ██╗███████╗ ██████╗ ██╗      ██████╗
+  ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔═══██╗██║     ██╔═══██╗
+  ███████╗   ██║   ███████║██║     █████╔╝ ███████╗██║   ██║██║     ██║   ██║
+  ╚════██║   ██║   ██╔══██║██║     ██╔═██╗ ╚════██║██║   ██║██║     ██║   ██║
+  ███████║   ██║   ██║  ██║╚██████╗██║  ██╗███████║╚██████╔╝███████╗╚██████╔╝
+  ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚══════╝ ╚═════╝
+`;
+
+const PROJECT_TYPES: Array<{
+  value: ProjectType;
+  name: string;
+  description: string;
+}> = [
+  {
+    value: 'function-api',
+    name: 'Function API',
+    description: 'Serverless API using Cloud Functions behind a load balancer',
+  },
+  {
+    value: 'container-api',
+    name: 'Container API',
+    description: 'Containerized API using Cloud Run behind a load balancer',
+  },
+  {
+    value: 'function-cron',
+    name: 'Function Cron',
+    description: 'Scheduled Cloud Function triggered by Cloud Scheduler',
+  },
+  {
+    value: 'static-api',
+    name: 'Static Site + API',
+    description: 'Static frontend with serverless API backend',
+  },
+];
 
 export const initCommand = new Command('init')
   .description('Initialize a new StackSolo project')
   .option('-n, --name <name>', 'Project name')
-  .option('-p, --provider <provider>', 'Cloud provider (gcp)')
-  .option('--project-id <id>', 'Provider project ID (e.g., GCP project ID)')
+  .option('--project-id <id>', 'GCP project ID')
   .option('-r, --region <region>', 'Region')
+  .option('-t, --template <template>', 'Project template (function-api, container-api, function-cron, static-api)')
   .option('-y, --yes', 'Skip prompts and use defaults')
+  .option('--skip-org-policy', 'Skip org policy check and fix')
+  .option('--skip-apis', 'Skip enabling GCP APIs')
   .action(async (options) => {
     const cwd = process.cwd();
-    console.log(chalk.bold('\n  StackSolo Init\n'));
 
-    const stacksoloDir = path.join(cwd, STACKSOLO_DIR);
-    const configPath = path.join(stacksoloDir, CONFIG_FILENAME);
+    // Print banner
+    console.log(chalk.cyan(BANNER));
+    console.log(chalk.bold('  Let\'s set up your project.\n'));
+    console.log(chalk.gray('─'.repeat(75)));
 
-    // Check if config already exists
-    let existingConfig: StackSoloConfig | null = null;
-    try {
-      const content = await fs.readFile(configPath, 'utf-8');
-      existingConfig = JSON.parse(content) as StackSoloConfig;
-    } catch {
-      // No existing config
+    // =========================================
+    // Step 0: Check gcloud CLI
+    // =========================================
+    const gcloudSpinner = ora('Checking gcloud CLI...').start();
+
+    if (!(await isGcloudInstalled())) {
+      gcloudSpinner.fail('gcloud CLI not found');
+      console.log(chalk.red('\n  gcloud CLI is not installed.\n'));
+      console.log(chalk.gray('  Install it from: https://cloud.google.com/sdk/docs/install\n'));
+      return;
     }
 
-    if (existingConfig) {
-      console.log(chalk.yellow(`  ${STACKSOLO_DIR}/${CONFIG_FILENAME} already exists.\n`));
+    const authInfo = await checkGcloudAuth();
+    if (!authInfo) {
+      gcloudSpinner.fail('Not authenticated to GCP');
+      console.log(chalk.red('\n  gcloud CLI is not authenticated.\n'));
+      console.log(chalk.gray('  Run these commands:'));
+      console.log(chalk.white('    gcloud auth login'));
+      console.log(chalk.white('    gcloud auth application-default login\n'));
+      return;
+    }
 
-      const { action } = await inquirer.prompt([
+    gcloudSpinner.succeed(`Authenticated as ${chalk.green(authInfo.account)}`);
+
+    // =========================================
+    // Step 1: Select GCP Project
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.cyan.bold('\n  Step 1: Select GCP Project\n'));
+
+    let projectId = options.projectId;
+
+    if (!projectId && !options.yes) {
+      const projectsSpinner = ora('Loading accessible projects...').start();
+      const projects = await listProjects();
+      const currentProject = await getCurrentProject();
+      projectsSpinner.stop();
+
+      const projectChoices = projects.map((p) => ({
+        name: `${p.name} (${p.projectId})`,
+        value: p.projectId,
+      }));
+
+      const { selectedProject } = await inquirer.prompt([
         {
           type: 'list',
-          name: 'action',
-          message: 'What would you like to do?',
+          name: 'selectedProject',
+          message: 'Select a GCP project:',
           choices: [
-            { name: 'View existing config', value: 'view' },
-            { name: 'Overwrite with new config', value: 'overwrite' },
-            { name: 'Merge (update project settings)', value: 'merge' },
-            { name: 'Cancel', value: 'cancel' },
+            ...projectChoices,
+            new inquirer.Separator(),
+            { name: '+ Create new project', value: '__create__' },
+            { name: 'Enter manually', value: '__manual__' },
           ],
+          default: currentProject || projects[0]?.projectId,
+          pageSize: 15,
         },
       ]);
 
-      if (action === 'view') {
-        console.log(chalk.gray('\n  Current configuration:\n'));
-        console.log(chalk.white(JSON.stringify(existingConfig, null, 2)));
-        console.log('');
-        return;
-      }
+      if (selectedProject === '__create__') {
+        // Create new project flow
+        const { newProjectId, newProjectName } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'newProjectId',
+            message: 'New project ID:',
+            validate: (input: string) => {
+              if (!input) return 'Required';
+              if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(input)) {
+                return 'Must be 6-30 chars: lowercase letters, digits, hyphens. Start with letter, end with letter/digit.';
+              }
+              return true;
+            },
+          },
+          {
+            type: 'input',
+            name: 'newProjectName',
+            message: 'Project display name:',
+            default: (answers: { newProjectId: string }) => answers.newProjectId,
+          },
+        ]);
 
-      if (action === 'cancel') {
-        console.log(chalk.gray('  Cancelled.\n'));
-        return;
-      }
+        const createSpinner = ora('Creating GCP project...').start();
+        const result = await createProject(newProjectId, newProjectName);
 
-      // For merge, we'll use existing values as defaults
-      if (action === 'merge') {
-        options.name = options.name || existingConfig.project?.name;
-        options.projectId = options.projectId || existingConfig.project?.gcpProjectId;
-        options.region = options.region || existingConfig.project?.region;
+        if (!result.success) {
+          createSpinner.fail('Failed to create project');
+          console.log(chalk.red(`\n  ${result.error}\n`));
+          return;
+        }
+
+        createSpinner.succeed(`Created project: ${newProjectId}`);
+        projectId = newProjectId;
+
+        // Link billing account
+        const billingSpinner = ora('Checking billing accounts...').start();
+        const billingAccounts = await listBillingAccounts();
+        billingSpinner.stop();
+
+        if (billingAccounts.length > 0) {
+          console.log(chalk.yellow('\n  A billing account is required to use most GCP services.\n'));
+
+          const { billingAction } = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'billingAction',
+              message: 'Link a billing account?',
+              choices: [
+                ...billingAccounts.map((b) => ({
+                  name: `${b.name} (${b.id})`,
+                  value: b.id,
+                })),
+                new inquirer.Separator(),
+                { name: 'Skip (link later in GCP Console)', value: '__skip__' },
+              ],
+            },
+          ]);
+
+          if (billingAction !== '__skip__') {
+            const linkSpinner = ora('Linking billing account...').start();
+            const linked = await linkBillingAccount(projectId, billingAction);
+            if (linked) {
+              linkSpinner.succeed('Billing account linked');
+            } else {
+              linkSpinner.warn('Could not link billing account. Link it manually in GCP Console.');
+            }
+          }
+        } else {
+          console.log(chalk.yellow('\n  No billing accounts found. You may need to set up billing in GCP Console.\n'));
+        }
+      } else if (selectedProject === '__manual__') {
+        const { manualId } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'manualId',
+            message: 'Enter GCP Project ID:',
+            validate: (input: string) => input.length > 0 || 'Required',
+          },
+        ]);
+        projectId = manualId;
+      } else {
+        projectId = selectedProject;
       }
     }
+
+    projectId = projectId || authInfo.project;
+
+    if (!projectId) {
+      console.log(chalk.red('\n  Project ID is required. Use --project-id or run interactively.\n'));
+      return;
+    }
+
+    // Set the active project in gcloud config
+    const currentProject = await getCurrentProject();
+    if (currentProject !== projectId) {
+      const setProjectSpinner = ora('Setting active project...').start();
+      const projectSet = await setActiveProject(projectId);
+      if (projectSet) {
+        setProjectSpinner.succeed(`Active project set to ${chalk.green(projectId)}`);
+      } else {
+        setProjectSpinner.warn(`Could not set active project. Run: gcloud config set project ${projectId}`);
+      }
+    } else {
+      console.log(chalk.gray(`\n  Using project: ${chalk.white(projectId)}`));
+    }
+
+    // =========================================
+    // Step 2: Check & Enable APIs
+    // =========================================
+    if (!options.skipApis) {
+      console.log(chalk.gray('\n─'.repeat(75)));
+      console.log(chalk.cyan.bold('\n  Step 2: Project Permissions\n'));
+
+      const apisSpinner = ora('Checking required APIs...').start();
+      const apiStatus = await checkApis(projectId, REQUIRED_APIS);
+      const missingApis = apiStatus.filter((a) => !a.enabled);
+      apisSpinner.stop();
+
+      console.log('  Required APIs:');
+      for (const api of apiStatus) {
+        if (api.enabled) {
+          console.log(chalk.green(`  ✓ ${api.name}`));
+        } else {
+          console.log(chalk.red(`  ✗ ${api.name}`));
+        }
+      }
+
+      if (missingApis.length > 0) {
+        console.log('');
+        const { shouldEnable } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'shouldEnable',
+            message: 'Enable missing APIs?',
+            default: true,
+          },
+        ]);
+
+        if (shouldEnable) {
+          console.log('');
+          const enableSpinner = ora('Enabling APIs...').start();
+          const result = await enableApis(projectId, missingApis.map((a) => a.api), (api, success) => {
+            if (success) {
+              enableSpinner.text = `Enabled ${api}`;
+            }
+          });
+
+          if (result.failed.length === 0) {
+            enableSpinner.succeed(`Enabled ${result.enabled.length} APIs`);
+          } else {
+            enableSpinner.warn(`Enabled ${result.enabled.length} APIs, ${result.failed.length} failed`);
+            console.log(chalk.yellow('  Failed to enable:'));
+            for (const api of result.failed) {
+              console.log(chalk.gray(`    - ${api}`));
+            }
+          }
+        } else {
+          console.log(chalk.yellow('\n  Some features may not work without required APIs.\n'));
+        }
+      } else {
+        console.log(chalk.green('\n  All required APIs are enabled.'));
+      }
+    }
+
+    // =========================================
+    // Step 3: Check & Fix Org Policy
+    // =========================================
+    let orgPolicyFixed = false;
+
+    if (!options.skipOrgPolicy) {
+      console.log(chalk.gray('\n─'.repeat(75)));
+      console.log(chalk.cyan.bold('\n  Step 3: Organization Policy\n'));
+
+      const policySpinner = ora('Checking org policy...').start();
+      const policyStatus = await checkOrgPolicy(projectId);
+
+      if (policyStatus.hasRestriction) {
+        policySpinner.warn('Organization policy restricts public access');
+
+        console.log(chalk.yellow('\n  Your organization restricts allUsers IAM bindings.'));
+        console.log(chalk.gray('  This is required for public load balancer access.\n'));
+
+        if (!policyStatus.canOverride) {
+          console.log(chalk.red('  You do not have permission to override this policy.'));
+          console.log(chalk.gray('  Contact your GCP organization admin to either:'));
+          console.log(chalk.gray('    1. Add an exception for this project'));
+          console.log(chalk.gray('    2. Grant you the "Organization Policy Administrator" role\n'));
+
+          const { continueAnyway } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'continueAnyway',
+              message: 'Continue anyway? (Some features may not work)',
+              default: false,
+            },
+          ]);
+
+          if (!continueAnyway) {
+            return;
+          }
+        } else {
+          const { policyAction } = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'policyAction',
+              message: 'How do you want to handle this?',
+              choices: [
+                { name: 'Fix automatically (override policy for this project)', value: 'fix' },
+                { name: 'Skip (I\'ll request an exception from my org admin)', value: 'skip' },
+              ],
+            },
+          ]);
+
+          if (policyAction === 'fix') {
+            const fixSpinner = ora('Updating org policy...').start();
+            const fixed = await fixOrgPolicy(projectId);
+
+            if (fixed) {
+              fixSpinner.succeed(`Policy updated. Public access enabled for ${projectId}.`);
+              orgPolicyFixed = true;
+            } else {
+              fixSpinner.fail('Failed to update org policy');
+              console.log(chalk.yellow('\n  Could not override the policy. Some features may not work.\n'));
+            }
+          }
+        }
+      } else {
+        policySpinner.succeed('No org policy restrictions detected');
+        orgPolicyFixed = true;
+      }
+    }
+
+    // =========================================
+    // Step 4: Check Cloud Build Permissions
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.cyan.bold('\n  Step 4: Cloud Build Permissions\n'));
+
+    const iamSpinner = ora('Checking Cloud Build service account permissions...').start();
+    const iamResult = await checkAndFixCloudBuildPermissions(projectId);
+
+    if (iamResult.fixed.length > 0) {
+      iamSpinner.succeed(`Granted permissions: ${iamResult.fixed.join(', ')}`);
+    } else if (iamResult.failed.length > 0) {
+      iamSpinner.warn('Could not grant some permissions');
+      console.log(chalk.yellow('  You may need to manually grant these roles:'));
+      for (const role of iamResult.failed) {
+        console.log(chalk.gray(`    - ${role}`));
+      }
+    } else {
+      iamSpinner.succeed('Cloud Build permissions are configured');
+    }
+
+    // =========================================
+    // Step 5: Select Project Type
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.cyan.bold('\n  Step 5: Project Type\n'));
+
+    let projectType: ProjectType = (options.template as ProjectType) || 'function-api';
+
+    if (!options.template && !options.yes) {
+      const { selectedType } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selectedType',
+          message: 'What are you building?',
+          choices: PROJECT_TYPES.map((t) => ({
+            name: `${t.name}\n      ${chalk.gray(t.description)}`,
+            value: t.value,
+            short: t.name,
+          })),
+          default: 'function-api',
+        },
+      ]);
+      projectType = selectedType;
+    }
+
+    // =========================================
+    // Step 6: Project Details
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.cyan.bold('\n  Step 6: Project Details\n'));
 
     // Get project name
     let projectName = options.name;
     if (!projectName && !options.yes) {
-      const defaultName = path.basename(cwd);
-      const answers = await inquirer.prompt([
+      const defaultName = path.basename(cwd).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const { name } = await inquirer.prompt([
         {
           type: 'input',
           name: 'name',
@@ -89,113 +450,133 @@ export const initCommand = new Command('init')
           validate: (input: string) => {
             if (!input) return 'Project name is required';
             if (!/^[a-z][a-z0-9-]*$/.test(input)) {
-              return 'Must be lowercase, start with letter, only letters/numbers/hyphens';
+              return 'Must start with letter, only lowercase, numbers, hyphens';
             }
             return true;
           },
         },
       ]);
-      projectName = answers.name;
+      projectName = name;
     }
-    projectName = projectName || path.basename(cwd);
-
-    // Get cloud provider
-    let provider = options.provider;
-    if (!provider && !options.yes) {
-      if (PROVIDERS.length === 1) {
-        // Only one provider available, auto-select
-        provider = PROVIDERS[0].value;
-        console.log(chalk.gray(`  Using provider: ${PROVIDERS[0].name}\n`));
-      } else {
-        const answers = await inquirer.prompt([
-          {
-            type: 'list',
-            name: 'provider',
-            message: 'Cloud provider:',
-            choices: PROVIDERS.map((p) => ({ name: p.name, value: p.value })),
-          },
-        ]);
-        provider = answers.provider;
-      }
-    }
-    provider = provider || 'gcp';
-
-    // Get provider project ID
-    let projectId = options.projectId;
-    if (!projectId && !options.yes) {
-      const label = provider === 'gcp' ? 'GCP Project ID' : 'Project ID';
-      const answers = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'projectId',
-          message: `${label}:`,
-          validate: (input: string) => input.length > 0 || 'Required',
-        },
-      ]);
-      projectId = answers.projectId;
-    }
-
-    if (!projectId) {
-      console.log(chalk.red('\n  Project ID is required. Use --project-id or run interactively.\n'));
-      return;
-    }
+    projectName = projectName || path.basename(cwd).toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
     // Get region
     let region = options.region;
     if (!region && !options.yes) {
-      const regions = getRegionsForProvider(provider);
-      if (regions.length > 0) {
-        const answers = await inquirer.prompt([
-          {
-            type: 'list',
-            name: 'region',
-            message: 'Region:',
-            choices: regions.map((r) => ({ name: r.name, value: r.value })),
-            default: 'us-central1',
-          },
-        ]);
-        region = answers.region;
-      }
+      const regions = getRegionsForProvider('gcp');
+      const { selectedRegion } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selectedRegion',
+          message: 'Region:',
+          choices: regions.map((r) => ({ name: r.name, value: r.value })),
+          default: 'us-central1',
+        },
+      ]);
+      region = selectedRegion;
     }
     region = region || 'us-central1';
 
-    // Build config
-    const config: StackSoloConfig = {
-      project: {
-        name: projectName,
-        region,
-        gcpProjectId: projectId,
-      },
-    };
+    // =========================================
+    // Step 7: Optional Resources
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.cyan.bold('\n  Step 7: Optional Resources\n'));
 
-    // Merge with existing if merging
-    if (existingConfig && options.yes !== true) {
-      // Preserve any additional config from existing (buckets, secrets, networks, etc.)
-      config.project = {
-        ...existingConfig.project,
-        name: projectName,
-        region,
-        gcpProjectId: projectId,
-      };
+    let needsDatabase = false;
+    let databaseVersion: string | undefined;
+    let needsBucket = false;
+
+    if (!options.yes) {
+      const { wantsDatabase } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'wantsDatabase',
+          message: 'Do you need a database?',
+          default: false,
+        },
+      ]);
+
+      if (wantsDatabase) {
+        needsDatabase = true;
+        const { dbType } = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'dbType',
+            message: 'Database type:',
+            choices: [
+              { name: 'PostgreSQL 15', value: 'POSTGRES_15' },
+              { name: 'PostgreSQL 14', value: 'POSTGRES_14' },
+              { name: 'MySQL 8.0', value: 'MYSQL_8_0' },
+            ],
+          },
+        ]);
+        databaseVersion = dbType;
+      }
+
+      const { wantsBucket } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'wantsBucket',
+          message: 'Do you need file storage (bucket)?',
+          default: false,
+        },
+      ]);
+      needsBucket = wantsBucket;
     }
 
-    // Create .stacksolo directory if it doesn't exist
-    await fs.mkdir(stacksoloDir, { recursive: true });
+    // =========================================
+    // Generate Files
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.cyan.bold('\n  Creating project files...\n'));
 
-    // Write config
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
+    const generateSpinner = ora('Generating configuration...').start();
 
-    console.log(chalk.green(`\n  Created ${STACKSOLO_DIR}/${CONFIG_FILENAME}\n`));
-    console.log(chalk.gray('  Configuration:'));
-    console.log(chalk.white(`    Name:       ${projectName}`));
-    console.log(chalk.white(`    Provider:   ${provider}`));
-    console.log(chalk.white(`    Project ID: ${projectId}`));
-    console.log(chalk.white(`    Region:     ${region}`));
-    console.log('');
+    // Generate config
+    const config = generateConfig({
+      projectName,
+      gcpProjectId: projectId,
+      region,
+      projectType,
+      needsDatabase,
+      databaseVersion,
+      needsBucket,
+    });
 
-    console.log(chalk.gray('  Next steps:'));
-    console.log(chalk.white(`    1. Edit ${STACKSOLO_DIR}/${CONFIG_FILENAME} to add resources`));
-    console.log(chalk.white('    2. stacksolo generate    ') + chalk.gray('# Generate Pulumi code'));
-    console.log(chalk.white('    3. stacksolo deploy      ') + chalk.gray('# Deploy to cloud'));
+    // Create .stacksolo directory and state
+    await createStacksoloDir(cwd, {
+      gcpProjectId: projectId,
+      orgPolicyFixed,
+      apisEnabled: REQUIRED_APIS,
+    });
+    generateSpinner.text = 'Created .stacksolo/';
+
+    // Write config file
+    await createConfigFile(cwd, config);
+    generateSpinner.text = 'Created stacksolo.config.json';
+
+    // Scaffold templates
+    const templateDir = projectType === 'function-cron' ? 'worker' : 'api';
+    const scaffoldedFiles = await scaffoldTemplates(cwd, projectType);
+    generateSpinner.succeed('Project files created');
+
+    console.log(chalk.green('\n  ✓ Created .stacksolo/'));
+    console.log(chalk.green('  ✓ Created stacksolo.config.json'));
+    console.log(chalk.green(`  ✓ Created ${templateDir}/ template`));
+
+    for (const file of scaffoldedFiles) {
+      console.log(chalk.gray(`      ${file}`));
+    }
+
+    // =========================================
+    // Done
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.bold.green('\n  Done! Your project is ready.\n'));
+
+    console.log(chalk.gray('  Next steps:\n'));
+    console.log(chalk.white(`    1. Edit ${templateDir}/index.ts with your code`));
+    console.log(chalk.white('    2. Run: ') + chalk.cyan('stacksolo deploy'));
     console.log('');
   });

@@ -21,6 +21,7 @@ import type {
   ServiceAccountConfig,
   SubnetConfig,
   FirewallRuleConfig,
+  LoadBalancerRouteConfig,
 } from './schema.js';
 
 /**
@@ -36,6 +37,11 @@ export function resolveConfig(config: StackSoloConfig): ResolvedConfig {
     region: project.region,
     gcpProjectId: project.gcpProjectId,
   };
+
+  // CDKTF backend uses composite resources
+  if (project.backend === 'cdktf') {
+    return resolveCdktfConfig(config, projectInfo);
+  }
 
   // Resolve global resources first (no network dependency)
   if (project.serviceAccount) {
@@ -582,4 +588,149 @@ export function findResourcesByType(resolved: ResolvedConfig, type: string): Res
  */
 export function findResourcesByNetwork(resolved: ResolvedConfig, network: string): ResolvedResource[] {
   return resolved.resources.filter((r) => r.network === network);
+}
+
+// =============================================================================
+// CDKTF Backend Resolution
+// =============================================================================
+
+/**
+ * Resolve config for CDKTF backend
+ * Creates individual resources: vpc_network, vpc_connector, cloud_function, load_balancer
+ */
+function resolveCdktfConfig(
+  config: StackSoloConfig,
+  projectInfo: { name: string; region: string; gcpProjectId: string }
+): ResolvedConfig {
+  const project = config.project;
+  const resources: ResolvedResource[] = [];
+
+  // Validate CDKTF-compatible config
+  const network = project.networks?.[0];
+  if (!network) {
+    throw new Error('CDKTF backend requires at least one network with a function');
+  }
+
+  const functions = network.functions || [];
+  if (functions.length === 0) {
+    throw new Error('CDKTF backend requires at least one function in the network');
+  }
+
+  // Check for unsupported resources
+  if (network.containers?.length) {
+    throw new Error('CDKTF backend does not support containers. Use backend: "pulumi" instead.');
+  }
+  if (network.databases?.length) {
+    throw new Error('CDKTF backend does not support databases. Use backend: "pulumi" instead.');
+  }
+  if (network.caches?.length) {
+    throw new Error('CDKTF backend does not support caches. Use backend: "pulumi" instead.');
+  }
+  if (project.crons?.length) {
+    throw new Error('CDKTF backend does not support crons. Use backend: "pulumi" instead.');
+  }
+
+  // Check if using existing network (skip VPC creation)
+  const useExistingNetwork = network.existing === true;
+  const networkName = useExistingNetwork ? network.name : `${projectInfo.name}-${network.name}`;
+  const connectorName = `${projectInfo.name}-connector`;
+
+  const networkId = `network-${network.name}`;
+  const connectorId = `connector-${network.name}`;
+  const lbName = `${projectInfo.name}-lb`;
+  const loadBalancerId = `lb-${network.name}`;
+
+  // 1. VPC Network (skip if using existing)
+  if (!useExistingNetwork) {
+    resources.push({
+      id: networkId,
+      type: 'gcp-cdktf:vpc_network',
+      name: networkName,
+      config: {
+        name: networkName,
+        description: network.description,
+        autoCreateSubnetworks: network.autoCreateSubnetworks ?? true,
+      },
+      dependsOn: [],
+      network: network.name,
+    });
+  }
+
+  // 2. VPC Access Connector (references existing or new network by name)
+  resources.push({
+    id: connectorId,
+    type: 'gcp-cdktf:vpc_connector',
+    name: connectorName,
+    config: {
+      name: connectorName,
+      region: projectInfo.region,
+      network: networkName,
+      existingNetwork: useExistingNetwork, // Flag to use data source instead of resource reference
+      ipCidrRange: '10.8.0.0/28',
+      minThroughput: 200,
+      maxThroughput: 300,
+    },
+    dependsOn: useExistingNetwork ? [] : [networkId],
+    network: network.name,
+  });
+
+  // 3. Cloud Functions (Gen2) - create one for each function in config
+  const functionIds: string[] = [];
+  const functionNames: string[] = [];
+
+  for (const fn of functions) {
+    const functionName = `${projectInfo.name}-${fn.name}`;
+    const functionId = `function-${fn.name}`;
+    functionIds.push(functionId);
+    functionNames.push(functionName);
+
+    resources.push({
+      id: functionId,
+      type: 'gcp-cdktf:cloud_function',
+      name: functionName,
+      config: {
+        name: functionName,
+        location: projectInfo.region,
+        sourceDir: fn.sourceDir || 'api',
+        entryPoint: fn.entryPoint || fn.name,
+        runtime: fn.runtime || 'nodejs20',
+        memory: fn.memory || '256Mi',
+        timeout: fn.timeout || 60,
+        minInstances: fn.minInstances ?? 0,
+        maxInstances: fn.maxInstances ?? 100,
+        vpcConnector: connectorName,
+        allowUnauthenticated: fn.allowUnauthenticated ?? true,
+        projectId: projectInfo.gcpProjectId,
+      },
+      dependsOn: [connectorId],
+      network: network.name,
+    });
+  }
+
+  // 4. Load Balancer (HTTP) - routes to all functions based on loadBalancer config
+  const routes: LoadBalancerRouteConfig[] = network.loadBalancer?.routes || [{ path: '/*', backend: functions[0].name }];
+
+  resources.push({
+    id: loadBalancerId,
+    type: 'gcp-cdktf:load_balancer',
+    name: lbName,
+    config: {
+      name: lbName,
+      region: projectInfo.region,
+      routes: routes.map((r: LoadBalancerRouteConfig) => ({
+        path: r.path,
+        functionName: `${projectInfo.name}-${r.backend}`,
+      })),
+      // Keep single function for backwards compat
+      functionName: functionNames[0],
+    },
+    dependsOn: functionIds,
+    network: network.name,
+  });
+
+  return {
+    project: projectInfo,
+    resources,
+    order: resources.map((r) => r.id),
+  };
 }

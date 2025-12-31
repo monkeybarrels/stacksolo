@@ -19,6 +19,9 @@ import { listCommand } from './commands/list';
 import { outputCommand } from './commands/output';
 import { unregisterCommand } from './commands/unregister';
 import { buildCommand } from './commands/build';
+import { logsCommand } from './commands/logs';
+import { resetCommand } from './commands/reset';
+import { infraCommand } from './commands/infra';
 
 const program = new Command();
 
@@ -41,5 +44,8 @@ program.addCommand(listCommand);
 program.addCommand(outputCommand);
 program.addCommand(unregisterCommand);
 program.addCommand(buildCommand);
+program.addCommand(logsCommand);
+program.addCommand(resetCommand);
+program.addCommand(infraCommand);
 
 program.parse();

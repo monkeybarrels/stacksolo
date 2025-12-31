@@ -24,6 +24,7 @@
     "@stacksolo/registry": "workspace:*",
     "@stacksolo/shared": "workspace:*",
     "@stacksolo/plugin-gcp": "workspace:*",
+    "@stacksolo/plugin-gcp-cdktf": "workspace:*",
     "commander": "^12.0.0",
     "chalk": "^5.3.0",
     "ora": "^8.0.1",

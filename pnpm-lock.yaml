@@ -106,6 +106,9 @@ importers:
       '@stacksolo/plugin-gcp':
         specifier: workspace:*
         version: link:../../plugins/gcp
+      '@stacksolo/plugin-gcp-cdktf':
+        specifier: workspace:*
+        version: link:../../plugins/gcp-cdktf
       '@stacksolo/registry':
         specifier: workspace:*
         version: link:../registry
@@ -291,6 +294,31 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  plugins/gcp-cdktf:
+    dependencies:
+      '@cdktf/provider-google':
+        specifier: ^14.0.0
+        version: 14.36.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)
+      '@stacksolo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      cdktf:
+        specifier: ^0.20.0
+        version: 0.20.12(constructs@10.4.4)
+      constructs:
+        specifier: ^10.0.0
+        version: 10.4.4
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.27
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+
 packages:
 
   7zip-bin@5.2.0:
@@ -303,6 +331,14 @@ packages:
   '@babel/runtime@7.28.4':
     resolution: {integrity: sha512-Q/N6JNWvIvPnLDvjlE1OUBLPQHH6l3CltCEsHIujp45zQUSSh8K+gHnaEX45yAT1nyngnINhvWtzN+Nb9D8RAQ==}
     engines: {node: '>=6.9.0'}
+
+  '@cdktf/provider-google@14.36.0':
+    resolution: {integrity: sha512-LMmbgPRNhX30+JlEpiZQI/fIFSA/q168QjavHmZeucqn0ZsTgmfqFhlVgqKW2SVCh9jXBzKFQ3v7rggCPki4Cg==}
+    engines: {node: '>= 18.12.0'}
+    deprecated: See https://cdk.tf/imports for details on how to continue to use the google provider in your CDK for Terraform (CDKTF) projects by generating the bindings locally.
+    peerDependencies:
+      cdktf: ^0.20.0
+      constructs: ^10.3.0
 
   '@develar/schema-utils@2.6.5':
     resolution: {integrity: sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==}
@@ -1541,6 +1577,15 @@ packages:
     resolution: {integrity: sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==}
     engines: {node: '>= 0.4'}
 
+  cdktf@0.20.12:
+    resolution: {integrity: sha512-ZBg2gA3Uw0WvGFlgrY1uxo6QHWn+ZdHiDkZQyOsTBl68k62UlaV8K7RR51d0E/amQG/CjtKOJr5XPFFAcOq0VA==}
+    peerDependencies:
+      constructs: ^10.3.0
+    bundledDependencies:
+      - archiver
+      - json-stable-stringify
+      - semver
+
   chai@4.5.0:
     resolution: {integrity: sha512-RITGBfijLkBddZvnn8jdqoTypxvqbOLYQkGGxXzeFjVHvudaPw0HNFD9x928/eUwYWd2dPCugVqspGALTZZQKw==}
     engines: {node: '>=4'}
@@ -1680,6 +1725,9 @@ packages:
 
   console-control-strings@1.1.0:
     resolution: {integrity: sha512-ty/fTekppD2fIwRvnZAVdeOiGd1c7YXEixbgJTNzqcxJWKQnjJ/V1bNEEE6hygpM3WjwHFUVK6HTjWSzV4a8sQ==}
+
+  constructs@10.4.4:
+    resolution: {integrity: sha512-lP0qC1oViYf1cutHo9/KQ8QL637f/W29tDmv/6sy35F5zs+MD9f66nbAAIjicwc7fwyuF3rkg6PhZh4sfvWIpA==}
 
   content-disposition@0.5.4:
     resolution: {integrity: sha512-FveZTNuGw04cxlAiWbzi6zTAL/lhehaWbTtgluJh4/E95DqMwTmha3KZN1aAWA8cFIhHzMZUvLevkw5Rqk+tSQ==}
@@ -3952,6 +4000,11 @@ snapshots:
 
   '@babel/runtime@7.28.4': {}
 
+  '@cdktf/provider-google@14.36.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)':
+    dependencies:
+      cdktf: 0.20.12(constructs@10.4.4)
+      constructs: 10.4.4
+
   '@develar/schema-utils@2.6.5':
     dependencies:
       ajv: 6.12.6
@@ -5334,6 +5387,10 @@ snapshots:
       call-bind-apply-helpers: 1.0.2
       get-intrinsic: 1.3.0
 
+  cdktf@0.20.12(constructs@10.4.4):
+    dependencies:
+      constructs: 10.4.4
+
   chai@4.5.0:
     dependencies:
       assertion-error: 1.1.0
@@ -5466,6 +5523,8 @@ snapshots:
   consola@3.4.2: {}
 
   console-control-strings@1.1.0: {}
+
+  constructs@10.4.4: {}
 
   content-disposition@0.5.4:
     dependencies:

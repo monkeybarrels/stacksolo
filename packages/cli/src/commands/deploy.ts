@@ -16,6 +16,7 @@ import { promisify } from 'util';
 import { parseConfig, resolveConfig, topologicalSort } from '@stacksolo/blueprint';
 import { getRegistry } from '@stacksolo/registry';
 import { deployConfig } from '../services/deploy.service';
+import { createCommandLogger, logFullError, getLogPath } from '../logger';
 
 const execAsync = promisify(exec);
 
@@ -96,11 +97,169 @@ interface RetryContext {
   grantedBuildPermissions?: boolean;
   grantedGcfArtifactsPermissions?: boolean;
   deletedResource?: string;
+  deletedResources?: string[];
   refreshedState?: boolean;
+}
+
+interface ConflictingResource {
+  type: string;
+  name: string;
+  fullPath: string;
+}
+
+/**
+ * Parse conflicting resources from Pulumi error output
+ * Handles various GCP resource types and their error message formats
+ */
+function parseConflictingResources(error: string): ConflictingResource[] {
+  const conflicts: ConflictingResource[] = [];
+  const seen = new Set<string>();
+
+  // Extract from error diagnostics sections
+  // Patterns handled:
+  // 1. projects/PROJECT/locations/LOCATION/TYPE/NAME already exists
+  // 2. projects/PROJECT/global/TYPE/NAME already exists
+  // 3. the repository already exists (artifact registry)
+  // 4. Service account NAME already exists
+  const lines = error.split('\n');
+  for (const line of lines) {
+    // Match: gcp:TYPE (NAME) - handles multi-line format with \n in name
+    const pulumiMatch = line.match(/gcp:([^:]+):([^\s]+)\s+\(([^)]+)\)/);
+    if (pulumiMatch) {
+      const [, provider, resourceType, name] = pulumiMatch;
+      const cleanName = name.replace(/\\n/g, '').trim();
+      if (!seen.has(cleanName) && line.includes('409')) {
+        seen.add(cleanName);
+        conflicts.push({
+          type: `${provider}/${resourceType}`,
+          name: cleanName,
+          fullPath: cleanName,
+        });
+      }
+    }
+
+    // Match: gcp:provider:Type (name): followed by 409 error on same or nearby line
+    // This catches cases like "gcp:vpcaccess:Connector (main-connector):"
+    if (line.includes('409') || line.includes('already exists')) {
+      const resourceMatch = error.match(/gcp:([^:]+):([^\s]+)\s+\(([^)]+)\)/);
+      if (resourceMatch) {
+        const [, provider, resourceType, name] = resourceMatch;
+        const cleanName = name.replace(/\\n/g, '').trim();
+        if (!seen.has(cleanName)) {
+          seen.add(cleanName);
+          conflicts.push({
+            type: `${provider}/${resourceType}`,
+            name: cleanName,
+            fullPath: cleanName,
+          });
+        }
+      }
+    }
+
+    // Match: 'projects/xxx/global/addresses/yyy' already exists
+    const pathMatch = line.match(/['"]?(projects\/[^'"]+)['"]?\s+already exists/i);
+    if (pathMatch) {
+      const fullPath = pathMatch[1];
+      const parts = fullPath.split('/');
+      const name = parts[parts.length - 1];
+      const type = parts[parts.length - 2];
+      if (!seen.has(name)) {
+        seen.add(name);
+        conflicts.push({
+          type: type,
+          name: name,
+          fullPath: fullPath,
+        });
+      }
+    }
+
+    // Match: Service account xxx already exists
+    const saMatch = line.match(/Service account ([^\s]+) already exists/);
+    if (saMatch) {
+      const name = saMatch[1];
+      if (!seen.has(name)) {
+        seen.add(name);
+        conflicts.push({
+          type: 'serviceAccounts',
+          name: name,
+          fullPath: name,
+        });
+      }
+    }
+
+    // Match: the repository already exists (for artifact registry)
+    if (line.includes('repository already exists') && line.includes('artifactregistry')) {
+      const repoMatch = line.match(/Repository \(([^)]+)\)/);
+      if (repoMatch) {
+        const name = repoMatch[1].replace(/\\n/g, '').trim();
+        if (!seen.has(name)) {
+          seen.add(name);
+          conflicts.push({
+            type: 'repositories',
+            name: name,
+            fullPath: name,
+          });
+        }
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * Sort resources for deletion in reverse dependency order
+ * Load balancer resources have complex dependencies:
+ *   forwarding-rule → target-proxy → url-map → backend-service
+ */
+function sortResourcesForDeletion(resources: ConflictingResource[]): ConflictingResource[] {
+  // Define deletion priority (higher = delete first)
+  const deletionPriority: Record<string, number> = {
+    // Forwarding rules must be deleted first
+    'forwardingRules': 100,
+    'globalForwardingRules': 100,
+    // Then proxies
+    'targetHttpProxies': 90,
+    'targetHttpsProxies': 90,
+    // Then SSL certificates (after proxies that use them)
+    'sslCertificates': 85,
+    // Then URL maps
+    'urlMaps': 80,
+    // Then backend services/buckets
+    'backendServices': 70,
+    'backendBuckets': 70,
+    // Then health checks
+    'healthChecks': 60,
+    // Then network endpoint groups
+    'networkEndpointGroups': 50,
+    // Then functions (depend on NEGs)
+    'functions': 45,
+    // VPC Connectors (can have dependent functions/Cloud Run)
+    'connectors': 42,
+    'vpcaccess/Connector': 42,
+    // Addresses can be deleted whenever
+    'addresses': 40,
+    'globalAddresses': 40,
+    // Service accounts
+    'serviceAccounts': 30,
+    // Artifact registry
+    'repositories': 20,
+    // Everything else
+    'default': 10,
+  };
+
+  return [...resources].sort((a, b) => {
+    const priorityA = deletionPriority[a.type] || deletionPriority['default'];
+    const priorityB = deletionPriority[b.type] || deletionPriority['default'];
+    return priorityB - priorityA; // Higher priority first
+  });
 }
 
 async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: RetryContext = {}): Promise<void> {
   const MAX_RETRIES = 3;
+  const log = createCommandLogger('deploy');
+
+  log.info('Starting deploy', { options, retryCount, retryContext });
 
   if (retryCount === 0) {
     console.log(chalk.bold('\n  StackSolo Deploy\n'));
@@ -114,7 +273,9 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
 
   try {
     config = parseConfig(configPath);
+    log.info('Config loaded', { configPath, project: config.project });
   } catch (error) {
+    logFullError('config-parse', error, { configPath });
     console.log(chalk.red(`  Error: Could not read ${STACKSOLO_DIR}/${CONFIG_FILENAME}\n`));
     console.log(chalk.gray(`  ${error}`));
     console.log(chalk.gray(`\n  Run 'stacksolo init' to create a project first.\n`));
@@ -343,6 +504,16 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
     spinner.fail(`${action} failed`);
     console.log(chalk.red(`\n  ${result.error}\n`));
 
+    // Log the full error for debugging
+    logFullError('deploy', result.error, {
+      action,
+      projectName: config.project.name,
+      gcpProjectId: config.project.gcpProjectId,
+      region: config.project.region,
+      logs: logs.slice(-50), // Last 50 log lines
+    });
+    log.info(`Full debug log available at: ${getLogPath()}`);
+
     // Check for GCP auth errors
     if (result.error?.includes('invalid_grant') || result.error?.includes('reauth related error')) {
       console.log(chalk.yellow('  GCP authentication has expired.\n'));
@@ -391,11 +562,29 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
       console.log(chalk.yellow('  Cloud Build service account needs permissions.\n'));
       console.log(chalk.gray('  This is required for Cloud Functions Gen2 to build from source.\n'));
 
-      // Check if we already granted permissions in this session
+      // Check if permissions already exist (might just be propagating)
+      const permissionsExist = await checkCloudBuildPermissions(config.project.gcpProjectId);
+
+      if (permissionsExist) {
+        // Permissions exist but aren't propagated yet - just wait and retry
+        console.log(chalk.gray('  Permissions are already configured but still propagating.\n'));
+        console.log(chalk.gray('  Waiting 60 seconds for IAM changes to take effect...\n'));
+        await sleep(60000);
+        if (retryCount < MAX_RETRIES) {
+          return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedBuildPermissions: true });
+        }
+        console.log(chalk.yellow('  Still failing after waiting. Please try again in a minute.\n'));
+        return;
+      }
+
+      // Check if we already granted permissions in this session (shouldn't happen but safety check)
       if (retryContext.grantedBuildPermissions) {
-        console.log(chalk.yellow('  Permissions were already granted but the error persists.\n'));
-        console.log(chalk.gray('  This usually means IAM changes are still propagating (can take 1-2 minutes).\n'));
-        console.log(chalk.gray('  Please wait a moment and run `stacksolo deploy` again.\n'));
+        console.log(chalk.gray('  Waiting 60 seconds for IAM changes to propagate...\n'));
+        await sleep(60000);
+        if (retryCount < MAX_RETRIES) {
+          return runDeploy({ ...options, skipBuild: true }, retryCount + 1, retryContext);
+        }
+        console.log(chalk.yellow('  Still failing after waiting. Please try again in a minute.\n'));
         return;
       }
 
@@ -404,8 +593,8 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
         const success = await grantCloudBuildPermissions(config.project.gcpProjectId, config.project.region);
         if (success) {
           console.log(chalk.green('\n  Permissions granted!'));
-          console.log(chalk.gray('  Waiting 30 seconds for IAM changes to propagate...\n'));
-          await sleep(30000);
+          console.log(chalk.gray('  Waiting 45 seconds for IAM changes to propagate...\n'));
+          await sleep(45000);
           console.log(chalk.cyan('  Continuing deploy...\n'));
           if (retryCount < MAX_RETRIES) {
             return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedBuildPermissions: true });
@@ -462,68 +651,87 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
       console.log(chalk.gray('  For HTTP-triggered functions, you\'ll need authenticated access or an org policy exception.\n'));
     } else if (result.error?.includes('already exists') || result.error?.includes('Error 409')) {
       // Resource already exists - state mismatch
-      const resourceMatch = result.error.match(/Resource '([^']+)' already exists/);
-      const resourceName = resourceMatch ? resourceMatch[1] : 'the resource';
+      // Parse all conflicting resources from the error
+      const conflicts = parseConflictingResources(result.error);
 
-      console.log(chalk.yellow('  Resource conflict detected.\n'));
-      console.log(chalk.gray(`  ${resourceName} exists in GCP but not in Pulumi state.\n`));
-
-      // Check if we already deleted this resource - if so, GCP is still propagating
-      if (retryContext.deletedResource === resourceName) {
-        console.log(chalk.yellow('  Resource was already deleted but GCP is still propagating the change.\n'));
-        console.log(chalk.gray('  Cloud Functions can take 1-2 minutes to fully delete.\n'));
-        console.log(chalk.gray('  Please wait a moment and run `stacksolo deploy` again.\n'));
-        return;
-      }
-
-      const resolution = await promptConflictResolution();
-      if (resolution === 'refresh') {
-        // Remove the conflicting resource from Pulumi state so it can be recreated
-        console.log(chalk.gray('\n  Removing resource from Pulumi state...\n'));
-
-        // Extract just the resource name from the path
-        const shortName = resourceName.split('/').pop() || resourceName;
-        const success = await refreshPulumiState(config.project.name, shortName);
-        if (success) {
-          console.log(chalk.green('  State updated! Continuing deploy...\n'));
-          if (retryCount < MAX_RETRIES) {
-            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, refreshedState: true });
-          }
-        }
-      } else if (resolution === 'force') {
-        // Delete from GCP and remove from state
-        console.log(chalk.gray('\n  Force-deleting resource in GCP...\n'));
-        const gcpSuccess = await forceDeleteResource(resourceName, config.project.gcpProjectId);
-
-        // Also remove from state
-        const shortName = resourceName.split('/').pop() || resourceName;
-        await refreshPulumiState(config.project.name, shortName);
-
-        if (gcpSuccess) {
-          console.log(chalk.green('\n  Resource deleted!'));
-          console.log(chalk.gray('  Waiting 30 seconds for deletion to propagate...\n'));
-          await sleep(30000);
-          console.log(chalk.cyan('  Continuing deploy...\n'));
-          if (retryCount < MAX_RETRIES) {
-            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, deletedResource: resourceName });
-          }
-        }
+      if (conflicts.length === 0) {
+        console.log(chalk.yellow('  Resource conflict detected but could not parse resource names.\n'));
+        console.log(chalk.gray('  Check the error above for details.\n'));
       } else {
-        console.log(chalk.gray('\n  To fix manually, you can either:\n'));
-        console.log(chalk.gray('  1. Import the resource into Pulumi state:'));
-        console.log(chalk.cyan(`     stacksolo deploy --refresh\n`));
-        console.log(chalk.gray('  2. Delete the existing resource and let Pulumi recreate it:'));
-        console.log(chalk.cyan(`     stacksolo deploy --force\n`));
+        console.log(chalk.yellow(`  ${conflicts.length} resource conflict(s) detected.\n`));
+        console.log(chalk.gray('  These resources exist in GCP but not in Pulumi state:\n'));
+        for (const conflict of conflicts) {
+          console.log(chalk.gray(`    - ${conflict.type}: ${conflict.name}`));
+        }
+        console.log('');
+
+        // Check if we already handled these in this session
+        const alreadyHandled = conflicts.every((c: ConflictingResource) => retryContext.deletedResources?.includes(c.name));
+        if (alreadyHandled) {
+          console.log(chalk.yellow('  Resources were already deleted but GCP is still propagating.\n'));
+          console.log(chalk.gray('  Some resources can take 1-2 minutes to fully delete.\n'));
+          console.log(chalk.gray('  Please wait a moment and run `stacksolo deploy` again.\n'));
+          return;
+        }
+
+        const resolution = await promptConflictResolution();
+        if (resolution === 'force') {
+          // Delete from GCP and remove from state
+          console.log(chalk.gray('\n  Deleting conflicting resources in GCP...\n'));
+
+          const deletedResources: string[] = [...(retryContext.deletedResources || [])];
+          let allDeleted = true;
+
+          // Delete in reverse dependency order (forwarding rules → proxies → url maps, etc.)
+          const sortedConflicts = sortResourcesForDeletion(conflicts);
+
+          for (const conflict of sortedConflicts) {
+            const success = await forceDeleteResource(conflict, config.project.gcpProjectId);
+            if (success) {
+              deletedResources.push(conflict.name);
+            } else {
+              allDeleted = false;
+            }
+          }
+
+          // Also remove from state
+          const projectName = `${config.project.name}-${config.project.gcpProjectId}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+          for (const conflict of conflicts) {
+            await refreshPulumiState(projectName, conflict.name);
+          }
+
+          if (allDeleted || deletedResources.length > 0) {
+            console.log(chalk.green(`\n  Deleted ${deletedResources.length} resource(s)!`));
+
+            // Wait longer if we deleted a Cloud Function (they take 60-120 seconds to fully delete)
+            const deletedFunction = sortedConflicts.some(c => c.type === 'functions' || c.type.includes('Function'));
+            const waitTime = deletedFunction ? 60000 : 15000;
+            const waitSeconds = waitTime / 1000;
+
+            console.log(chalk.gray(`  Waiting ${waitSeconds} seconds for deletion to propagate...\n`));
+            await sleep(waitTime);
+            console.log(chalk.cyan('  Continuing deploy...\n'));
+            if (retryCount < MAX_RETRIES) {
+              return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, deletedResources });
+            }
+          }
+        } else {
+          console.log(chalk.gray('\n  To fix manually, delete the resources in GCP Console'));
+          console.log(chalk.gray('  or run `stacksolo destroy` first, then redeploy.\n'));
+        }
       }
     } else if (logs.length > 0) {
       console.log(chalk.gray('  Recent logs:'));
       // Show last 10 log lines
       const recentLogs = logs.slice(-10);
-      for (const log of recentLogs) {
-        console.log(chalk.gray(`    ${log}`));
+      for (const logLine of recentLogs) {
+        console.log(chalk.gray(`    ${logLine}`));
       }
       console.log('');
     }
+
+    // Always show where to find the full debug log
+    console.log(chalk.gray(`  Full debug log: ${getLogPath()}\n`));
   }
 }
 
@@ -571,6 +779,30 @@ async function promptFixBuildPermissions(): Promise<boolean> {
     },
   ]);
   return fix;
+}
+
+/**
+ * Check if Cloud Build permissions are already configured
+ * Returns true if the key permissions exist (even if still propagating)
+ */
+async function checkCloudBuildPermissions(gcpProjectId: string): Promise<boolean> {
+  try {
+    // Get project number
+    const { stdout: projectNumber } = await execAsync(
+      `gcloud projects describe ${gcpProjectId} --format="value(projectNumber)"`
+    );
+    const trimmedProjectNumber = projectNumber.trim();
+
+    // Check if Cloud Build SA has storage.objectViewer role
+    const { stdout: policy } = await execAsync(
+      `gcloud projects get-iam-policy ${gcpProjectId} --format="json" --flatten="bindings[].members" --filter="bindings.members:${trimmedProjectNumber}@cloudbuild.gserviceaccount.com AND bindings.role:roles/storage.objectViewer"`
+    );
+
+    // If we get output, the permission exists
+    return policy.trim().length > 10;
+  } catch {
+    return false;
+  }
 }
 
 async function grantCloudBuildPermissions(gcpProjectId: string, region: string): Promise<boolean> {
@@ -680,7 +912,7 @@ async function grantGcfArtifactsPermissions(gcpProjectId: string, region: string
   }
 }
 
-async function promptConflictResolution(): Promise<'refresh' | 'force' | 'skip'> {
+async function promptConflictResolution(): Promise<'force' | 'skip'> {
   const inquirer = await import('inquirer');
   const { resolution } = await inquirer.default.prompt([
     {
@@ -689,11 +921,7 @@ async function promptConflictResolution(): Promise<'refresh' | 'force' | 'skip'>
       message: 'How would you like to resolve this conflict?',
       choices: [
         {
-          name: 'Refresh state (import existing resource into Pulumi)',
-          value: 'refresh',
-        },
-        {
-          name: 'Force delete (delete resource in GCP and recreate)',
+          name: 'Delete and recreate (delete resources in GCP, let Pulumi recreate them)',
           value: 'force',
         },
         {
@@ -701,7 +929,7 @@ async function promptConflictResolution(): Promise<'refresh' | 'force' | 'skip'>
           value: 'skip',
         },
       ],
-      default: 'refresh',
+      default: 'force',
     },
   ]);
   return resolution;
@@ -752,57 +980,300 @@ async function refreshPulumiState(projectName: string, resourceName?: string): P
   }
 }
 
-async function forceDeleteResource(resourcePath: string, gcpProjectId: string): Promise<boolean> {
-  const spinner = ora('Detecting resource type...').start();
+async function forceDeleteResource(resource: ConflictingResource, gcpProjectId: string): Promise<boolean> {
+  const spinner = ora(`Deleting ${resource.type}: ${resource.name}...`).start();
+  const { type, name, fullPath } = resource;
 
   try {
-    // Parse the resource path to determine type and name
-    // Example: projects/my-project/locations/us-central1/functions/processor
-    if (resourcePath.includes('/functions/')) {
-      const functionName = resourcePath.split('/functions/')[1];
-      const locationMatch = resourcePath.match(/locations\/([^/]+)/);
-      const location = locationMatch ? locationMatch[1] : 'us-central1';
+    // Handle based on resource type
+    switch (type) {
+      // Artifact Registry
+      case 'repositories':
+      case 'artifactregistry/Repository': {
+        // Get region from config or default
+        const regionMatch = fullPath.match(/locations\/([^/]+)/);
+        const region = regionMatch ? regionMatch[1] : 'us-east1';
+        spinner.text = `Deleting Artifact Registry ${name}...`;
+        await execAsync(
+          `gcloud artifacts repositories delete ${name} --location=${region} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Artifact Registry ${name}`);
+        return true;
+      }
 
-      spinner.text = `Deleting Cloud Function ${functionName}...`;
-      await execAsync(
-        `gcloud functions delete ${functionName} --region=${location} --project=${gcpProjectId} --gen2 --quiet`
-      );
-      spinner.succeed(`Deleted Cloud Function ${functionName}`);
-      return true;
-    } else if (resourcePath.includes('/services/')) {
-      const serviceName = resourcePath.split('/services/')[1];
-      const locationMatch = resourcePath.match(/locations\/([^/]+)/);
-      const location = locationMatch ? locationMatch[1] : 'us-central1';
+      // Service Accounts
+      case 'serviceAccounts':
+      case 'serviceaccount/Account': {
+        spinner.text = `Deleting Service Account ${name}...`;
+        const email = name.includes('@') ? name : `${name}@${gcpProjectId}.iam.gserviceaccount.com`;
+        await execAsync(
+          `gcloud iam service-accounts delete ${email} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Service Account ${name}`);
+        return true;
+      }
 
-      spinner.text = `Deleting Cloud Run service ${serviceName}...`;
-      await execAsync(
-        `gcloud run services delete ${serviceName} --region=${location} --project=${gcpProjectId} --quiet`
-      );
-      spinner.succeed(`Deleted Cloud Run service ${serviceName}`);
-      return true;
-    } else if (resourcePath.includes('/topics/')) {
-      const topicName = resourcePath.split('/topics/')[1];
+      // Global Addresses
+      case 'addresses':
+      case 'globalAddresses':
+      case 'compute/GlobalAddress': {
+        spinner.text = `Deleting Global Address ${name}...`;
+        await execAsync(
+          `gcloud compute addresses delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Global Address ${name}`);
+        return true;
+      }
 
-      spinner.text = `Deleting Pub/Sub topic ${topicName}...`;
-      await execAsync(`gcloud pubsub topics delete ${topicName} --project=${gcpProjectId} --quiet`);
-      spinner.succeed(`Deleted Pub/Sub topic ${topicName}`);
-      return true;
-    } else if (resourcePath.includes('/buckets/')) {
-      const bucketName = resourcePath.split('/buckets/')[1];
+      // URL Maps
+      case 'urlMaps':
+      case 'compute/URLMap': {
+        spinner.text = `Deleting URL Map ${name}...`;
+        // First check if there are dependent proxies
+        const dependentProxies = await findDependentResources(name, 'url-map', gcpProjectId);
+        if (dependentProxies.length > 0) {
+          spinner.warn(`URL Map ${name} has dependencies that must be deleted first`);
+          for (const dep of dependentProxies) {
+            await forceDeleteResource(dep, gcpProjectId);
+          }
+          spinner.text = `Deleting URL Map ${name}...`;
+        }
+        await execAsync(
+          `gcloud compute url-maps delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted URL Map ${name}`);
+        return true;
+      }
 
-      spinner.text = `Deleting storage bucket ${bucketName}...`;
-      await execAsync(`gcloud storage rm -r gs://${bucketName} --project=${gcpProjectId}`);
-      spinner.succeed(`Deleted storage bucket ${bucketName}`);
-      return true;
-    } else {
-      spinner.fail('Unknown resource type');
-      console.log(chalk.yellow(`\n  Could not determine how to delete: ${resourcePath}\n`));
-      console.log(chalk.gray('  Please delete the resource manually in the GCP Console.\n'));
-      return false;
+      // Target HTTP Proxies
+      case 'targetHttpProxies':
+      case 'compute/TargetHttpProxy': {
+        spinner.text = `Deleting Target HTTP Proxy ${name}...`;
+        // First check if there are dependent forwarding rules
+        const dependentRules = await findDependentResources(name, 'http-proxy', gcpProjectId);
+        if (dependentRules.length > 0) {
+          spinner.warn(`Target HTTP Proxy ${name} has dependencies that must be deleted first`);
+          for (const dep of dependentRules) {
+            await forceDeleteResource(dep, gcpProjectId);
+          }
+          spinner.text = `Deleting Target HTTP Proxy ${name}...`;
+        }
+        await execAsync(
+          `gcloud compute target-http-proxies delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Target HTTP Proxy ${name}`);
+        return true;
+      }
+
+      // Target HTTPS Proxies
+      case 'targetHttpsProxies':
+      case 'compute/TargetHttpsProxy': {
+        spinner.text = `Deleting Target HTTPS Proxy ${name}...`;
+        const dependentRules = await findDependentResources(name, 'https-proxy', gcpProjectId);
+        if (dependentRules.length > 0) {
+          for (const dep of dependentRules) {
+            await forceDeleteResource(dep, gcpProjectId);
+          }
+          spinner.text = `Deleting Target HTTPS Proxy ${name}...`;
+        }
+        await execAsync(
+          `gcloud compute target-https-proxies delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Target HTTPS Proxy ${name}`);
+        return true;
+      }
+
+      // Forwarding Rules
+      case 'forwardingRules':
+      case 'globalForwardingRules':
+      case 'compute/GlobalForwardingRule': {
+        spinner.text = `Deleting Forwarding Rule ${name}...`;
+        await execAsync(
+          `gcloud compute forwarding-rules delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Forwarding Rule ${name}`);
+        return true;
+      }
+
+      // Backend Services
+      case 'backendServices':
+      case 'compute/BackendService': {
+        spinner.text = `Deleting Backend Service ${name}...`;
+        await execAsync(
+          `gcloud compute backend-services delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Backend Service ${name}`);
+        return true;
+      }
+
+      // Health Checks
+      case 'healthChecks':
+      case 'compute/HealthCheck': {
+        spinner.text = `Deleting Health Check ${name}...`;
+        await execAsync(
+          `gcloud compute health-checks delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Health Check ${name}`);
+        return true;
+      }
+
+      // Network Endpoint Groups
+      case 'networkEndpointGroups':
+      case 'compute/RegionNetworkEndpointGroup': {
+        const regionMatch = fullPath.match(/regions\/([^/]+)/);
+        const region = regionMatch ? regionMatch[1] : 'us-east1';
+        spinner.text = `Deleting Network Endpoint Group ${name}...`;
+        await execAsync(
+          `gcloud compute network-endpoint-groups delete ${name} --region=${region} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Network Endpoint Group ${name}`);
+        return true;
+      }
+
+      // VPC Networks
+      case 'networks':
+      case 'compute/Network': {
+        spinner.text = `Deleting VPC Network ${name}...`;
+        await execAsync(
+          `gcloud compute networks delete ${name} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted VPC Network ${name}`);
+        return true;
+      }
+
+      // Cloud Functions
+      case 'functions':
+      case 'cloudfunctions/Function': {
+        const locationMatch = fullPath.match(/locations\/([^/]+)/);
+        const location = locationMatch ? locationMatch[1] : 'us-east1';
+        spinner.text = `Deleting Cloud Function ${name}...`;
+        await execAsync(
+          `gcloud functions delete ${name} --region=${location} --project=${gcpProjectId} --gen2 --quiet`
+        );
+        spinner.succeed(`Deleted Cloud Function ${name}`);
+        return true;
+      }
+
+      // Cloud Run Services
+      case 'services':
+      case 'run/Service': {
+        const locationMatch = fullPath.match(/locations\/([^/]+)/);
+        const location = locationMatch ? locationMatch[1] : 'us-east1';
+        spinner.text = `Deleting Cloud Run service ${name}...`;
+        await execAsync(
+          `gcloud run services delete ${name} --region=${location} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted Cloud Run service ${name}`);
+        return true;
+      }
+
+      // Pub/Sub Topics
+      case 'topics':
+      case 'pubsub/Topic': {
+        spinner.text = `Deleting Pub/Sub topic ${name}...`;
+        await execAsync(`gcloud pubsub topics delete ${name} --project=${gcpProjectId} --quiet`);
+        spinner.succeed(`Deleted Pub/Sub topic ${name}`);
+        return true;
+      }
+
+      // SSL Certificates
+      case 'sslCertificates':
+      case 'compute/ManagedSslCertificate': {
+        spinner.text = `Deleting SSL Certificate ${name}...`;
+        // Check if there are dependent HTTPS proxies
+        const dependentHttpsProxies = await findDependentResources(name, 'ssl-cert', gcpProjectId);
+        if (dependentHttpsProxies.length > 0) {
+          spinner.warn(`SSL Certificate ${name} has dependencies that must be deleted first`);
+          for (const dep of dependentHttpsProxies) {
+            await forceDeleteResource(dep, gcpProjectId);
+          }
+          spinner.text = `Deleting SSL Certificate ${name}...`;
+        }
+        await execAsync(
+          `gcloud compute ssl-certificates delete ${name} --global --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted SSL Certificate ${name}`);
+        return true;
+      }
+
+      // Storage Buckets
+      case 'buckets':
+      case 'storage/Bucket': {
+        spinner.text = `Deleting Storage Bucket ${name}...`;
+        await execAsync(`gcloud storage rm -r gs://${name} --project=${gcpProjectId}`);
+        spinner.succeed(`Deleted Storage Bucket ${name}`);
+        return true;
+      }
+
+      // VPC Access Connectors
+      case 'connectors':
+      case 'vpcaccess/Connector': {
+        const regionMatch = fullPath.match(/locations\/([^/]+)/);
+        const region = regionMatch ? regionMatch[1] : 'us-east1';
+        spinner.text = `Deleting VPC Connector ${name}...`;
+        await execAsync(
+          `gcloud compute networks vpc-access connectors delete ${name} --region=${region} --project=${gcpProjectId} --quiet`
+        );
+        spinner.succeed(`Deleted VPC Connector ${name}`);
+        return true;
+      }
+
+      default: {
+        // Try to infer from fullPath if type didn't match
+        if (fullPath.includes('/functions/')) {
+          return forceDeleteResource({ ...resource, type: 'functions' }, gcpProjectId);
+        } else if (fullPath.includes('/services/')) {
+          return forceDeleteResource({ ...resource, type: 'services' }, gcpProjectId);
+        } else if (fullPath.includes('/topics/')) {
+          return forceDeleteResource({ ...resource, type: 'topics' }, gcpProjectId);
+        } else if (fullPath.includes('/buckets/')) {
+          return forceDeleteResource({ ...resource, type: 'buckets' }, gcpProjectId);
+        } else if (fullPath.includes('/addresses/')) {
+          return forceDeleteResource({ ...resource, type: 'addresses' }, gcpProjectId);
+        } else if (fullPath.includes('/urlMaps/')) {
+          return forceDeleteResource({ ...resource, type: 'urlMaps' }, gcpProjectId);
+        } else if (fullPath.includes('/targetHttpProxies/')) {
+          return forceDeleteResource({ ...resource, type: 'targetHttpProxies' }, gcpProjectId);
+        } else if (fullPath.includes('/forwardingRules/')) {
+          return forceDeleteResource({ ...resource, type: 'forwardingRules' }, gcpProjectId);
+        } else if (fullPath.includes('/connectors/') || type.includes('Connector')) {
+          return forceDeleteResource({ ...resource, type: 'connectors' }, gcpProjectId);
+        }
+
+        spinner.fail(`Unknown resource type: ${type}`);
+        console.log(chalk.yellow(`\n  Could not determine how to delete: ${name} (type: ${type})\n`));
+        console.log(chalk.gray('  Please delete the resource manually in the GCP Console.\n'));
+        return false;
+      }
     }
   } catch (error) {
-    spinner.fail('Failed to delete resource');
+    spinner.fail(`Failed to delete ${name}`);
     const errorStr = String(error);
+
+    // Check if resource is being used by another resource
+    if (errorStr.includes('being used by')) {
+      const usedByMatch = errorStr.match(/being used by '([^']+)'/);
+      if (usedByMatch) {
+        const dependency = usedByMatch[1];
+        const depParts = dependency.split('/');
+        const depName = depParts[depParts.length - 1];
+        const depType = depParts[depParts.length - 2];
+
+        console.log(chalk.yellow(`\n  ${name} is being used by ${depName}. Deleting dependency first...\n`));
+
+        const depResource: ConflictingResource = {
+          type: depType,
+          name: depName,
+          fullPath: dependency,
+        };
+
+        const depSuccess = await forceDeleteResource(depResource, gcpProjectId);
+        if (depSuccess) {
+          // Retry deleting the original resource
+          return forceDeleteResource(resource, gcpProjectId);
+        }
+      }
+    }
 
     // Check for permission denied errors
     if (errorStr.includes('Permission') && errorStr.includes('denied')) {
@@ -810,21 +1281,102 @@ async function forceDeleteResource(resourcePath: string, gcpProjectId: string): 
 
       const shouldFix = await promptFixIamPermissions();
       if (shouldFix) {
-        const success = await grantResourceDeletePermissions(resourcePath, gcpProjectId);
+        const success = await grantResourceDeletePermissions(fullPath, gcpProjectId);
         if (success) {
           console.log(chalk.green('\n  Permissions granted! Retrying delete...\n'));
-          // Retry the delete
-          return forceDeleteResource(resourcePath, gcpProjectId);
+          return forceDeleteResource(resource, gcpProjectId);
         }
       } else {
         console.log(chalk.gray('  Please delete the resource manually in the GCP Console.\n'));
       }
-    } else {
+    } else if (!errorStr.includes('being used by')) {
       console.log(chalk.red(`\n  ${error}\n`));
       console.log(chalk.gray('  Please delete the resource manually in the GCP Console.\n'));
     }
     return false;
   }
+}
+
+/**
+ * Find resources that depend on a given resource
+ * Used to handle deletion dependencies (forwarding rules → proxies → url maps)
+ */
+async function findDependentResources(
+  resourceName: string,
+  resourceType: 'url-map' | 'http-proxy' | 'https-proxy' | 'ssl-cert',
+  gcpProjectId: string
+): Promise<ConflictingResource[]> {
+  const dependencies: ConflictingResource[] = [];
+
+  try {
+    if (resourceType === 'url-map') {
+      // Find HTTP proxies using this URL map
+      const { stdout: httpProxies } = await execAsync(
+        `gcloud compute target-http-proxies list --project=${gcpProjectId} --format="json" 2>/dev/null || echo "[]"`
+      );
+      const proxies = JSON.parse(httpProxies);
+      for (const proxy of proxies) {
+        if (proxy.urlMap?.includes(resourceName)) {
+          dependencies.push({
+            type: 'targetHttpProxies',
+            name: proxy.name,
+            fullPath: proxy.selfLink || proxy.name,
+          });
+        }
+      }
+
+      // Find HTTPS proxies using this URL map
+      const { stdout: httpsProxies } = await execAsync(
+        `gcloud compute target-https-proxies list --project=${gcpProjectId} --format="json" 2>/dev/null || echo "[]"`
+      );
+      const httpsProxyList = JSON.parse(httpsProxies);
+      for (const proxy of httpsProxyList) {
+        if (proxy.urlMap?.includes(resourceName)) {
+          dependencies.push({
+            type: 'targetHttpsProxies',
+            name: proxy.name,
+            fullPath: proxy.selfLink || proxy.name,
+          });
+        }
+      }
+    } else if (resourceType === 'http-proxy' || resourceType === 'https-proxy') {
+      // Find forwarding rules using this proxy
+      const { stdout: rules } = await execAsync(
+        `gcloud compute forwarding-rules list --global --project=${gcpProjectId} --format="json" 2>/dev/null || echo "[]"`
+      );
+      const ruleList = JSON.parse(rules);
+      for (const rule of ruleList) {
+        if (rule.target?.includes(resourceName)) {
+          dependencies.push({
+            type: 'forwardingRules',
+            name: rule.name,
+            fullPath: rule.selfLink || rule.name,
+          });
+        }
+      }
+    } else if (resourceType === 'ssl-cert') {
+      // Find HTTPS proxies using this SSL certificate
+      const { stdout: httpsProxies } = await execAsync(
+        `gcloud compute target-https-proxies list --project=${gcpProjectId} --format="json" 2>/dev/null || echo "[]"`
+      );
+      const proxyList = JSON.parse(httpsProxies);
+      for (const proxy of proxyList) {
+        // sslCertificates is an array of certificate URLs
+        const certs = proxy.sslCertificates || [];
+        if (certs.some((cert: string) => cert.includes(resourceName))) {
+          dependencies.push({
+            type: 'targetHttpsProxies',
+            name: proxy.name,
+            fullPath: proxy.selfLink || proxy.name,
+          });
+        }
+      }
+    }
+  } catch {
+    // Ignore errors when listing - we'll discover dependencies during deletion
+  }
+
+  return dependencies;
 }
 
 async function promptFixIamPermissions(): Promise<boolean> {
