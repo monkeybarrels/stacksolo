@@ -446,9 +446,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start the server
 async function main() {
-  // Load GCP plugin to register patterns
-  const gcpPlugin = await import('@stacksolo/plugin-gcp');
-  registry.registerPlugin(gcpPlugin.default);
+  // Load GCP CDKTF plugin to register patterns
+  const gcpCdktfPlugin = await import('@stacksolo/plugin-gcp-cdktf');
+  registry.registerPlugin(gcpCdktfPlugin.default);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

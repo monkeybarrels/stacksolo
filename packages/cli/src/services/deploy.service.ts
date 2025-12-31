@@ -1,26 +1,22 @@
 /**
  * CLI Deploy Service
  *
- * Standalone deployment using Pulumi Automation API.
+ * Standalone deployment using CDKTF (Terraform).
  * No API server required.
  */
 
-import * as pulumi from '@pulumi/pulumi/automation/index.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import type { StackSoloConfig, ResolvedResource } from '@stacksolo/blueprint';
-import { resolveConfig, topologicalSort } from '@stacksolo/blueprint';
+import type { StackSoloConfig } from '@stacksolo/blueprint';
+import { resolveConfig } from '@stacksolo/blueprint';
 import { registry } from '@stacksolo/core';
-import { gcpProvider } from '@stacksolo/plugin-gcp';
 import { gcpCdktfProvider } from '@stacksolo/plugin-gcp-cdktf';
 
 const execAsync = promisify(exec);
 
 // Register providers
-registry.registerProvider(gcpProvider);
 registry.registerProvider(gcpCdktfProvider);
 
 export interface DeployResult {
@@ -37,272 +33,9 @@ export interface DeployOptions {
 }
 
 /**
- * Deploy infrastructure from a StackSolo config
+ * Deploy infrastructure from a StackSolo config (CDKTF/Terraform)
  */
 export async function deployConfig(
-  config: StackSoloConfig,
-  stateDir: string,
-  options: DeployOptions = {}
-): Promise<DeployResult> {
-  // Route to CDKTF deployment if backend is cdktf
-  if (config.project.backend === 'cdktf') {
-    return deployCdktfConfig(config, stateDir, options);
-  }
-
-  return deployPulumiConfig(config, stateDir, options);
-}
-
-/**
- * Deploy infrastructure using Pulumi (default backend)
- */
-async function deployPulumiConfig(
-  config: StackSoloConfig,
-  stateDir: string,
-  options: DeployOptions = {}
-): Promise<DeployResult> {
-  const { onLog = console.log, preview = false, destroy = false } = options;
-  const logs: string[] = [];
-
-  const log = (msg: string) => {
-    logs.push(msg);
-    onLog(msg);
-  };
-
-  try {
-    // Resolve config to get resources
-    const resolved = resolveConfig(config);
-    const resourceOrder = topologicalSort(resolved.resources);
-
-    log(`Resolved ${resolved.resources.length} resources`);
-
-    // Generate Pulumi code
-    const workDir = await prepareWorkDir(config, resolved.resources);
-    log(`Generated Pulumi project at ${workDir}`);
-
-    // Ensure state directory exists
-    await fs.mkdir(stateDir, { recursive: true });
-
-    // Create Pulumi stack
-    // Include GCP project ID in the Pulumi project name to prevent state conflicts
-    // when the same project name is used with different GCP projects
-    const stackName = 'dev';
-    const projectName = `${config.project.name}-${config.project.gcpProjectId}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-
-    log('Creating Pulumi stack...');
-    const stack = await pulumi.LocalWorkspace.createOrSelectStack(
-      {
-        stackName,
-        workDir,
-      },
-      {
-        projectSettings: {
-          name: projectName,
-          runtime: 'nodejs',
-        },
-        envVars: {
-          PULUMI_BACKEND_URL: `file://${stateDir}`,
-          PULUMI_CONFIG_PASSPHRASE: '',
-        },
-      }
-    );
-
-    // Set GCP config
-    log('Configuring GCP project and region...');
-    await stack.setConfig('gcp:project', { value: config.project.gcpProjectId });
-    await stack.setConfig('gcp:region', { value: config.project.region });
-
-    // Install GCP plugin
-    log('Installing Pulumi GCP plugin...');
-    await stack.workspace.installPlugin('gcp', 'v7.0.0');
-
-    // Install npm dependencies
-    log('Installing npm dependencies...');
-    await execAsync('npm install', { cwd: workDir });
-
-    if (destroy) {
-      // Destroy resources
-      log('Destroying resources...');
-      await stack.destroy({
-        onOutput: (msg) => log(msg.trim()),
-      });
-
-      return {
-        success: true,
-        outputs: {},
-        logs,
-      };
-    }
-
-    if (preview) {
-      // Preview only
-      log('Running preview...');
-      const previewResult = await stack.preview({
-        onOutput: (msg) => log(msg.trim()),
-      });
-
-      return {
-        success: true,
-        outputs: {},
-        logs,
-      };
-    }
-
-    // Deploy
-    log('Deploying resources...');
-    const upResult = await stack.up({
-      onOutput: (msg) => log(msg.trim()),
-    });
-
-    // Extract outputs
-    const outputs = upResult.outputs || {};
-    const outputValues: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(outputs)) {
-      outputValues[key] = value.value;
-    }
-
-    log('Deployment complete!');
-
-    return {
-      success: true,
-      outputs: outputValues,
-      logs,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log(`Error: ${errorMessage}`);
-
-    return {
-      success: false,
-      outputs: {},
-      logs,
-      error: errorMessage,
-    };
-  }
-}
-
-/**
- * Generate Pulumi project files
- */
-async function prepareWorkDir(
-  config: StackSoloConfig,
-  resources: ResolvedResource[]
-): Promise<string> {
-  const tmpDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), `stacksolo-${config.project.name}-`)
-  );
-
-  // Generate index.ts
-  const indexContent = generatePulumiCode(config, resources);
-  await fs.writeFile(path.join(tmpDir, 'index.ts'), indexContent);
-
-  // Generate Pulumi.yaml
-  const pulumiYaml = `name: ${config.project.name}
-runtime: nodejs
-description: Infrastructure for ${config.project.name} - generated by StackSolo
-`;
-  await fs.writeFile(path.join(tmpDir, 'Pulumi.yaml'), pulumiYaml);
-
-  // Generate package.json
-  const packageJson = {
-    name: config.project.name,
-    main: 'index.ts',
-    dependencies: {
-      '@pulumi/pulumi': '^3.0.0',
-      '@pulumi/gcp': '^7.0.0',
-    },
-    devDependencies: {
-      typescript: '^5.0.0',
-      '@types/node': '^20.0.0',
-    },
-  };
-  await fs.writeFile(
-    path.join(tmpDir, 'package.json'),
-    JSON.stringify(packageJson, null, 2)
-  );
-
-  // Generate tsconfig.json
-  const tsconfig = {
-    compilerOptions: {
-      target: 'ES2020',
-      module: 'commonjs',
-      strict: true,
-      esModuleInterop: true,
-      skipLibCheck: true,
-    },
-  };
-  await fs.writeFile(
-    path.join(tmpDir, 'tsconfig.json'),
-    JSON.stringify(tsconfig, null, 2)
-  );
-
-  return tmpDir;
-}
-
-/**
- * Generate Pulumi TypeScript code from resolved resources
- */
-function generatePulumiCode(
-  config: StackSoloConfig,
-  resources: ResolvedResource[]
-): string {
-  const imports = new Set<string>();
-  imports.add("import * as pulumi from '@pulumi/pulumi';");
-  imports.add("import * as gcp from '@pulumi/gcp';");
-
-  const lines: string[] = [];
-  lines.push('// Configuration');
-  lines.push('const config = new pulumi.Config();');
-  lines.push(`const gcpProject = config.get("gcp:project") || "${config.project.gcpProjectId}";`);
-  lines.push(`const region = config.get("gcp:region") || "${config.project.region}";`);
-  lines.push('');
-
-  // Generate resources
-  const outputs: string[] = [];
-
-  for (const resource of resources) {
-    const resourceDef = registry.getResource(resource.type);
-    if (!resourceDef) {
-      lines.push(`// TODO: Unknown resource type: ${resource.type}`);
-      continue;
-    }
-
-    const generated = resourceDef.generatePulumi(resource.config);
-
-    // Add imports
-    for (const imp of generated.imports || []) {
-      imports.add(imp);
-    }
-
-    // Add code
-    lines.push(`// ${resource.type}: ${resource.name}`);
-    lines.push(generated.code);
-    lines.push('');
-
-    // Collect outputs
-    if (generated.outputs) {
-      outputs.push(...generated.outputs);
-    }
-  }
-
-  // Add exports
-  if (outputs.length > 0) {
-    lines.push('// Outputs');
-    for (const output of outputs) {
-      lines.push(output);
-    }
-  }
-
-  return [...imports, '', ...lines].join('\n');
-}
-
-// =============================================================================
-// CDKTF Backend Deployment
-// =============================================================================
-
-/**
- * Deploy infrastructure using CDKTF/Terraform
- */
-async function deployCdktfConfig(
   config: StackSoloConfig,
   _stateDir: string, // Not used - CDKTF manages its own state
   options: DeployOptions = {}

@@ -17,7 +17,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@stacksolo/core": "workspace:*",
     "@stacksolo/shared": "workspace:*",
-    "@stacksolo/plugin-gcp": "workspace:*"
+    "@stacksolo/plugin-gcp-cdktf": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.27",

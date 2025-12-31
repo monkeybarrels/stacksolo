@@ -69,7 +69,7 @@ StackSolo is built on a plugin system. Providers and resource types are defined 
 ### Using Plugins
 
 Plugins are auto-discovered from:
-- Built-in: `@stacksolo/plugin-gcp`, `@stacksolo/plugin-aws`, etc.
+- Built-in: `@stacksolo/plugin-gcp-cdktf` (CDKTF/Terraform-based)
 - npm packages: `stacksolo-plugin-*`
 - Local: `./stacksolo-plugins/` or `~/.stacksolo/plugins/`
 

@@ -13,16 +13,14 @@
   "dependencies": {
     "@stacksolo/core": "workspace:*",
     "@stacksolo/shared": "workspace:*",
-    "@stacksolo/plugin-gcp": "workspace:*",
+    "@stacksolo/plugin-gcp-cdktf": "workspace:*",
     "@trpc/server": "^10.45.0",
     "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "kysely": "^0.27.0",
     "uuid": "^9.0.0",
-    "zod": "^3.22.0",
-    "@pulumi/pulumi": "^3.100.0",
-    "@pulumi/gcp": "^7.0.0"
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",

@@ -2,7 +2,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import * as trpcExpress from '@trpc/server/adapters/express';
 import { registry } from '@stacksolo/core';
-import gcpPlugin from '@stacksolo/plugin-gcp';
+import gcpCdktfPlugin from '@stacksolo/plugin-gcp-cdktf';
 
 import { initDatabase } from './db/index';
 import {
@@ -27,7 +27,7 @@ export async function createApp(): Promise<Express> {
   await initDatabase();
 
   // Register plugins
-  registry.registerPlugin(gcpPlugin);
+  registry.registerPlugin(gcpCdktfPlugin);
 
   // Create repositories
   const projectRepo = new SQLiteProjectRepository();

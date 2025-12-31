@@ -16,14 +16,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@pulumi/pulumi": "^3.0.0",
-    "@pulumi/gcp": "^7.0.0",
     "@stacksolo/api": "workspace:*",
     "@stacksolo/blueprint": "workspace:*",
     "@stacksolo/core": "workspace:*",
     "@stacksolo/registry": "workspace:*",
     "@stacksolo/shared": "workspace:*",
-    "@stacksolo/plugin-gcp": "workspace:*",
     "@stacksolo/plugin-gcp-cdktf": "workspace:*",
     "commander": "^12.0.0",
     "chalk": "^5.3.0",

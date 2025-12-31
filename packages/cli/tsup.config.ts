@@ -17,7 +17,7 @@ export default defineConfig({
     '@stacksolo/api',
     '@stacksolo/core',
     '@stacksolo/shared',
-    '@stacksolo/plugin-gcp',
+    '@stacksolo/plugin-gcp-cdktf',
   ],
   // Bundle everything else including local imports
   noExternal: [],

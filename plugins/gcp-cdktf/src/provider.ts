@@ -8,10 +8,9 @@ const execAsync = promisify(exec);
 /**
  * GCP CDKTF Provider
  *
- * This provider uses CDK for Terraform (CDKTF) instead of Pulumi.
- * It only supports the function-api template (Cloud Function + Load Balancer).
- *
- * For other resource types, use the standard @stacksolo/plugin-gcp (Pulumi-based).
+ * This provider uses CDK for Terraform (CDKTF) for infrastructure deployment.
+ * Supports function-api template (Cloud Function + Load Balancer) with
+ * multi-function path-based routing.
  */
 export const gcpCdktfProvider = defineProvider({
   id: 'gcp-cdktf',
