@@ -226,7 +226,7 @@ new CloudRunServiceIamMember(this, '${config.name}-invoker', {
       ],
       code,
       outputs: [
-        `export const ${varName}ServiceUrl = ${varName}Service.status[0].url;`,
+        `export const ${varName}ServiceUrl = ${varName}Service.status.get(0).url;`,
         `export const ${varName}ServiceName = ${varName}Service.name;`,
       ],
     };

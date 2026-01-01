@@ -3,6 +3,7 @@
     "name": "simple-api",
     "region": "us-central1",
     "gcpProjectId": "my-project",
+    "backend": "cdktf",
     "secrets": [
       { "name": "api-key" }
     ],
