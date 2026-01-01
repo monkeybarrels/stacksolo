@@ -9,6 +9,7 @@ on:
       - 'packages/registry/**'
       - 'packages/shared/**'
       - 'plugins/gcp-cdktf/**'
+      - 'pnpm-lock.yaml'
     branches:
       - main
   workflow_dispatch:
