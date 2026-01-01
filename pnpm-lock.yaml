@@ -101,9 +101,6 @@ importers:
         specifier: ^8.0.1
         version: 8.2.0
     devDependencies:
-      '@stacksolo/api':
-        specifier: workspace:*
-        version: link:../api
       '@stacksolo/blueprint':
         specifier: workspace:*
         version: link:../blueprint
