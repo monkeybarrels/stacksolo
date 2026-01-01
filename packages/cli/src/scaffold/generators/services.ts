@@ -1,6 +1,6 @@
 /**
  * Service scaffolder
- * Orchestrates scaffolding for containers, functions, and UIs
+ * Orchestrates scaffolding for containers, functions, UIs, and kernel
  */
 
 import type { StackSoloConfig } from '@stacksolo/blueprint';
@@ -8,6 +8,7 @@ import type { ServiceScaffold, GeneratedFile } from './types';
 import { generateContainerScaffold } from './resources/container';
 import { generateFunctionScaffold } from './resources/function';
 import { generateUIScaffold } from './resources/ui';
+import { generateKernelScaffold } from './resources/kernel';
 
 interface ServicesGeneratorResult {
   services: ServiceScaffold[];
@@ -24,6 +25,13 @@ export function generateServiceScaffolds(
   const services: ServiceScaffold[] = [];
   const allFiles: GeneratedFile[] = [];
   let uiCount = 0;
+
+  // Generate kernel scaffold if configured (project-level)
+  if (config.project.kernel) {
+    const scaffold = generateKernelScaffold(config.project.kernel, config);
+    services.push(scaffold);
+    allFiles.push(...scaffold.files);
+  }
 
   for (const network of config.project.networks || []) {
     // Generate container scaffolds

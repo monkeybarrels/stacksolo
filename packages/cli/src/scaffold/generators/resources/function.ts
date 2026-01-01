@@ -57,8 +57,8 @@ function generateFunctionPackageJson(
     type: 'module',
     main: 'dist/index.js',
     scripts: {
-      dev: 'functions-framework --source=src --target=handler',
-      build: 'tsc',
+      dev: "tsup src/index.ts --format esm --target node20 --watch --onSuccess 'functions-framework --source=dist --target=handler'",
+      build: 'tsup src/index.ts --format esm --target node20',
       start: 'functions-framework --source=dist --target=handler',
       lint: 'eslint src/',
       typecheck: 'tsc --noEmit',
@@ -69,6 +69,7 @@ function generateFunctionPackageJson(
     },
     devDependencies: {
       '@types/node': '^20.10.0',
+      tsup: '^8.0.0',
       tsx: '^4.6.0',
       typescript: '^5.3.0',
     },

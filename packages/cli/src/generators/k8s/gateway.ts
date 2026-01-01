@@ -222,7 +222,9 @@ events {
 }
 
 http {
-    upstream_keepalive_timeout 60s;
+    keepalive_timeout 60s;
+    proxy_connect_timeout 60s;
+    proxy_read_timeout 60s;
 
     server {
         listen 8000;

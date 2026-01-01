@@ -65,6 +65,7 @@ export interface K8sResourceRequirements {
 export interface K8sContainer {
   name: string;
   image: string;
+  imagePullPolicy?: 'Always' | 'IfNotPresent' | 'Never';
   command?: string[];
   args?: string[];
   ports?: K8sContainerPort[];

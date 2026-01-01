@@ -6,8 +6,9 @@ function toVariableName(name: string): string {
 
 interface RouteConfig {
   path: string;
-  functionName?: string;  // For Cloud Function backend
-  uiName?: string;        // For Storage bucket backend (static UI)
+  functionName?: string;    // For Cloud Function backend
+  containerName?: string;   // For Cloud Run backend
+  uiName?: string;          // For Storage bucket backend (static UI)
 }
 
 export const loadBalancer = defineResource({
@@ -63,16 +64,18 @@ export const loadBalancer = defineResource({
     // Get routes (or use default function if specified)
     const routes = lbConfig.routes || (lbConfig.functionName ? [{ path: '/*', functionName: lbConfig.functionName }] : []);
 
-    // Separate function and UI backends
+    // Separate function, container, and UI backends
     const functionRoutes = routes.filter(r => r.functionName);
+    const containerRoutes = routes.filter(r => r.containerName);
     const uiRoutes = routes.filter(r => r.uiName);
     const uniqueFunctions = [...new Set(functionRoutes.map(r => r.functionName!))];
+    const uniqueContainers = [...new Set(containerRoutes.map(r => r.containerName!))];
     const uniqueUIs = [...new Set(uiRoutes.map(r => r.uiName!))];
 
     // Generate NEG and Backend for each unique function
-    const negBackendCode = uniqueFunctions.map(fnName => {
+    const functionNegBackendCode = uniqueFunctions.map(fnName => {
       const fnVar = toVariableName(fnName);
-      return `// Serverless NEG for ${fnName}
+      return `// Serverless NEG for Cloud Function ${fnName}
 const ${fnVar}Neg = new ComputeRegionNetworkEndpointGroup(this, '${fnName}-neg', {
   name: '${fnName}-neg',
   region: '${lbConfig.region}',
@@ -94,6 +97,33 @@ const ${fnVar}Backend = new ComputeBackendService(this, '${fnName}-backend', {
 });`;
     }).join('\n\n');
 
+    // Generate NEG and Backend for each unique Cloud Run container
+    const containerNegBackendCode = uniqueContainers.map(containerName => {
+      const containerVar = toVariableName(containerName);
+      return `// Serverless NEG for Cloud Run ${containerName}
+const ${containerVar}Neg = new ComputeRegionNetworkEndpointGroup(this, '${containerName}-neg', {
+  name: '${containerName}-neg',
+  region: '${lbConfig.region}',
+  networkEndpointType: 'SERVERLESS',
+  cloudRun: {
+    service: ${containerVar}Service.name,
+  },
+});
+
+// Backend service for ${containerName}
+const ${containerVar}Backend = new ComputeBackendService(this, '${containerName}-backend', {
+  name: '${containerName}-backend',
+  protocol: 'HTTP',
+  portName: 'http',
+  timeoutSec: 300,
+  backend: [{
+    group: ${containerVar}Neg.selfLink,
+  }],
+});`;
+    }).join('\n\n');
+
+    const negBackendCode = [functionNegBackendCode, containerNegBackendCode].filter(Boolean).join('\n\n');
+
     // Note: UI backend buckets are created by storage-website resource
     // We just reference them here by their variable name pattern: ${uiVar}BackendBucket
 
@@ -101,6 +131,8 @@ const ${fnVar}Backend = new ComputeBackendService(this, '${fnName}-backend', {
     const getBackendRef = (route: RouteConfig): string => {
       if (route.functionName) {
         return `${toVariableName(route.functionName)}Backend.selfLink`;
+      } else if (route.containerName) {
+        return `${toVariableName(route.containerName)}Backend.selfLink`;
       } else if (route.uiName) {
         return `${toVariableName(route.uiName)}BackendBucket.selfLink`;
       }
@@ -112,6 +144,8 @@ const ${fnVar}Backend = new ComputeBackendService(this, '${fnName}-backend', {
     let defaultBackendRef: string;
     if (defaultRoute) {
       defaultBackendRef = getBackendRef(defaultRoute);
+    } else if (uniqueContainers.length > 0) {
+      defaultBackendRef = `${toVariableName(uniqueContainers[0])}Backend.selfLink`;
     } else if (uniqueFunctions.length > 0) {
       defaultBackendRef = `${toVariableName(uniqueFunctions[0])}Backend.selfLink`;
     } else if (uniqueUIs.length > 0) {

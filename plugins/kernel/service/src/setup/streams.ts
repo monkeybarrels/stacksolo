@@ -4,6 +4,7 @@
  */
 
 import type { NatsConnection } from 'nats';
+import { RetentionPolicy, StorageType, DiscardPolicy } from 'nats';
 
 const KERNEL_EVENTS_STREAM = 'KERNEL_EVENTS';
 
@@ -26,12 +27,12 @@ export async function setupStreams(nc: NatsConnection): Promise<void> {
   await jsm.streams.add({
     name: KERNEL_EVENTS_STREAM,
     subjects: ['kernel.events.>'],
-    retention: 'limits' as const,
+    retention: RetentionPolicy.Limits,
     max_age: 7 * 24 * 60 * 60 * 1000 * 1000000, // 7 days in nanoseconds
     max_bytes: 1024 * 1024 * 1024, // 1GB
-    storage: 'file' as const,
+    storage: StorageType.File,
     num_replicas: 1,
-    discard: 'old' as const,
+    discard: DiscardPolicy.Old,
   });
 
   console.log(`Created stream ${KERNEL_EVENTS_STREAM}`);

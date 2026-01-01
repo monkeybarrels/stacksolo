@@ -9,8 +9,6 @@ import type {
   CacheConfig,
   SecretConfig,
   BucketConfig,
-  ContainerConfig,
-  FunctionConfig,
 } from '@stacksolo/blueprint';
 import type { EnvSection, EnvVariable, GeneratedFile } from './types';
 
@@ -35,6 +33,26 @@ export function generateEnvFiles(config: StackSoloConfig): EnvGeneratorResult {
       { name: 'GCP_REGION', value: config.project.region },
     ],
   });
+
+  // Kernel config (if present)
+  if (config.project.kernel) {
+    const kernel = config.project.kernel;
+    sections.push({
+      header: 'Kernel',
+      variables: [
+        { name: 'KERNEL_URL', value: 'http://localhost:8090', comment: 'Kernel HTTP endpoint' },
+        { name: 'NATS_URL', value: 'nats://localhost:4222', comment: 'Kernel NATS endpoint' },
+        {
+          name: 'FIREBASE_PROJECT_ID',
+          value: kernel.firebaseProjectId || `demo-${config.project.gcpProjectId}`,
+          comment: 'Firebase project for auth validation',
+        },
+        ...(kernel.gcsBucket
+          ? [{ name: 'GCS_BUCKET', value: kernel.gcsBucket, comment: 'GCS bucket for file storage' }]
+          : []),
+      ],
+    });
+  }
 
   // Collect all referenced resources from container/function env vars
   const referencedSecrets = new Set<string>();
@@ -271,7 +289,7 @@ function generateEnvTsContent(sections: EnvSection[]): string {
     const sectionName = sectionToPropertyName(section.header);
     const vars = section.variables;
 
-    if (sectionName === 'database' || sectionName === 'cache' || sectionName === 'storage') {
+    if (sectionName === 'database' || sectionName === 'cache' || sectionName === 'storage' || sectionName === 'kernel') {
       // Object with properties
       lines.push(`  ${sectionName}: {`);
       for (const v of vars) {

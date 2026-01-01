@@ -613,16 +613,14 @@ function resolveCdktfConfig(
   }
 
   const functions = network.functions || [];
+  const containers = network.containers || [];
   const uis = network.uis || [];
 
-  if (functions.length === 0 && uis.length === 0) {
-    throw new Error('CDKTF backend requires at least one function or UI in the network');
+  if (functions.length === 0 && containers.length === 0 && uis.length === 0) {
+    throw new Error('CDKTF backend requires at least one function, container, or UI in the network');
   }
 
   // Check for unsupported resources
-  if (network.containers?.length) {
-    throw new Error('CDKTF backend does not support containers. Use backend: "pulumi" instead.');
-  }
   if (network.databases?.length) {
     throw new Error('CDKTF backend does not support databases. Use backend: "pulumi" instead.');
   }
@@ -677,7 +675,68 @@ function resolveCdktfConfig(
     network: network.name,
   });
 
-  // 3. Cloud Functions (Gen2) - create one for each function in config
+  // 3. Artifact Registry (if containers exist)
+  const registryName = `${projectInfo.name}-registry`;
+  const registryId = `registry-${network.name}`;
+
+  if (containers.length > 0) {
+    resources.push({
+      id: registryId,
+      type: 'gcp-cdktf:artifact_registry',
+      name: registryName,
+      config: {
+        name: registryName,
+        location: projectInfo.region,
+        format: 'DOCKER',
+        description: `Container registry for ${projectInfo.name}`,
+        projectId: projectInfo.gcpProjectId,
+      },
+      dependsOn: [],
+      network: network.name,
+    });
+  }
+
+  // 4. Cloud Run containers
+  const containerIds: string[] = [];
+  const containerNames: string[] = [];
+
+  for (const container of containers) {
+    const containerName = `${projectInfo.name}-${container.name}`;
+    const containerId = `container-${container.name}`;
+    containerIds.push(containerId);
+    containerNames.push(containerName);
+
+    // Build image URL from Artifact Registry
+    const imageUrl = container.image ||
+      `${projectInfo.region}-docker.pkg.dev/${projectInfo.gcpProjectId}/${registryName}/${container.name}:latest`;
+
+    resources.push({
+      id: containerId,
+      type: 'gcp-cdktf:cloud_run',
+      name: containerName,
+      config: {
+        name: containerName,
+        location: projectInfo.region,
+        image: imageUrl,
+        port: container.port || 8080,
+        memory: container.memory || '512Mi',
+        cpu: container.cpu || '1',
+        minInstances: container.minInstances ?? 0,
+        maxInstances: container.maxInstances ?? 100,
+        concurrency: container.concurrency ?? 80,
+        timeout: container.timeout || '300s',
+        vpcConnector: connectorName,
+        allowUnauthenticated: container.allowUnauthenticated ?? true,
+        environmentVariables: container.env,
+        projectId: projectInfo.gcpProjectId,
+        projectName: projectInfo.name,
+      },
+      dependsOn: [connectorId, registryId],
+      network: network.name,
+    });
+  }
+
+  // 5. Cloud Functions (Gen2) - create one for each function in config
   const functionIds: string[] = [];
   const functionNames: string[] = [];
 
@@ -741,11 +800,14 @@ function resolveCdktfConfig(
     });
   }
 
-  // 5. Load Balancer (HTTP) - routes to functions and UIs based on loadBalancer config
+  // 7. Load Balancer (HTTP) - routes to functions, containers, and UIs based on loadBalancer config
   // Build default routes if none specified
   let routes: LoadBalancerRouteConfig[];
   if (network.loadBalancer?.routes) {
     routes = network.loadBalancer.routes;
+  } else if (containers.length > 0) {
+    // Default to first container if no explicit routes
+    routes = [{ path: '/*', backend: containers[0].name }];
   } else if (functions.length > 0) {
     routes = [{ path: '/*', backend: functions[0].name }];
   } else if (uis.length > 0) {
@@ -754,7 +816,7 @@ function resolveCdktfConfig(
     routes = [];
   }
 
-  // Map routes to either function or UI backends
+  // Map routes to function, container, or UI backends
   const mappedRoutes = routes.map((r: LoadBalancerRouteConfig) => {
     // Check if backend is a UI
     const isUI = uis.some(ui => ui.name === r.backend);
@@ -762,6 +824,14 @@ function resolveCdktfConfig(
       return {
         path: r.path,
         uiName: `${projectInfo.name}-${r.backend}`,
+      };
+    }
+    // Check if backend is a container
+    const isContainer = containers.some(c => c.name === r.backend);
+    if (isContainer) {
+      return {
+        path: r.path,
+        containerName: `${projectInfo.name}-${r.backend}`,
       };
     }
     // Otherwise it's a function
@@ -784,7 +854,7 @@ function resolveCdktfConfig(
         // Keep single function for backwards compat (if functions exist)
         functionName: functionNames.length > 0 ? functionNames[0] : undefined,
       },
-      dependsOn: [...functionIds, ...uiIds],
+      dependsOn: [...containerIds, ...functionIds, ...uiIds],
       network: network.name,
     });
   }

@@ -147,12 +147,23 @@ export interface CacheConfig {
 
 export interface UIConfig {
   name: string;
-  sourceDir: string;              // e.g., './web'
+  sourceDir?: string;             // e.g., './web' - defaults to 'ui/<name>'
   framework?: 'react' | 'vue' | 'sveltekit' | 'html';  // Default: detect from package.json
   buildCommand?: string;          // Default: 'npm run build'
   buildOutputDir?: string;        // Default: 'dist' or 'build'
   indexDocument?: string;         // Default: 'index.html'
   errorDocument?: string;         // Default: 'index.html' (for SPA routing)
+}
+
+export interface KernelConfig {
+  name: string;
+  memory?: string;                // Default: '512Mi'
+  cpu?: string;                   // Default: '1'
+  minInstances?: number;          // Default: 0
+  maxInstances?: number;          // Default: 10
+  firebaseProjectId?: string;     // For auth validation
+  gcsBucket?: string;             // For file operations
+  env?: Record<string, string>;   // Additional environment variables
 }
 
 export interface SubnetConfig {
@@ -239,6 +250,9 @@ export interface ProjectConfig {
   queues?: QueueConfig[];
   secrets?: SecretConfig[];
   crons?: CronConfig[];
+
+  // Kernel (one per project - shared auth/files/events service)
+  kernel?: KernelConfig;
 
   // Network-scoped resources
   networks?: NetworkConfig[];

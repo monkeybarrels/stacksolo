@@ -25,6 +25,7 @@ export const devCommand = new Command('dev')
   .description('Start local Kubernetes development environment')
   .option('--stop', 'Stop and tear down the environment')
   .option('--status', 'Show status of running pods')
+  .option('--routes', 'Show gateway routes and services')
   .option('--describe [resource]', 'Describe K8s resources (pods, services, all)')
   .option('--logs [service]', 'Tail logs (all pods or specific service)')
   .option('--rebuild', 'Force regenerate manifests before starting')
@@ -39,6 +40,11 @@ export const devCommand = new Command('dev')
 
       if (options.status) {
         await showStatus();
+        return;
+      }
+
+      if (options.routes) {
+        await showRoutes();
         return;
       }
 
@@ -120,6 +126,16 @@ async function validateSourceDirs(config: StackSoloConfig): Promise<string[]> {
   const warnings: string[] = [];
   const projectRoot = process.cwd();
 
+  // Check kernel directory if configured
+  if (config.project.kernel) {
+    const kernelDir = path.join(projectRoot, 'containers', config.project.kernel.name);
+    try {
+      await fs.access(kernelDir);
+    } catch {
+      warnings.push(`Kernel directory not found: containers/${config.project.kernel.name}/`);
+    }
+  }
+
   for (const network of config.project.networks || []) {
     // Check function directories
     for (const func of network.functions || []) {
@@ -143,6 +159,46 @@ async function validateSourceDirs(config: StackSoloConfig): Promise<string[]> {
   }
 
   return warnings;
+}
+
+/**
+ * Build kernel Docker image from containers/kernel
+ */
+async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
+  if (!config.project.kernel) {
+    return false;
+  }
+
+  const kernelName = config.project.kernel.name;
+  const kernelDir = path.join(process.cwd(), 'containers', kernelName);
+
+  // Check if kernel directory exists
+  try {
+    await fs.access(kernelDir);
+  } catch {
+    return false;
+  }
+
+  const spinner = ora(`Building kernel image from containers/${kernelName}...`).start();
+
+  try {
+    // Install dependencies first
+    execSync('npm install', { cwd: kernelDir, stdio: 'pipe' });
+
+    // Build TypeScript
+    execSync('npm run build', { cwd: kernelDir, stdio: 'pipe' });
+
+    // Build Docker image
+    execSync(`docker build -t ${kernelName}:dev .`, { cwd: kernelDir, stdio: 'pipe' });
+
+    // Load into Kubernetes (OrbStack automatically shares Docker images)
+    spinner.succeed(`Kernel image built: ${kernelName}:dev`);
+    return true;
+  } catch (error) {
+    spinner.fail(`Failed to build kernel image`);
+    console.log(chalk.gray(`    Error: ${error instanceof Error ? error.message : error}`));
+    return false;
+  }
 }
 
 /**
@@ -174,7 +230,10 @@ async function startEnvironment(options: {
     console.log('');
   }
 
-  // 4. Generate K8s manifests
+  // 4. Build kernel image if configured
+  await buildKernelImage(config);
+
+  // 5. Generate K8s manifests
   const genSpinner = ora('Generating Kubernetes manifests...').start();
   const outputDir = path.resolve(process.cwd(), K8S_OUTPUT_DIR);
 
@@ -321,6 +380,15 @@ async function setupPortForwarding(
     { name: 'Pub/Sub', service: 'pubsub-emulator', localPort: 8085, targetPort: 8085, protocol: 'tcp' }
   );
 
+  // Kernel ports (if configured)
+  if (config.project.kernel) {
+    const kernelName = config.project.kernel.name;
+    portMappings.push(
+      { name: 'Kernel HTTP', service: kernelName, localPort: 8090, targetPort: 8090, protocol: 'http' },
+      { name: 'Kernel NATS', service: kernelName, localPort: 4222, targetPort: 4222, protocol: 'tcp' }
+    );
+  }
+
   // Dynamic ports for functions and UIs from config
   let functionPort = 8081;
   let uiPort = 3000;
@@ -377,7 +445,17 @@ async function setupPortForwarding(
         { stdio: 'pipe', detached: false }
       );
       portForwardProcesses.push(gatewayProc);
-      gatewayProc.on('error', () => {});
+
+      // Log stderr for debugging port-forward failures
+      gatewayProc.stderr?.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg && !msg.includes('Forwarding from')) {
+          console.log(chalk.yellow(`    Gateway port-forward: ${msg}`));
+        }
+      });
+      gatewayProc.on('error', (err) => {
+        console.log(chalk.yellow(`    Gateway port-forward error: ${err.message}`));
+      });
 
       // Add gateway to the mappings for display
       portMappings.unshift({
@@ -447,6 +525,74 @@ async function showStatus(): Promise<void> {
     console.log(chalk.gray('  Run "stacksolo dev" to start the environment\n'));
   }
 
+  console.log('');
+}
+
+/**
+ * Show gateway routes and services from config
+ */
+async function showRoutes(): Promise<void> {
+  console.log(chalk.bold('\n  StackSolo Gateway Routes\n'));
+
+  const config = await loadConfig();
+
+  // Show kernel if configured
+  if (config.project.kernel) {
+    console.log(chalk.bold('  Kernel:\n'));
+    console.log(`    ${chalk.cyan('●')} ${config.project.kernel.name}`);
+    console.log(chalk.gray(`      Source: containers/${config.project.kernel.name}/`));
+    console.log('');
+  }
+
+  // Show networks with their routes
+  for (const network of config.project.networks || []) {
+    console.log(chalk.bold(`  Network: ${network.name}\n`));
+
+    // Functions
+    if (network.functions && network.functions.length > 0) {
+      console.log(chalk.bold('    Functions:'));
+      for (const func of network.functions) {
+        console.log(`      ${chalk.green('λ')} ${func.name}`);
+        console.log(chalk.gray(`        Source: functions/${func.name}/`));
+      }
+      console.log('');
+    }
+
+    // Containers
+    if (network.containers && network.containers.length > 0) {
+      console.log(chalk.bold('    Containers:'));
+      for (const container of network.containers) {
+        console.log(`      ${chalk.blue('◼')} ${container.name}`);
+        console.log(chalk.gray(`        Source: containers/${container.name}/`));
+      }
+      console.log('');
+    }
+
+    // UIs
+    if (network.uis && network.uis.length > 0) {
+      console.log(chalk.bold('    UIs:'));
+      for (const ui of network.uis) {
+        console.log(`      ${chalk.magenta('◆')} ${ui.name}`);
+        console.log(chalk.gray(`        Source: ui/${ui.name}/`));
+      }
+      console.log('');
+    }
+
+    // Load balancer routes
+    if (network.loadBalancer?.routes && network.loadBalancer.routes.length > 0) {
+      console.log(chalk.bold('    Gateway Routes:'));
+      console.log(chalk.gray('      Path                    → Backend'));
+      console.log(chalk.gray('      ' + '─'.repeat(50)));
+      for (const route of network.loadBalancer.routes) {
+        const pathPadded = route.path.padEnd(24);
+        console.log(`      ${chalk.yellow(pathPadded)} → ${route.backend}`);
+      }
+      console.log('');
+    }
+  }
+
+  console.log(chalk.bold('  Local Access:\n'));
+  console.log(`    ${chalk.cyan('Gateway:')}        http://localhost:8000`);
   console.log('');
 }
 

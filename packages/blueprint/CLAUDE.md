@@ -130,14 +130,25 @@ pnpm --filter @stacksolo/blueprint test
 Config types are defined in `schema.ts`:
 ```typescript
 interface FunctionConfig {
+  name: string;
   runtime?: string;
-  sourceDir: string;
+  sourceDir?: string;  // Optional - defaults to functions/<name>
   entryPoint?: string;
   memory?: string;
   timeout?: number;
   env?: Record<string, string>;
 }
 ```
+
+### Default Source Paths
+When `sourceDir` is not specified, scaffold and K8s generators use these defaults:
+- **Functions**: `functions/<name>/`
+- **UIs**: `ui/<name>/`
+- **Containers**: `containers/<name>/`
+
+These defaults must be kept in sync between:
+- `packages/cli/src/scaffold/generators/resources/`
+- `packages/cli/src/generators/k8s/`
 
 ### Adding a New Resource Type
 1. Add config type to `schema.ts`

@@ -7,6 +7,7 @@ import type {
   StackSoloConfig,
   DatabaseConfig,
   CacheConfig,
+  KernelConfig,
 } from '@stacksolo/blueprint';
 import type { DockerComposeConfig, DockerService, GeneratedFile } from './types';
 
@@ -22,6 +23,14 @@ export function generateDockerCompose(config: StackSoloConfig): DockerGeneratorR
   const services: Record<string, DockerService> = {};
   const volumes: Record<string, { driver?: string }> = {};
   const serviceNames: string[] = [];
+
+  // Generate kernel service if configured
+  if (config.project.kernel) {
+    const service = generateKernelService(config.project.kernel, config.project.gcpProjectId);
+    services[service.name] = service;
+    serviceNames.push(service.name);
+    volumes['kernel_data'] = {};
+  }
 
   // Collect databases and caches from networks
   for (const network of config.project.networks || []) {
@@ -57,7 +66,7 @@ export function generateDockerCompose(config: StackSoloConfig): DockerGeneratorR
   const content = generateDockerComposeYaml(composeConfig);
 
   return {
-    dockerCompose: { path: 'docker-compose.yml', content },
+    dockerCompose: { path: '.stacksolo/docker-compose.yml', content },
     services: serviceNames,
   };
 }
@@ -125,6 +134,35 @@ function generateCacheService(cache: CacheConfig): DockerService {
   };
 }
 
+function generateKernelService(kernel: KernelConfig, gcpProjectId: string): DockerService {
+  const serviceName = kernel.name.replace(/-/g, '_');
+
+  return {
+    name: serviceName,
+    image: `${serviceName}:dev`,
+    build: {
+      context: `../containers/${kernel.name}`,
+      dockerfile: 'Dockerfile',
+    },
+    environment: {
+      NODE_ENV: 'development',
+      HTTP_PORT: '8080',
+      NATS_URL: 'nats://localhost:4222',
+      FIREBASE_PROJECT_ID: kernel.firebaseProjectId || `demo-${gcpProjectId}`,
+      ...(kernel.gcsBucket ? { GCS_BUCKET: kernel.gcsBucket } : {}),
+      ...(kernel.env || {}),
+    },
+    ports: ['8090:8080', '4222:4222'],
+    volumes: ['kernel_data:/data'],
+    healthcheck: {
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:8080/health'],
+      interval: '10s',
+      timeout: '5s',
+      retries: 3,
+    },
+  };
+}
+
 function extractPostgresVersion(version?: string): string {
   if (!version) return '15';
   const match = version.match(/POSTGRES_(\d+)/);
@@ -156,6 +194,13 @@ function generateDockerComposeYaml(config: DockerComposeConfig): string {
 
   for (const [name, service] of Object.entries(config.services)) {
     lines.push(`  ${name}:`);
+
+    if (service.build) {
+      lines.push('    build:');
+      lines.push(`      context: ${service.build.context}`);
+      lines.push(`      dockerfile: ${service.build.dockerfile}`);
+    }
+
     lines.push(`    image: ${service.image}`);
 
     if (service.environment && Object.keys(service.environment).length > 0) {

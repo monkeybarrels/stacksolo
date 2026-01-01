@@ -54,13 +54,14 @@ export async function deployConfig(
 
     log(`Resolved ${resolved.resources.length} resources (CDKTF backend)`);
 
-    // CDKTF uses individual resources: vpc_network, vpc_connector, cloud_function, load_balancer, storage_website
-    // Find all cloud function and UI resources
+    // CDKTF uses individual resources: vpc_network, vpc_connector, cloud_function, cloud_run, load_balancer, storage_website
+    // Find all deployable resources
     const functionResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:cloud_function');
+    const containerResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:cloud_run');
     const uiResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:storage_website');
 
-    if (functionResources.length === 0 && uiResources.length === 0) {
-      throw new Error('CDKTF backend requires at least one cloud_function or UI resource');
+    if (functionResources.length === 0 && containerResources.length === 0 && uiResources.length === 0) {
+      throw new Error('CDKTF backend requires at least one cloud_function, cloud_run, or UI resource');
     }
 
     // Generate CDKTF code for all resources
@@ -75,7 +76,7 @@ export async function deployConfig(
         continue;
       }
 
-      const generated = resourceDef.generatePulumi(resource.config as { name: string; [key: string]: unknown });
+      const generated = resourceDef.generate(resource.config as { name: string; [key: string]: unknown });
 
       for (const imp of generated.imports || []) {
         allImports.add(imp);
@@ -184,6 +185,69 @@ export async function deployConfig(
       }
 
       sourceZips.push({ name: fnName, zipPath: sourceZipPath });
+    }
+
+    // Build and push Docker images for each container
+    for (const containerResource of containerResources) {
+      const containerName = containerResource.config.name as string;
+      const image = containerResource.config.image as string;
+
+      // Extract registry info from image URL
+      // Format: {region}-docker.pkg.dev/{project}/{registry}/{image}:{tag}
+      const imageMatch = image.match(/^(.+-docker\.pkg\.dev\/[^/]+\/[^/]+)\//);
+      if (!imageMatch) {
+        log(`Skipping container ${containerName} - using pre-built image: ${image}`);
+        continue;
+      }
+
+      // Find the source directory for the container
+      // Default to containers/{short-name} where short-name is the name without project prefix
+      const shortName = containerName.replace(`${config.project.name}-`, '');
+      const sourceDir = path.resolve(process.cwd(), `containers/${shortName}`);
+
+      // Check if source directory and Dockerfile exist
+      try {
+        await fs.access(path.join(sourceDir, 'Dockerfile'));
+      } catch {
+        log(`Skipping container ${containerName} - no Dockerfile found at ${sourceDir}`);
+        continue;
+      }
+
+      log(`Building Docker image for ${containerName}...`);
+
+      // Build the TypeScript code first
+      const packageJsonPath = path.join(sourceDir, 'package.json');
+      try {
+        const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
+        const pkg = JSON.parse(packageJsonContent);
+
+        // Install dependencies
+        const nodeModulesPath = path.join(sourceDir, 'node_modules');
+        try {
+          await fs.access(nodeModulesPath);
+        } catch {
+          log(`Installing dependencies for ${containerName}...`);
+          await execAsync('npm install', { cwd: sourceDir, timeout: 120000 });
+        }
+
+        // Run build if script exists
+        if (pkg.scripts?.build) {
+          log(`Building ${containerName}...`);
+          await execAsync('npm run build', { cwd: sourceDir, timeout: 60000 });
+        }
+      } catch {
+        // No package.json - continue with Docker build
+      }
+
+      // Build Docker image
+      log(`Building Docker image: ${image}`);
+      await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
+
+      // Push to Artifact Registry
+      log(`Pushing Docker image: ${image}`);
+      await execAsync(`docker push "${image}"`, { timeout: 300000 });
+
+      log(`Container ${containerName} built and pushed successfully`);
     }
 
     // State directory for Terraform (also in .stacksolo)

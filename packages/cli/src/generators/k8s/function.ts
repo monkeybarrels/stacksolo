@@ -38,8 +38,18 @@ export function generateFunctionManifests(options: FunctionManifestOptions): Gen
   const isPython = isPythonRuntime(options.function.runtime);
 
   // Build install + run command based on runtime
-  const installCmd = isPython ? 'pip install -r requirements.txt 2>/dev/null || true && pip install functions-framework' : 'npm install';
-  const runCmd = runtimeConfig.command.join(' ');
+  // For Node.js: use npm run dev for TypeScript support (uses tsx or ts-node)
+  // For Python: install deps and run functions-framework directly
+  const installCmd = isPython
+    ? 'pip install -r requirements.txt 2>/dev/null || true && pip install functions-framework'
+    : 'npm install';
+
+  // For Node.js dev, prefer npm run dev which handles TypeScript via tsx
+  // Fall back to direct functions-framework if no dev script exists
+  const runCmd = isPython
+    ? runtimeConfig.command.join(' ')
+    : 'npm run dev 2>/dev/null || ' + runtimeConfig.command.join(' ');
+
   const containerCommand = ['sh', '-c', `${installCmd} && ${runCmd}`];
 
   const labels = {

@@ -154,7 +154,7 @@ const ${varName}SourceBucket = new StorageBucket(this, '${config.name}-source', 
 const ${varName}SourceZip = new StorageBucketObject(this, '${config.name}-source-zip', {
   name: 'source.zip',
   bucket: ${varName}SourceBucket.name,
-  source: './${sourceZipFileName}',
+  source: '${sourceZipFileName}',
 });
 
 // Cloud Function Gen2

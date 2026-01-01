@@ -12,6 +12,11 @@ export interface StackSoloEnv {
   // Gateway URL for inter-service calls
   gatewayUrl: string;
 
+  // Kernel URLs (HTTP + NATS)
+  kernelUrl: string;
+  kernelAuthUrl: string;
+  natsUrl: string;
+
   // Emulator hosts (only set in local dev)
   firestoreEmulatorHost: string | undefined;
   firebaseAuthEmulatorHost: string | undefined;
@@ -20,6 +25,7 @@ export interface StackSoloEnv {
   // Project info
   projectName: string;
   gcpProjectId: string;
+  firebaseProjectId: string;
 
   // Get any env var with optional default
   get(key: string, defaultValue?: string): string | undefined;
@@ -66,6 +72,32 @@ class Env implements StackSoloEnv {
 
   get gcpProjectId(): string {
     return process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || '';
+  }
+
+  get firebaseProjectId(): string {
+    return process.env.FIREBASE_PROJECT_ID || this.gcpProjectId;
+  }
+
+  get kernelUrl(): string {
+    // In local dev, kernel runs on localhost:8090
+    // In production, it's the Cloud Run service URL
+    if (this.isLocal) {
+      return process.env.KERNEL_URL || 'http://localhost:8090';
+    }
+    return process.env.KERNEL_URL || 'http://kernel:8090';
+  }
+
+  get kernelAuthUrl(): string {
+    return `${this.kernelUrl}/auth`;
+  }
+
+  get natsUrl(): string {
+    // In local dev, NATS runs on localhost:4222
+    // In production, it's the kernel's embedded NATS
+    if (this.isLocal) {
+      return process.env.NATS_URL || 'nats://localhost:4222';
+    }
+    return process.env.NATS_URL || 'nats://kernel:4222';
   }
 
   get(key: string, defaultValue?: string): string | undefined {

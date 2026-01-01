@@ -11,8 +11,9 @@ export function generateUIScaffold(
   ui: UIConfig,
   config: StackSoloConfig
 ): ServiceScaffold {
-  // Use sourceDir from config if provided, otherwise default to apps/<name>
-  const uiPath = ui.sourceDir?.replace(/^\.\//, '') || `apps/${ui.name}`;
+  // Use sourceDir from config if provided, otherwise default to ui/<name>
+  // This matches the K8s generator default path
+  const uiPath = ui.sourceDir?.replace(/^\.\//, '') || `ui/${ui.name}`;
   const framework = ui.framework || 'react';
 
   switch (framework) {

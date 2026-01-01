@@ -239,7 +239,31 @@ pnpm lint             # Lint code
 - Use tRPC for API type safety
 - Resource type IDs follow `provider:resource_name` format
 - Config schemas use JSON Schema format
-- **NEVER use .js extensions in imports** - tsup bundler handles this, use extensionless imports
+
+### ESM and TypeScript Build Rules
+
+**CRITICAL: These rules must be followed for all TypeScript code:**
+
+1. **NEVER use .js extensions in imports** - tsup bundler handles module resolution
+2. **NEVER use directory imports** like `import from './http'` - ESM doesn't support this
+3. **ALWAYS use explicit index imports** like `import from './http/index'`
+4. **Use tsup for all builds** - provides proper ESM bundling without extension issues
+
+### Scaffolded Project Patterns
+
+Functions, kernels, and UIs all use tsup for building:
+- `tsup src/index.ts --format esm --target node20` for production builds
+- `tsup ... --watch --onSuccess '...'` for dev with auto-reload
+- `tsx watch src/index.ts` for container dev mode (no bundling needed)
+
+### Default Source Paths
+
+When `sourceDir` is not specified in config:
+- Functions: `functions/<name>/`
+- UIs: `ui/<name>/`
+- Containers: `containers/<name>/`
+
+These defaults must be consistent between scaffold generators and K8s manifest generators.
 
 ## Key Files to Know
 

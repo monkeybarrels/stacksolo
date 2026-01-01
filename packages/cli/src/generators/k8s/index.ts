@@ -10,6 +10,7 @@ import { generateConfigMap } from './configmap';
 import { generateFunctionManifests } from './function';
 import { generateUIManifests } from './ui';
 import { generateFirebaseEmulator, generatePubSubEmulator } from './emulators';
+import { generateKernelManifests, generateNatsEmulator } from './kernel';
 import { generateGateway } from './gateway';
 import { createPortAllocator } from './ports';
 
@@ -19,6 +20,7 @@ export * from './configmap';
 export * from './function';
 export * from './ui';
 export * from './emulators';
+export * from './kernel';
 export * from './gateway';
 export * from './ports';
 export * from './runtime';
@@ -58,12 +60,29 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
     services.push('firebase-emulator', 'pubsub-emulator');
   }
 
+  // 4. Generate kernel (if configured)
+  if (config.project.kernel) {
+    const kernel = config.project.kernel;
+    manifests.push(
+      generateKernelManifests({
+        projectName,
+        kernelName: kernel.name,
+        firebaseProjectId: kernel.firebaseProjectId,
+        gcsBucket: kernel.gcsBucket,
+      })
+    );
+    services.push(kernel.name);
+    servicePortMap[kernel.name] = 8090; // Kernel HTTP port
+  }
+
   // 4. Process networks for functions and UIs
   for (const network of config.project.networks || []) {
     // Generate function manifests
     for (const func of network.functions || []) {
       const port = portAllocator.nextFunctionPort();
-      const sourceDir = `${projectRoot}/functions/${func.name}`;
+      // Use sourceDir from config, or default to functions/<name>
+      const funcSourceDir = func.sourceDir?.replace(/^\.\//, '') || `functions/${func.name}`;
+      const sourceDir = `${projectRoot}/${funcSourceDir}`;
 
       try {
         const manifest = generateFunctionManifests({
@@ -90,7 +109,9 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
     // Generate UI manifests
     for (const ui of network.uis || []) {
       const port = portAllocator.nextUiPort();
-      const sourceDir = `${projectRoot}/ui/${ui.name}`;
+      // Use sourceDir from config (required for UI)
+      const uiSourceDir = ui.sourceDir?.replace(/^\.\//, '') || `ui/${ui.name}`;
+      const sourceDir = `${projectRoot}/${uiSourceDir}`;
 
       try {
         const manifest = generateUIManifests({

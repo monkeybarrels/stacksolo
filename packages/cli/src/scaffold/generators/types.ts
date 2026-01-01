@@ -17,6 +17,10 @@ export interface EnvSection {
 export interface DockerService {
   name: string;
   image: string;
+  build?: {
+    context: string;
+    dockerfile: string;
+  };
   environment?: Record<string, string>;
   ports?: string[];
   volumes?: string[];
@@ -63,6 +67,5 @@ export interface ScaffoldOptions {
   targetDir: string;
   force: boolean;
   envOnly?: boolean;
-  dockerOnly?: boolean;
   servicesOnly?: boolean;
 }
