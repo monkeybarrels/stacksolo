@@ -187,67 +187,79 @@ export async function deployConfig(
       sourceZips.push({ name: fnName, zipPath: sourceZipPath });
     }
 
-    // Build and push Docker images for each container
-    for (const containerResource of containerResources) {
-      const containerName = containerResource.config.name as string;
-      const image = containerResource.config.image as string;
-
-      // Extract registry info from image URL
-      // Format: {region}-docker.pkg.dev/{project}/{registry}/{image}:{tag}
-      const imageMatch = image.match(/^(.+-docker\.pkg\.dev\/[^/]+\/[^/]+)\//);
-      if (!imageMatch) {
-        log(`Skipping container ${containerName} - using pre-built image: ${image}`);
-        continue;
+    // Build and push Docker images for each container (skip during preview)
+    if (!preview && containerResources.length > 0) {
+      // Configure Docker authentication for Artifact Registry
+      const region = config.project.region;
+      log(`Configuring Docker authentication for ${region}-docker.pkg.dev...`);
+      try {
+        await execAsync(`gcloud auth configure-docker ${region}-docker.pkg.dev --quiet`, { timeout: 30000 });
+      } catch (error) {
+        log(`Warning: Failed to configure Docker auth: ${error instanceof Error ? error.message : error}`);
+        log('You may need to run: gcloud auth configure-docker ' + region + '-docker.pkg.dev');
       }
 
-      // Find the source directory for the container
-      // Default to containers/{short-name} where short-name is the name without project prefix
-      const shortName = containerName.replace(`${config.project.name}-`, '');
-      const sourceDir = path.resolve(process.cwd(), `containers/${shortName}`);
+      for (const containerResource of containerResources) {
+        const containerName = containerResource.config.name as string;
+        const image = containerResource.config.image as string;
 
-      // Check if source directory and Dockerfile exist
-      try {
-        await fs.access(path.join(sourceDir, 'Dockerfile'));
-      } catch {
-        log(`Skipping container ${containerName} - no Dockerfile found at ${sourceDir}`);
-        continue;
-      }
+        // Extract registry info from image URL
+        // Format: {region}-docker.pkg.dev/{project}/{registry}/{image}:{tag}
+        const imageMatch = image.match(/^(.+-docker\.pkg\.dev\/[^/]+\/[^/]+)\//);
+        if (!imageMatch) {
+          log(`Skipping container ${containerName} - using pre-built image: ${image}`);
+          continue;
+        }
 
-      log(`Building Docker image for ${containerName}...`);
+        // Find the source directory for the container
+        // Default to containers/{short-name} where short-name is the name without project prefix
+        const shortName = containerName.replace(`${config.project.name}-`, '');
+        const sourceDir = path.resolve(process.cwd(), `containers/${shortName}`);
 
-      // Build the TypeScript code first
-      const packageJsonPath = path.join(sourceDir, 'package.json');
-      try {
-        const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
-        const pkg = JSON.parse(packageJsonContent);
-
-        // Install dependencies
-        const nodeModulesPath = path.join(sourceDir, 'node_modules');
+        // Check if source directory and Dockerfile exist
         try {
-          await fs.access(nodeModulesPath);
+          await fs.access(path.join(sourceDir, 'Dockerfile'));
         } catch {
-          log(`Installing dependencies for ${containerName}...`);
-          await execAsync('npm install', { cwd: sourceDir, timeout: 120000 });
+          log(`Skipping container ${containerName} - no Dockerfile found at ${sourceDir}`);
+          continue;
         }
 
-        // Run build if script exists
-        if (pkg.scripts?.build) {
-          log(`Building ${containerName}...`);
-          await execAsync('npm run build', { cwd: sourceDir, timeout: 60000 });
+        log(`Building Docker image for ${containerName}...`);
+
+        // Build the TypeScript code first
+        const packageJsonPath = path.join(sourceDir, 'package.json');
+        try {
+          const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
+          const pkg = JSON.parse(packageJsonContent);
+
+          // Install dependencies
+          const nodeModulesPath = path.join(sourceDir, 'node_modules');
+          try {
+            await fs.access(nodeModulesPath);
+          } catch {
+            log(`Installing dependencies for ${containerName}...`);
+            await execAsync('npm install', { cwd: sourceDir, timeout: 120000 });
+          }
+
+          // Run build if script exists
+          if (pkg.scripts?.build) {
+            log(`Building ${containerName}...`);
+            await execAsync('npm run build', { cwd: sourceDir, timeout: 60000 });
+          }
+        } catch {
+          // No package.json - continue with Docker build
         }
-      } catch {
-        // No package.json - continue with Docker build
+
+        // Build Docker image
+        log(`Building Docker image: ${image}`);
+        await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
+
+        // Push to Artifact Registry
+        log(`Pushing Docker image: ${image}`);
+        await execAsync(`docker push "${image}"`, { timeout: 300000 });
+
+        log(`Container ${containerName} built and pushed successfully`);
       }
-
-      // Build Docker image
-      log(`Building Docker image: ${image}`);
-      await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
-
-      // Push to Artifact Registry
-      log(`Pushing Docker image: ${image}`);
-      await execAsync(`docker push "${image}"`, { timeout: 300000 });
-
-      log(`Container ${containerName} built and pushed successfully`);
     }
 
     // State directory for Terraform (also in .stacksolo)

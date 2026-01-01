@@ -615,9 +615,10 @@ function resolveCdktfConfig(
   const functions = network.functions || [];
   const containers = network.containers || [];
   const uis = network.uis || [];
+  const hasKernelConfig = !!project.kernel;
 
-  if (functions.length === 0 && containers.length === 0 && uis.length === 0) {
-    throw new Error('CDKTF backend requires at least one function, container, or UI in the network');
+  if (functions.length === 0 && containers.length === 0 && uis.length === 0 && !hasKernelConfig) {
+    throw new Error('CDKTF backend requires at least one function, container, kernel, or UI');
   }
 
   // Check for unsupported resources
@@ -675,11 +676,12 @@ function resolveCdktfConfig(
     network: network.name,
   });
 
-  // 3. Artifact Registry (if containers exist)
+  // 3. Artifact Registry (if containers or kernel exist)
   const registryName = `${projectInfo.name}-registry`;
   const registryId = `registry-${network.name}`;
+  const hasKernel = !!project.kernel;
 
-  if (containers.length > 0) {
+  if (containers.length > 0 || hasKernel) {
     resources.push({
       id: registryId,
       type: 'gcp-cdktf:artifact_registry',
@@ -696,7 +698,45 @@ function resolveCdktfConfig(
     });
   }
 
-  // 4. Cloud Run containers
+  // 4. Kernel (special container at project level)
+  const kernelIds: string[] = [];
+  const kernelNames: string[] = [];
+
+  if (project.kernel) {
+    const kernelName = `${projectInfo.name}-${project.kernel.name}`;
+    const kernelId = `kernel-${project.kernel.name}`;
+    kernelIds.push(kernelId);
+    kernelNames.push(kernelName);
+
+    // Build image URL from Artifact Registry
+    const imageUrl = `${projectInfo.region}-docker.pkg.dev/${projectInfo.gcpProjectId}/${registryName}/${project.kernel.name}:latest`;
+
+    resources.push({
+      id: kernelId,
+      type: 'gcp-cdktf:cloud_run',
+      name: kernelName,
+      config: {
+        name: kernelName,
+        location: projectInfo.region,
+        image: imageUrl,
+        port: 8090, // Kernel default port
+        memory: '512Mi',
+        cpu: '1',
+        minInstances: 0,
+        maxInstances: 100,
+        concurrency: 80,
+        timeout: '300s',
+        vpcConnector: connectorName,
+        allowUnauthenticated: true,
+        projectId: projectInfo.gcpProjectId,
+        projectName: projectInfo.name,
+      },
+      dependsOn: [connectorId, registryId],
+      network: network.name,
+    });
+  }
+
+  // 5. Cloud Run containers
   const containerIds: string[] = [];
   const containerNames: string[] = [];
 
@@ -854,7 +894,7 @@ function resolveCdktfConfig(
         // Keep single function for backwards compat (if functions exist)
         functionName: functionNames.length > 0 ? functionNames[0] : undefined,
       },
-      dependsOn: [...containerIds, ...functionIds, ...uiIds],
+      dependsOn: [...kernelIds, ...containerIds, ...functionIds, ...uiIds],
       network: network.name,
     });
   }
