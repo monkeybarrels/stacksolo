@@ -21,6 +21,7 @@ import {
   listCommand,
   // Development commands
   buildCommand,
+  devCommand,
   installCommand,
   serveCommand,
   // Configuration commands
@@ -53,6 +54,7 @@ program.addCommand(listCommand);
 
 // Development commands
 program.addCommand(buildCommand);
+program.addCommand(devCommand);
 program.addCommand(installCommand);
 program.addCommand(serveCommand);
 

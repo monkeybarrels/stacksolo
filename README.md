@@ -142,6 +142,91 @@ stacksolo/
 
 ---
 
+## Local Development with `stacksolo dev`
+
+StackSolo includes a local Kubernetes-based development environment that mirrors your production GCP stack. This lets you develop and test locally without deploying to the cloud.
+
+### Prerequisites
+
+- [OrbStack](https://orbstack.dev/) with Kubernetes enabled (or any local K8s cluster)
+- `kubectl` CLI available
+
+### Quick Start
+
+```bash
+# Start local development environment
+stacksolo dev
+
+# The command will:
+# 1. Generate K8s manifests from your stacksolo.config.json
+# 2. Spin up Firebase and Pub/Sub emulators
+# 3. Start your functions and UIs with hot-reload
+# 4. Set up ingress routing matching your production config
+```
+
+### Available Commands
+
+```bash
+stacksolo dev              # Start local K8s environment
+stacksolo dev --stop       # Tear down environment
+stacksolo dev --status     # Show running pods
+stacksolo dev --logs       # Tail all pod logs
+stacksolo dev --logs api   # Tail logs for specific service
+stacksolo dev --rebuild    # Force regenerate manifests
+stacksolo dev --no-emulators  # Skip Firebase/Pub/Sub emulators
+```
+
+### What Gets Created
+
+From your `stacksolo.config.json`, the following K8s resources are generated:
+
+| Config Element | K8s Resource |
+|----------------|--------------|
+| `functions[]` | Deployment + Service |
+| `uis[]` | Deployment + Service |
+| `loadBalancer.routes` | Ingress |
+| Firebase (automatic) | Firebase Emulator Pod |
+| Pub/Sub (automatic) | Pub/Sub Emulator Pod |
+
+### Port Mapping
+
+| Service | Port |
+|---------|------|
+| Ingress | 8000 |
+| Firebase Firestore | 8080 |
+| Firebase Auth | 9099 |
+| Firebase UI | 4000 |
+| Pub/Sub | 8085 |
+| Functions | 8081, 8082, ... |
+| UIs | 3000, 3001, ... |
+
+### Environment Variables
+
+All pods automatically receive emulator connection strings via a shared ConfigMap:
+
+```
+FIRESTORE_EMULATOR_HOST=firebase-emulator:8080
+FIREBASE_AUTH_EMULATOR_HOST=firebase-emulator:9099
+PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+NODE_ENV=development
+```
+
+### Project Directory Convention
+
+```
+your-project/
+├── stacksolo.config.json
+├── .stacksolo/              # Generated K8s manifests (gitignored)
+│   └── k8s/
+├── functions/               # Function source code
+│   ├── api/
+│   └── hello/
+└── ui/                      # UI source code
+    └── web/
+```
+
+---
+
 ## Development
 
 ```bash

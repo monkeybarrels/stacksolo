@@ -1,38 +1,60 @@
 {
   "name": "@stacksolo/runtime",
   "version": "0.1.0",
-  "description": "Runtime helpers for StackSolo-deployed applications - config validation, database, and storage utilities",
+  "description": "Runtime utilities for StackSolo applications",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monkeybarrels/stacksolo.git",
+    "directory": "packages/runtime"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch"
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@google-cloud/storage": ">=7.0.0"
+    "firebase-admin": "^12.0.0 || ^13.0.0",
+    "@google-cloud/pubsub": "^4.0.0",
+    "@google-cloud/storage": "^7.0.0"
   },
   "peerDependenciesMeta": {
+    "firebase-admin": {
+      "optional": true
+    },
+    "@google-cloud/pubsub": {
+      "optional": true
+    },
     "@google-cloud/storage": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@types/node": "^20.19.27",
-    "typescript": "^5.0.0"
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
   },
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "stacksolo",
     "runtime",
-    "config",
-    "gcp",
-    "cloud"
+    "firebase",
+    "gcp"
   ],
   "license": "MIT"
 }

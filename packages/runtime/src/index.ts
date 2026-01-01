@@ -1,11 +1,23 @@
 /**
  * @stacksolo/runtime
  *
- * Runtime helpers for StackSolo-deployed applications.
- * Install this package in your app to get typed config access and utility functions.
+ * Runtime utilities for StackSolo applications.
+ * Provides environment detection, service-to-service calls,
+ * and auto-configured GCP SDK clients.
  */
 
-// Config types and factory
+// Environment configuration
+export { env } from './env';
+export type { StackSoloEnv } from './env';
+
+// Firestore client
+export { firestore, resetFirestore } from './firestore';
+
+// Service-to-service calls
+export { services, call, create } from './services';
+export type { ServiceCallOptions, ServiceResponse } from './services';
+
+// Config types and factory (legacy)
 export {
   createStackSoloConfig,
   type StackSoloConfig,

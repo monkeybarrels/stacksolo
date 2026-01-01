@@ -109,6 +109,7 @@ function generateContainerPackageJson(
     },
     dependencies: {
       express: '^4.18.2',
+      '@stacksolo/runtime': '^0.1.0',
     },
     devDependencies: {
       '@types/express': '^4.17.21',

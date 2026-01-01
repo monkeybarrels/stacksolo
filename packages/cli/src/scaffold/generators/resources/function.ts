@@ -65,6 +65,7 @@ function generateFunctionPackageJson(
     },
     dependencies: {
       '@google-cloud/functions-framework': '^3.3.0',
+      '@stacksolo/runtime': '^0.1.0',
     },
     devDependencies: {
       '@types/node': '^20.10.0',

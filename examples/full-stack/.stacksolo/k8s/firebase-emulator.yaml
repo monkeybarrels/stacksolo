@@ -1,0 +1,75 @@
+# Firebase Emulator (Firestore + Auth)
+# Ports:
+#   - Firestore: 8080
+#   - Auth: 9099
+#   - UI: 4000
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firebase-emulator
+  namespace: fullstack
+  labels:
+    app.kubernetes.io/name: firebase-emulator
+    app.kubernetes.io/component: emulator
+    app.kubernetes.io/managed-by: stacksolo
+    stacksolo.dev/project: fullstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: firebase-emulator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: firebase-emulator
+        app.kubernetes.io/component: emulator
+    spec:
+      containers:
+      - name: firebase
+        image: "andreysenov/firebase-tools:latest"
+        command:
+        - firebase
+        - "emulators:start"
+        - --only
+        - firestore,auth
+        - --project
+        - demo-stacksolo
+        ports:
+        - containerPort: 8080
+          name: firestore
+        - containerPort: 9099
+          name: auth
+        - containerPort: 4000
+          name: ui
+        resources:
+          limits:
+            memory: "1Gi"
+          requests:
+            memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: firebase-emulator
+  namespace: fullstack
+  labels:
+    app.kubernetes.io/name: firebase-emulator
+    app.kubernetes.io/component: emulator
+    app.kubernetes.io/managed-by: stacksolo
+    stacksolo.dev/project: fullstack
+spec:
+  selector:
+    app.kubernetes.io/name: firebase-emulator
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: firestore
+  - port: 9099
+    targetPort: 9099
+    name: auth
+  - port: 4000
+    targetPort: 4000
+    name: ui
+  type: ClusterIP

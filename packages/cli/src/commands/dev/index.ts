@@ -4,5 +4,6 @@
  */
 
 export { buildCommand } from './build';
+export { devCommand } from './dev';
 export { installCommand } from './install';
 export { serveCommand } from './serve';

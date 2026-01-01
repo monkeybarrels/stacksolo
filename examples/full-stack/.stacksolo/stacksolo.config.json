@@ -21,6 +21,26 @@
             "ipCidrRange": "10.0.1.0/24"
           }
         ],
+        "functions": [
+          {
+            "name": "api",
+            "runtime": "nodejs20",
+            "entryPoint": "handler",
+            "memory": "256Mi"
+          }
+        ],
+        "uis": [
+          {
+            "name": "web",
+            "framework": "vue"
+          }
+        ],
+        "loadBalancer": {
+          "routes": [
+            { "path": "/api/*", "backend": "api" },
+            { "path": "/*", "backend": "web" }
+          ]
+        },
         "containers": [
           {
             "name": "api",

@@ -45,6 +45,12 @@ export function generateScaffold(
     envVarCount = envLocalLines.filter((line) => line.includes('=') && !line.startsWith('#')).length;
   }
 
+  // Generate root .npmrc for GitHub Packages
+  files.push({
+    path: '.npmrc',
+    content: '@stacksolo:registry=https://npm.pkg.github.com\n',
+  });
+
   // Generate docker-compose
   if (generateDocker) {
     const dockerResult = generateDockerCompose(config);
@@ -138,6 +144,7 @@ export async function updateGitignore(targetDir: string): Promise<void> {
     '',
     '# StackSolo local development',
     '.env.local',
+    '.stacksolo/',
     'local-storage/',
     '',
   ];

@@ -24,7 +24,7 @@ export {
 } from './infra';
 
 // Development commands
-export { buildCommand, installCommand, serveCommand } from './dev';
+export { buildCommand, devCommand, installCommand, serveCommand } from './dev';
 
 // Configuration commands
 export {

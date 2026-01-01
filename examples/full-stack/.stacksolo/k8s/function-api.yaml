@@ -1,0 +1,72 @@
+# Function: api
+# Runtime: nodejs20
+# Entry point: handler
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: fullstack
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: function
+    app.kubernetes.io/managed-by: stacksolo
+    stacksolo.dev/project: fullstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+        app.kubernetes.io/component: function
+    spec:
+      containers:
+      - name: api
+        image: "node:20-slim"
+        command:
+        - sh
+        - -c
+        - npm install && npx @google-cloud/functions-framework --target=handler --port=8080
+        ports:
+        - containerPort: 8080
+          name: http
+        envFrom:
+        - configMapRef:
+            name: stacksolo-env
+        volumeMounts:
+        - name: source
+          mountPath: /app
+        workingDir: /app
+        resources:
+          limits:
+            memory: "256Mi"
+          requests:
+            memory: "128Mi"
+      volumes:
+      - name: source
+        hostPath:
+          path: /Users/jimlivingston/Documents/git/stacksolo/examples/full-stack/functions/api
+          type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: fullstack
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: function
+    app.kubernetes.io/managed-by: stacksolo
+    stacksolo.dev/project: fullstack
+spec:
+  selector:
+    app.kubernetes.io/name: api
+  ports:
+  - port: 8081
+    targetPort: 8080
+    name: http
+  type: ClusterIP
