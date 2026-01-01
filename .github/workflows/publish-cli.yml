@@ -35,8 +35,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build CLI package
-        run: pnpm --filter @stacksolo/cli build
+      - name: Build all packages
+        run: pnpm build
 
       - name: Publish to npm
         run: pnpm --filter @stacksolo/cli publish --no-git-checks
