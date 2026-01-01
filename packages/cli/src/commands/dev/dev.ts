@@ -591,8 +591,20 @@ async function showRoutes(): Promise<void> {
     }
   }
 
+  // Emulators section
+  console.log(chalk.bold('  Emulators:\n'));
+  console.log(`    ${chalk.yellow('Firebase UI')}      http://localhost:4000`);
+  console.log(`    ${chalk.yellow('Firestore')}        localhost:8080`);
+  console.log(`    ${chalk.yellow('Firebase Auth')}    localhost:9099`);
+  console.log(`    ${chalk.yellow('Pub/Sub')}          localhost:8085`);
+  console.log('');
+
   console.log(chalk.bold('  Local Access:\n'));
-  console.log(`    ${chalk.cyan('Gateway:')}        http://localhost:8000`);
+  console.log(`    ${chalk.cyan('Gateway:')}          http://localhost:8000`);
+  if (config.project.kernel) {
+    console.log(`    ${chalk.cyan('Kernel HTTP:')}      http://localhost:8090`);
+    console.log(`    ${chalk.cyan('Kernel NATS:')}      localhost:4222`);
+  }
   console.log('');
 }
 
