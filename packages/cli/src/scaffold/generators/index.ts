@@ -45,11 +45,6 @@ export function generateScaffold(
     envVarCount = envLocalLines.filter((line) => line.includes('=') && !line.startsWith('#')).length;
   }
 
-  // Generate root .npmrc for GitHub Packages
-  files.push({
-    path: '.npmrc',
-    content: '@stacksolo:registry=https://npm.pkg.github.com\n',
-  });
 
   // Generate docker-compose
   if (generateDocker) {
