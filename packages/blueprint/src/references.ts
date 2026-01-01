@@ -69,6 +69,12 @@ const REFERENCE_OUTPUTS: Record<ReferenceType, Record<string, string>> = {
     bucketName: 'bucketName',
     name: 'name',
   },
+  kernel: {
+    default: 'url',
+    url: 'url',
+    authUrl: 'authUrl',
+    natsUrl: 'natsUrl',
+  },
 };
 
 /**
@@ -95,7 +101,7 @@ export function parseReference(ref: string): Reference | null {
   // Validate type
   const validTypes: ReferenceType[] = [
     'secret', 'database', 'bucket', 'cache',
-    'container', 'function', 'topic', 'queue', 'network', 'ui'
+    'container', 'function', 'topic', 'queue', 'network', 'ui', 'kernel'
   ];
 
   if (!validTypes.includes(typeStr as ReferenceType)) {

@@ -76,6 +76,22 @@ export const cloudFunction = defineResource({
         description: 'Allow public access without authentication',
         default: true,
       },
+      projectName: {
+        type: 'string',
+        title: 'Project Name',
+        description: 'StackSolo project name (injected as STACKSOLO_PROJECT_NAME)',
+      },
+      gatewayUrl: {
+        type: 'string',
+        title: 'Gateway URL',
+        description: 'URL for service-to-service calls (e.g., load balancer URL)',
+      },
+      environmentVariables: {
+        type: 'object',
+        title: 'Environment Variables',
+        description: 'Additional environment variables for the function',
+        additionalProperties: { type: 'string' },
+      },
     },
     required: ['name', 'location'],
   },
@@ -104,6 +120,9 @@ export const cloudFunction = defineResource({
       vpcConnector?: string;
       allowUnauthenticated?: boolean;
       projectId?: string;
+      projectName?: string;
+      gatewayUrl?: string;
+      environmentVariables?: Record<string, string>;
     };
 
     const location = fnConfig.location;
@@ -115,6 +134,9 @@ export const cloudFunction = defineResource({
     const maxInstances = fnConfig.maxInstances ?? 100;
     const allowUnauthenticated = fnConfig.allowUnauthenticated ?? true;
     const projectId = fnConfig.projectId || '${var.project_id}';
+    const projectName = fnConfig.projectName || '';
+    const gatewayUrl = fnConfig.gatewayUrl || '';
+    const additionalEnv = fnConfig.environmentVariables || {};
 
     // Source bucket and zip (each function has its own source zip)
     // Use relative path - the zip will be copied to the terraform stack directory
@@ -155,7 +177,11 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
     maxInstanceCount: ${maxInstances},
     minInstanceCount: ${minInstances},
     ingressSettings: 'ALLOW_ALL',
-    allTrafficOnLatestRevision: true,`;
+    allTrafficOnLatestRevision: true,
+    environmentVariables: {
+      NODE_ENV: 'production',
+      GCP_PROJECT_ID: '${projectId}',${projectName ? `\n      STACKSOLO_PROJECT_NAME: '${projectName}',` : ''}${gatewayUrl ? `\n      GATEWAY_URL: '${gatewayUrl}',` : ''}${Object.entries(additionalEnv).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}
+    },`;
 
     // Add VPC connector if specified
     if (fnConfig.vpcConnector) {

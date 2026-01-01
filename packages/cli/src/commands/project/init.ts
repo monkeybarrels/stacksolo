@@ -40,6 +40,7 @@ import {
   type ProjectType,
   type UIFramework,
 } from '../../templates';
+import { getRegistry } from '@stacksolo/registry';
 
 const BANNER = `
   ███████╗████████╗ █████╗  ██████╗██╗  ██╗███████╗ ██████╗ ██╗      ██████╗
@@ -617,6 +618,35 @@ export const initCommand = new Command('init')
     // Scaffold templates
     const scaffoldedFiles = await scaffoldTemplates(cwd, projectType, uiFramework);
     generateSpinner.succeed('Project files created');
+
+    // Register project in global registry
+    const registrySpinner = ora('Registering project...').start();
+    try {
+      const registry = getRegistry();
+      const configPath = path.join(cwd, '.stacksolo', 'stacksolo.config.json');
+
+      // Check if already registered
+      const existing = await registry.findProjectByName(projectName);
+      if (existing) {
+        // Update existing registration
+        await registry.updateProject(existing.id, {
+          gcpProjectId: projectId,
+          region,
+          configPath,
+        });
+        registrySpinner.succeed('Updated project in registry');
+      } else {
+        await registry.registerProject({
+          name: projectName,
+          gcpProjectId: projectId,
+          region,
+          configPath,
+        });
+        registrySpinner.succeed('Registered project in global registry');
+      }
+    } catch (error) {
+      registrySpinner.warn('Could not register in global registry (non-blocking)');
+    }
 
     // Determine the main directories created based on project type
     const createdDirs: string[] = [];

@@ -1,6 +1,6 @@
 # StackSolo
 
-**A local webapp that helps solo developers scaffold and deploy cloud infrastructure using Pulumi.**
+**A CLI tool that helps solo developers scaffold and deploy cloud infrastructure using CDKTF (Terraform).**
 
 > A [MonkeyBarrels](https://monkeybarrels.com) open source project
 
@@ -8,15 +8,28 @@
 
 ## What is StackSolo?
 
-StackSolo is a visual infrastructure builder for indie hackers and solo developers. Instead of wrestling with Terraform docs or clicking through cloud consoles, you define your resources through a simple UI - and StackSolo generates clean, exportable Pulumi code you actually own.
+StackSolo is an infrastructure automation tool for indie hackers and solo developers. Define your infrastructure in a simple JSON config file, and StackSolo generates and deploys real Terraform code you own.
 
 **You get:**
-- A local web UI for designing your infrastructure
-- Real Pulumi TypeScript files you can inspect, modify, and version control
-- One-click deploys to your cloud provider (or export and run yourself)
-- SQLite persistence - your projects live on your machine
+- A simple CLI for deploying infrastructure
+- Real CDKTF/Terraform files you can inspect, modify, and version control
+- One-click deploys to GCP (more providers coming)
+- Local Kubernetes development environment that mirrors production
+- Clean, exportable code you can eject anytime
 
 **This is not a managed platform.** You run it locally. You own the code it generates. You can eject anytime.
+
+---
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Quickstart](docs/quickstart.md) | Get started in 5 minutes |
+| [CLI Reference](docs/cli-reference.md) | All commands and options |
+| [Configuration](docs/configuration.md) | How to write stacksolo.config.json |
+| [Architecture](docs/architecture.md) | How StackSolo works internally |
+| [Plugin Development](docs/plugin-development.md) | Create your own plugins |
 
 ---
 
@@ -31,95 +44,130 @@ StackSolo is a visual infrastructure builder for indie hackers and solo develope
 ## Quick Start
 
 ```bash
-npx @stacksolo/cli
-```
+# Install the CLI
+npm install -g @stacksolo/cli
 
-Then open `http://localhost:3000`
+# Login to GCP
+gcloud auth login
+gcloud auth application-default login
+
+# Create a new project
+mkdir my-app && cd my-app
+stacksolo init
+
+# Deploy to GCP
+stacksolo deploy
+```
 
 ### Prerequisites
 
 - Node.js 18+
-- [Pulumi CLI](https://www.pulumi.com/docs/get-started/install/)
-- Cloud CLI for your provider (e.g., `gcloud` for GCP)
+- [Terraform CLI](https://developer.hashicorp.com/terraform/downloads)
+- [gcloud CLI](https://cloud.google.com/sdk/docs/install) (for GCP)
 
 ---
 
-## Supported Providers
+## Example Config
 
-### v0.1
-- **Google Cloud Platform (GCP)**
-  - Cloud Storage Bucket
+```json
+{
+  "project": {
+    "name": "my-api",
+    "region": "us-central1",
+    "gcpProjectId": "my-gcp-project",
+    "networks": [
+      {
+        "name": "main",
+        "functions": [
+          {
+            "name": "api",
+            "runtime": "nodejs20",
+            "memory": "256Mi"
+          }
+        ],
+        "loadBalancer": {
+          "name": "gateway",
+          "routes": [
+            { "path": "/api/*", "backend": "api" }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
 
-### Planned
-- GCP: Cloud Functions, Cloud Run, Firestore, Secret Manager
-- AWS: S3, Lambda, API Gateway, DynamoDB
-- Azure: Blob Storage, Functions
-- Railway, Render, Fly.io, Supabase, and more
+See [Configuration Guide](docs/configuration.md) for all options.
+
+---
+
+## Supported Resources
+
+### GCP (via CDKTF)
+- Cloud Functions (Gen2)
+- Cloud Run
+- Cloud SQL (PostgreSQL, MySQL)
+- Cloud Storage
+- Memorystore (Redis)
+- HTTP(S) Load Balancer
+- VPC Networks
+- Secret Manager
+- Pub/Sub
+- Cloud Scheduler
+
+### Coming Soon
+- AWS (Lambda, S3, RDS, etc.)
+- Azure (Functions, Blob Storage, etc.)
+
+---
+
+## Local Development
+
+StackSolo includes a local Kubernetes environment that mirrors production:
+
+```bash
+# Start local environment
+stacksolo dev
+
+# Check status
+stacksolo dev --status
+
+# View logs
+stacksolo dev --logs api
+
+# Stop environment
+stacksolo dev --stop
+```
+
+This spins up your functions, UIs, and emulators (Firebase, Pub/Sub) locally with the same routing as production.
+
+See [CLI Reference](docs/cli-reference.md#stacksolo-dev) for details.
 
 ---
 
 ## Plugin Architecture
 
-StackSolo is built on a plugin system. Providers and resource types are defined as plugins, making it easy to:
-
-- Add new cloud providers
-- Add new resource types to existing providers
-- Create custom resources for your specific needs
-
-### Using Plugins
-
-Plugins are auto-discovered from:
-- Built-in: `@stacksolo/plugin-gcp-cdktf` (CDKTF/Terraform-based)
-- npm packages: `stacksolo-plugin-*`
-- Local: `./stacksolo-plugins/` or `~/.stacksolo/plugins/`
-
-Override or add plugins via config:
+StackSolo is extensible via plugins. Add new cloud providers or resource types:
 
 ```typescript
-// stacksolo.config.ts
-import { defineConfig } from '@stacksolo/core'
-import myCustomPlugin from './my-plugins/custom'
+import { defineResource } from '@stacksolo/core';
 
-export default defineConfig({
-  plugins: [
-    myCustomPlugin()
-  ],
-  disable: ['@stacksolo/plugin-azure']
-})
+export const myResource = defineResource({
+  id: 'my-provider:my-resource',
+  provider: 'my-provider',
+  name: 'My Resource',
+  description: 'Does something useful',
+  configSchema: { /* JSON Schema */ },
+  defaultConfig: {},
+  generate: (config) => ({
+    imports: ['...'],
+    code: '// CDKTF code',
+    outputs: ['...'],
+  }),
+});
 ```
 
-### Creating Plugins
-
-```typescript
-// my-custom-resource.ts
-import { defineResource } from '@stacksolo/core'
-
-export default defineResource({
-  id: 'gcp:my-resource',
-  provider: 'gcp',
-  name: 'My Custom Resource',
-  description: 'Does something custom',
-  
-  configSchema: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', title: 'Name' },
-      // ... JSON Schema for config
-    },
-    required: ['name']
-  },
-
-  defaultConfig: {
-    name: 'my-resource'
-  },
-
-  generatePulumi: (config) => ({
-    imports: ["import * as gcp from '@pulumi/gcp'"],
-    code: `// Your Pulumi code here`,
-    outputs: []
-  })
-})
-```
+See [Plugin Development Guide](docs/plugin-development.md) for full documentation.
 
 ---
 
@@ -128,101 +176,15 @@ export default defineResource({
 ```
 stacksolo/
 ├── packages/
-│   ├── api/          # Express + tRPC backend
-│   ├── web/          # SvelteKit frontend
-│   ├── shared/       # Shared types
-│   ├── core/         # Plugin interfaces & registry
-│   └── cli/          # CLI entry point
-│
+│   ├── cli/          # CLI commands
+│   ├── core/         # Plugin system
+│   ├── blueprint/    # Config parsing & code generation
+│   ├── api/          # Optional web API
+│   └── web/          # Optional web UI
 ├── plugins/
-│   └── gcp/          # Built-in GCP plugin
-│
-└── stacksolo.config.ts
-```
-
----
-
-## Local Development with `stacksolo dev`
-
-StackSolo includes a local Kubernetes-based development environment that mirrors your production GCP stack. This lets you develop and test locally without deploying to the cloud.
-
-### Prerequisites
-
-- [OrbStack](https://orbstack.dev/) with Kubernetes enabled (or any local K8s cluster)
-- `kubectl` CLI available
-
-### Quick Start
-
-```bash
-# Start local development environment
-stacksolo dev
-
-# The command will:
-# 1. Generate K8s manifests from your stacksolo.config.json
-# 2. Spin up Firebase and Pub/Sub emulators
-# 3. Start your functions and UIs with hot-reload
-# 4. Set up ingress routing matching your production config
-```
-
-### Available Commands
-
-```bash
-stacksolo dev              # Start local K8s environment
-stacksolo dev --stop       # Tear down environment
-stacksolo dev --status     # Show running pods
-stacksolo dev --logs       # Tail all pod logs
-stacksolo dev --logs api   # Tail logs for specific service
-stacksolo dev --rebuild    # Force regenerate manifests
-stacksolo dev --no-emulators  # Skip Firebase/Pub/Sub emulators
-```
-
-### What Gets Created
-
-From your `stacksolo.config.json`, the following K8s resources are generated:
-
-| Config Element | K8s Resource |
-|----------------|--------------|
-| `functions[]` | Deployment + Service |
-| `uis[]` | Deployment + Service |
-| `loadBalancer.routes` | Ingress |
-| Firebase (automatic) | Firebase Emulator Pod |
-| Pub/Sub (automatic) | Pub/Sub Emulator Pod |
-
-### Port Mapping
-
-| Service | Port |
-|---------|------|
-| Ingress | 8000 |
-| Firebase Firestore | 8080 |
-| Firebase Auth | 9099 |
-| Firebase UI | 4000 |
-| Pub/Sub | 8085 |
-| Functions | 8081, 8082, ... |
-| UIs | 3000, 3001, ... |
-
-### Environment Variables
-
-All pods automatically receive emulator connection strings via a shared ConfigMap:
-
-```
-FIRESTORE_EMULATOR_HOST=firebase-emulator:8080
-FIREBASE_AUTH_EMULATOR_HOST=firebase-emulator:9099
-PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
-NODE_ENV=development
-```
-
-### Project Directory Convention
-
-```
-your-project/
-├── stacksolo.config.json
-├── .stacksolo/              # Generated K8s manifests (gitignored)
-│   └── k8s/
-├── functions/               # Function source code
-│   ├── api/
-│   └── hello/
-└── ui/                      # UI source code
-    └── web/
+│   ├── gcp-cdktf/    # GCP resources (CDKTF)
+│   └── kernel/       # Shared services (auth, files, events)
+└── docs/             # Documentation
 ```
 
 ---
@@ -230,37 +192,22 @@ your-project/
 ## Development
 
 ```bash
+# Clone the repo
+git clone https://github.com/monkeybarrels/stacksolo
+cd stacksolo
+
 # Install dependencies
 pnpm install
 
-# Start development servers
-pnpm dev
+# Build all packages
+pnpm build
+
+# Link CLI for testing
+pnpm cli:link
 
 # Run tests
 pnpm test
-
-# Build for production
-pnpm build
 ```
-
----
-
-## How It Works
-
-1. **Create a Project** - Name it, select your cloud provider, configure region
-2. **Add Resources** - Pick from available resource types, configure via form
-3. **Preview Code** - See the generated Pulumi TypeScript
-4. **Deploy** - One-click deploy via Pulumi Automation API
-5. **Eject** - Export the Pulumi project and run it yourself anytime
-
----
-
-## Non-Goals
-
-- Multi-cloud orchestration in a single project
-- Team collaboration features (for now)
-- Hosting your infrastructure state
-- Replacing Pulumi/Terraform for complex setups
 
 ---
 
@@ -285,5 +232,5 @@ MIT © [MonkeyBarrels LLC](https://monkeybarrels.com)
 ## Links
 
 - [Website](https://stacksolo.dev)
-- [Documentation](https://stacksolo.dev/docs)
+- [Documentation](docs/README.md)
 - [MonkeyBarrels](https://monkeybarrels.com)

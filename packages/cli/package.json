@@ -1,7 +1,17 @@
 {
   "name": "@stacksolo/cli",
   "version": "0.1.0",
-  "description": "CLI for StackSolo - deploy infrastructure from the command line",
+  "description": "CLI for StackSolo - deploy GCP infrastructure from the command line",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monkeybarrels/stacksolo.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://stacksolo.dev",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,30 +26,44 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@stacksolo/api": "workspace:*",
-    "@stacksolo/blueprint": "workspace:*",
-    "@stacksolo/core": "workspace:*",
-    "@stacksolo/registry": "workspace:*",
-    "@stacksolo/shared": "workspace:*",
-    "@stacksolo/plugin-gcp-cdktf": "workspace:*",
-    "commander": "^12.0.0",
+    "better-sqlite3": "^11.0.0",
     "chalk": "^5.3.0",
-    "ora": "^8.0.1",
-    "inquirer": "^9.2.0"
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.0",
+    "kysely": "^0.27.0",
+    "ora": "^8.0.1"
   },
   "devDependencies": {
-    "@types/node": "^20.19.27",
+    "@stacksolo/blueprint": "workspace:*",
+    "@stacksolo/core": "workspace:*",
+    "@stacksolo/plugin-gcp-cdktf": "workspace:*",
+    "@stacksolo/registry": "workspace:*",
+    "@stacksolo/shared": "workspace:*",
+    "@types/better-sqlite3": "^7.6.0",
     "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.19.27",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
     "vitest": "^1.0.0"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "keywords": [
     "cli",
     "stacksolo",
     "infrastructure",
-    "pulumi",
-    "deploy"
+    "gcp",
+    "google-cloud",
+    "terraform",
+    "cdktf",
+    "deploy",
+    "cloud-functions",
+    "cloud-run"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "license": "MIT"
 }

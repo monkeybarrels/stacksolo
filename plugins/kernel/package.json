@@ -1,0 +1,41 @@
+{
+  "name": "@stacksolo/plugin-kernel",
+  "version": "0.1.0",
+  "description": "StackSolo kernel plugin - hybrid HTTP + NATS shared infrastructure",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:service": "cd service && npm run build",
+    "docker:build": "docker build -t stacksolo-kernel service/",
+    "docker:push": "docker tag stacksolo-kernel gcr.io/$PROJECT_ID/stacksolo-kernel && docker push gcr.io/$PROJECT_ID/stacksolo-kernel",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@stacksolo/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@stacksolo/core": "workspace:*",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "stacksolo",
+    "plugin",
+    "kernel",
+    "nats",
+    "infrastructure"
+  ],
+  "license": "MIT"
+}

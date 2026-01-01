@@ -1,0 +1,1 @@
+export { kernelResource } from './kernel';

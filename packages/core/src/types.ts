@@ -18,6 +18,8 @@ export interface JSONSchemaProperty {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  properties?: Record<string, JSONSchemaProperty>;
+  additionalProperties?: boolean | JSONSchemaProperty;
 }
 
 // Provider types

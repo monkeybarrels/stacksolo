@@ -12,17 +12,17 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
-  // Mark these as external - they have native dependencies or special requirements
+  // External: native modules and optional dependencies
   external: [
-    '@stacksolo/plugin-gcp',
-    '@stacksolo/api',
-    '@stacksolo/registry',
-    'better-sqlite3',
+    'better-sqlite3',   // Native module - must be installed by user
+    'kysely',           // Database ORM - peer dependency
+    '@stacksolo/api',   // Optional - only needed for `stacksolo serve`
   ],
-  // Bundle workspace dependencies for clean imports (no .js extensions needed)
+  // Bundle all workspace packages into the CLI
   noExternal: [
     '@stacksolo/blueprint',
     '@stacksolo/core',
+    '@stacksolo/registry',
     '@stacksolo/shared',
     '@stacksolo/plugin-gcp-cdktf',
   ],

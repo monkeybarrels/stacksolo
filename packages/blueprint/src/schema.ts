@@ -291,7 +291,8 @@ export type ReferenceType =
   | 'topic'
   | 'queue'
   | 'network'
-  | 'ui';
+  | 'ui'
+  | 'kernel';
 
 export interface Reference {
   type: ReferenceType;
