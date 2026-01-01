@@ -35,8 +35,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build all packages
-        run: pnpm build
+      - name: Build CLI dependencies
+        run: |
+          pnpm --filter @stacksolo/shared build
+          pnpm --filter @stacksolo/core build
+          pnpm --filter @stacksolo/registry build
+          pnpm --filter @stacksolo/blueprint build
+          pnpm --filter @stacksolo/plugin-gcp-cdktf build
+          pnpm --filter @stacksolo/cli build
 
       - name: Publish to npm
         run: pnpm --filter @stacksolo/cli publish --no-git-checks
