@@ -5,10 +5,12 @@
  * Supports:
  * - NPM packages (from node_modules)
  * - Monorepo detection (builds from source in development)
+ * - Auto-installation of missing plugins
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import type { Plugin, PluginService } from '@stacksolo/core';
 import { registry } from '@stacksolo/core';
 
@@ -126,6 +128,67 @@ async function importPlugin(pathOrName: string): Promise<Plugin> {
 }
 
 /**
+ * Check if a plugin is installed in node_modules
+ */
+function isPluginInstalled(pluginName: string): boolean {
+  try {
+    // Check in current working directory's node_modules
+    const modulePath = path.join(process.cwd(), 'node_modules', pluginName);
+    return fs.existsSync(modulePath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install a plugin from npm
+ */
+function installPlugin(pluginName: string): void {
+  console.log(`Installing plugin ${pluginName}...`);
+
+  const cwd = process.cwd();
+
+  // Check if package.json exists, create minimal one if not
+  const packageJsonPath = path.join(cwd, 'package.json');
+  if (!fs.existsSync(packageJsonPath)) {
+    const minimalPackageJson = {
+      name: path.basename(cwd),
+      version: '1.0.0',
+      private: true,
+      dependencies: {},
+    };
+    fs.writeFileSync(packageJsonPath, JSON.stringify(minimalPackageJson, null, 2));
+  }
+
+  // Install the plugin
+  try {
+    execSync(`npm install ${pluginName}`, {
+      cwd,
+      stdio: 'inherit',
+    });
+    console.log(`Successfully installed ${pluginName}`);
+  } catch (error) {
+    throw new Error(
+      `Failed to install plugin ${pluginName}: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+/**
+ * Ensure a plugin is installed, installing it if necessary
+ */
+async function ensurePluginInstalled(pluginName: string): Promise<void> {
+  // Skip if in monorepo (plugins loaded from source)
+  if (getMonorepoRoot()) {
+    return;
+  }
+
+  if (!isPluginInstalled(pluginName)) {
+    installPlugin(pluginName);
+  }
+}
+
+/**
  * Load all plugins from config
  */
 export async function loadPlugins(configPlugins?: string[]): Promise<Plugin[]> {
@@ -138,6 +201,9 @@ export async function loadPlugins(configPlugins?: string[]): Promise<Plugin[]> {
 
   for (const pluginName of pluginNames) {
     try {
+      // Auto-install plugin if not present (only for user projects, not monorepo)
+      await ensurePluginInstalled(pluginName);
+
       const plugin = await loadPlugin(pluginName);
       plugins.push(plugin);
 
