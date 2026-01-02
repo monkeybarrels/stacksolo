@@ -10,7 +10,51 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
+  # First ensure core is published (plugin depends on it)
+  publish-core:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build core
+        run: pnpm --filter @stacksolo/core build
+
+      - name: Check if core version exists on npm
+        id: check-core
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./packages/core/package.json').version")
+          if npm view @stacksolo/core@$PACKAGE_VERSION version 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Core $PACKAGE_VERSION already exists on npm"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Core $PACKAGE_VERSION not found on npm"
+          fi
+
+      - name: Publish core to npm
+        if: steps.check-core.outputs.exists == 'false'
+        run: pnpm --filter @stacksolo/core publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Then publish the kernel plugin
+  publish-plugin:
+    needs: publish-core
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,7 +79,20 @@ jobs:
           pnpm --filter @stacksolo/core build
           pnpm --filter @stacksolo/plugin-kernel build
 
+      - name: Check if version exists on npm
+        id: version-check
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./plugins/kernel/package.json').version")
+          if npm view @stacksolo/plugin-kernel@$PACKAGE_VERSION version 2>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Plugin $PACKAGE_VERSION already exists on npm"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Plugin $PACKAGE_VERSION not found on npm"
+          fi
+
       - name: Publish to npm
-        run: pnpm --filter @stacksolo/plugin-kernel publish --no-git-checks
+        if: steps.version-check.outputs.exists == 'false'
+        run: pnpm --filter @stacksolo/plugin-kernel publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

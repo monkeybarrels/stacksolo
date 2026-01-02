@@ -1,10 +1,10 @@
 {
   "name": "@stacksolo/plugin-kernel",
   "version": "0.1.0",
-  "description": "StackSolo kernel plugin - hybrid HTTP + NATS shared infrastructure",
+  "description": "StackSolo kernel plugin - hybrid HTTP + NATS shared infrastructure for auth, files, and events",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,7 +12,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "tsup",
@@ -22,20 +23,35 @@
     "dev": "tsup --watch",
     "prepublishOnly": "npm run build"
   },
-  "peerDependencies": {
-    "@stacksolo/core": "^0.1.0"
-  },
-  "devDependencies": {
-    "@stacksolo/core": "workspace:*",
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
-  },
   "keywords": [
     "stacksolo",
     "plugin",
     "kernel",
     "nats",
-    "infrastructure"
+    "infrastructure",
+    "auth",
+    "files",
+    "events"
   ],
-  "license": "MIT"
+  "author": "MonkeyBarrels",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkeybarrels/stacksolo.git",
+    "directory": "plugins/kernel"
+  },
+  "bugs": {
+    "url": "https://github.com/monkeybarrels/stacksolo/issues"
+  },
+  "homepage": "https://stacksolo.dev",
+  "dependencies": {
+    "@stacksolo/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@stacksolo/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
 }
