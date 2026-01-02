@@ -45,7 +45,7 @@
   },
   "homepage": "https://stacksolo.dev",
   "dependencies": {
-    "@stacksolo/core": "^0.1.0",
+    "@stacksolo/core": "workspace:*",
     "cdktf": "^0.20.0",
     "constructs": "^10.0.0",
     "@cdktf/provider-google": "^14.0.0"
