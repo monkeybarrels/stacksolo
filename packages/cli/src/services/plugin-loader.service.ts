@@ -122,7 +122,27 @@ function resolveLocalPlugin(monorepoRoot: string, pluginName: string): string | 
  * Import a plugin module
  */
 async function importPlugin(pathOrName: string): Promise<Plugin> {
-  const module = await import(pathOrName);
+  let modulePath = pathOrName;
+
+  // If it's a package name (not a path), resolve from project's node_modules
+  if (!pathOrName.startsWith('/') && !pathOrName.startsWith('.')) {
+    const projectNodeModules = path.join(process.cwd(), 'node_modules', pathOrName);
+    if (fs.existsSync(projectNodeModules)) {
+      // ESM requires explicit path to entry file, read from package.json
+      const pkgJsonPath = path.join(projectNodeModules, 'package.json');
+      if (fs.existsSync(pkgJsonPath)) {
+        const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
+        // Use exports['.'].import, main, or default to dist/index.js
+        const entryPoint =
+          pkgJson.exports?.['.']?.import ||
+          pkgJson.main ||
+          './dist/index.js';
+        modulePath = path.join(projectNodeModules, entryPoint);
+      }
+    }
+  }
+
+  const module = await import(modulePath);
   // Support both default export and named 'plugin' export
   return module.default || module.plugin;
 }
