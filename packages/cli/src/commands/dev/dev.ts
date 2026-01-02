@@ -28,7 +28,11 @@ const CONFIG_FILE = '.stacksolo/stacksolo.config.json';
 export const devCommand = new Command('dev')
   .description('Start local Kubernetes development environment')
   .option('--stop', 'Stop and tear down the environment')
-  .option('--status', 'Show status of running pods')
+  .option('--status', 'Show status of running pods with health')
+  .option('--health', 'Check health of all services')
+  .option('--ports', 'Show port-forward status')
+  .option('--restart [service]', 'Restart port-forwards or specific service pod')
+  .option('--service-names', 'List service names for use with other commands')
   .option('--routes', 'Show gateway routes and services')
   .option('--describe [resource]', 'Describe K8s resources (pods, services, all)')
   .option('--logs [service]', 'Tail logs (all pods or specific service)')
@@ -44,6 +48,27 @@ export const devCommand = new Command('dev')
 
       if (options.status) {
         await showStatus();
+        return;
+      }
+
+      if (options.health) {
+        await checkHealth();
+        return;
+      }
+
+      if (options.ports) {
+        await showPorts();
+        return;
+      }
+
+      if (options.restart !== undefined) {
+        const service = typeof options.restart === 'string' ? options.restart : undefined;
+        await restartService(service);
+        return;
+      }
+
+      if (options.serviceNames) {
+        await showServiceNames();
         return;
       }
 
@@ -734,6 +759,416 @@ async function describeResources(resource: string): Promise<void> {
   } catch {
     console.log(chalk.yellow(`  No resources found in namespace ${namespace}`));
     console.log(chalk.gray('  Run "stacksolo dev" to start the environment\n'));
+  }
+
+  console.log('');
+}
+
+/**
+ * Check health of all services by making HTTP requests
+ */
+async function checkHealth(): Promise<void> {
+  console.log(chalk.bold('\n  StackSolo Dev - Health Check\n'));
+
+  const config = await loadConfig();
+  const namespace = sanitizeNamespaceName(config.project.name);
+
+  // Define services to check with their expected ports
+  const healthChecks: Array<{ name: string; port: number; path: string }> = [];
+
+  // Gateway
+  const hasGateway = config.project.networks?.some((n) => n.loadBalancer?.routes);
+  if (hasGateway) {
+    healthChecks.push({ name: 'Gateway', port: 8000, path: '/health' });
+  }
+
+  // Kernel
+  if (config.project.kernel) {
+    healthChecks.push({ name: 'Kernel HTTP', port: 8090, path: '/health' });
+  }
+
+  // Firebase emulator
+  healthChecks.push({ name: 'Firebase UI', port: 4000, path: '/' });
+
+  // Functions
+  let functionPort = 8081;
+  for (const network of config.project.networks || []) {
+    for (const func of network.functions || []) {
+      healthChecks.push({ name: `Function: ${func.name}`, port: functionPort, path: '/health' });
+      functionPort++;
+    }
+  }
+
+  // Get pod status from K8s
+  console.log(chalk.bold('  Pod Status:\n'));
+  try {
+    const podOutput = execSync(
+      `kubectl get pods -n ${namespace} -o jsonpath='{range .items[*]}{.metadata.name}|{.status.phase}|{.status.conditions[?(@.type=="Ready")].status}{\"\\n\"}{end}'`,
+      { encoding: 'utf-8' }
+    );
+
+    for (const line of podOutput.trim().split('\n')) {
+      if (!line) continue;
+      const [name, phase, ready] = line.split('|');
+      const isHealthy = phase === 'Running' && ready === 'True';
+      const icon = isHealthy ? chalk.green('✓') : chalk.red('✗');
+      const status = isHealthy ? chalk.green('Healthy') : chalk.yellow(phase);
+      console.log(`    ${icon} ${name.padEnd(40)} ${status}`);
+    }
+  } catch {
+    console.log(chalk.yellow('    Unable to get pod status'));
+  }
+
+  // Check HTTP endpoints
+  console.log(chalk.bold('\n  HTTP Endpoints:\n'));
+
+  for (const check of healthChecks) {
+    const spinner = ora({ text: `Checking ${check.name}...`, indent: 4 }).start();
+
+    try {
+      const response = await Promise.race([
+        fetch(`http://localhost:${check.port}${check.path}`),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 2000)
+        ),
+      ]) as Response;
+
+      if (response.ok) {
+        spinner.succeed(`${check.name.padEnd(25)} ${chalk.green('OK')} (port ${check.port})`);
+      } else {
+        spinner.warn(`${check.name.padEnd(25)} ${chalk.yellow(`HTTP ${response.status}`)} (port ${check.port})`);
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      if (errMsg.includes('ECONNREFUSED')) {
+        spinner.fail(`${check.name.padEnd(25)} ${chalk.red('Connection refused')} (port ${check.port})`);
+      } else if (errMsg.includes('Timeout')) {
+        spinner.fail(`${check.name.padEnd(25)} ${chalk.red('Timeout')} (port ${check.port})`);
+      } else {
+        spinner.fail(`${check.name.padEnd(25)} ${chalk.red(errMsg)} (port ${check.port})`);
+      }
+    }
+  }
+
+  console.log(chalk.bold('\n  Tip:\n'));
+  console.log(chalk.gray('    If ports show "Connection refused", try: stacksolo dev --restart'));
+  console.log(chalk.gray('    This will restart all port-forwards\n'));
+}
+
+/**
+ * Show port-forward status
+ */
+async function showPorts(): Promise<void> {
+  console.log(chalk.bold('\n  StackSolo Dev - Port Forward Status\n'));
+
+  const config = await loadConfig();
+  const namespace = sanitizeNamespaceName(config.project.name);
+
+  // Build expected port mappings
+  const expectedPorts: Array<{ name: string; service: string; port: number }> = [];
+
+  // Gateway
+  const hasGateway = config.project.networks?.some((n) => n.loadBalancer?.routes);
+  if (hasGateway) {
+    expectedPorts.push({ name: 'Gateway', service: 'gateway', port: 8000 });
+  }
+
+  // Firebase emulator
+  expectedPorts.push(
+    { name: 'Firebase UI', service: 'firebase-emulator', port: 4000 },
+    { name: 'Firestore', service: 'firebase-emulator', port: 8080 },
+    { name: 'Firebase Auth', service: 'firebase-emulator', port: 9099 }
+  );
+
+  // Pub/Sub
+  expectedPorts.push({ name: 'Pub/Sub', service: 'pubsub-emulator', port: 8085 });
+
+  // Kernel
+  if (config.project.kernel) {
+    const kernelName = config.project.kernel.name;
+    expectedPorts.push(
+      { name: 'Kernel HTTP', service: kernelName, port: 8090 },
+      { name: 'Kernel NATS', service: kernelName, port: 4222 }
+    );
+  }
+
+  // Functions and UIs
+  let functionPort = 8081;
+  let uiPort = 3000;
+  for (const network of config.project.networks || []) {
+    for (const func of network.functions || []) {
+      const svcName = func.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      expectedPorts.push({ name: `Function: ${func.name}`, service: svcName, port: functionPort });
+      functionPort++;
+    }
+    for (const ui of network.uis || []) {
+      const svcName = ui.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      expectedPorts.push({ name: `UI: ${ui.name}`, service: svcName, port: uiPort });
+      uiPort++;
+    }
+  }
+
+  // Check which ports are actually listening
+  console.log(chalk.bold('  Expected Port Forwards:\n'));
+  console.log(chalk.gray('    Name                          Port     Service                Status'));
+  console.log(chalk.gray('    ' + '─'.repeat(75)));
+
+  for (const mapping of expectedPorts) {
+    // Check if port is listening
+    let status: string;
+    try {
+      await Promise.race([
+        fetch(`http://localhost:${mapping.port}/`, { method: 'HEAD' }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 500)
+        ),
+      ]);
+      status = chalk.green('● Active');
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : '';
+      if (errMsg.includes('ECONNREFUSED')) {
+        status = chalk.red('○ Not listening');
+      } else if (errMsg.includes('Timeout')) {
+        status = chalk.yellow('○ No response');
+      } else {
+        // Could be non-HTTP service (like NATS) that is actually listening
+        status = chalk.blue('● TCP only');
+      }
+    }
+
+    console.log(
+      `    ${mapping.name.padEnd(30)} ${String(mapping.port).padEnd(8)} ${mapping.service.padEnd(22)} ${status}`
+    );
+  }
+
+  // Check for any active kubectl port-forward processes
+  console.log(chalk.bold('\n  Active Port-Forward Processes:\n'));
+  try {
+    const psOutput = execSync(`ps aux | grep 'kubectl port-forward' | grep -v grep | grep ${namespace}`, {
+      encoding: 'utf-8',
+    });
+    if (psOutput.trim()) {
+      for (const line of psOutput.trim().split('\n')) {
+        // Extract service name and ports from the command
+        const match = line.match(/port-forward.*svc\/([^\s]+)\s+(\d+:\d+)/);
+        if (match) {
+          console.log(chalk.gray(`    kubectl port-forward svc/${match[1]} ${match[2]}`));
+        }
+      }
+    } else {
+      console.log(chalk.yellow('    No active port-forward processes found'));
+    }
+  } catch {
+    console.log(chalk.yellow('    No active port-forward processes found'));
+  }
+
+  console.log(chalk.bold('\n  Commands:\n'));
+  console.log(chalk.gray('    stacksolo dev --restart       Restart all port-forwards'));
+  console.log(chalk.gray('    stacksolo dev --health        Check endpoint health\n'));
+}
+
+/**
+ * Show service names for use with other commands
+ */
+async function showServiceNames(): Promise<void> {
+  console.log(chalk.bold('\n  StackSolo Dev - Service Names\n'));
+
+  const config = await loadConfig();
+  const namespace = sanitizeNamespaceName(config.project.name);
+
+  const services: Array<{ name: string; type: string; k8sName: string }> = [];
+
+  // Kernel
+  if (config.project.kernel) {
+    services.push({
+      name: config.project.kernel.name,
+      type: 'kernel',
+      k8sName: config.project.kernel.name,
+    });
+  }
+
+  // Functions, containers, and UIs from networks
+  for (const network of config.project.networks || []) {
+    for (const func of network.functions || []) {
+      services.push({
+        name: func.name,
+        type: 'function',
+        k8sName: func.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      });
+    }
+
+    for (const container of network.containers || []) {
+      services.push({
+        name: container.name,
+        type: 'container',
+        k8sName: container.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      });
+    }
+
+    for (const ui of network.uis || []) {
+      services.push({
+        name: ui.name,
+        type: 'ui',
+        k8sName: ui.name.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+      });
+    }
+  }
+
+  // Emulators
+  services.push(
+    { name: 'firebase-emulator', type: 'emulator', k8sName: 'firebase-emulator' },
+    { name: 'pubsub-emulator', type: 'emulator', k8sName: 'pubsub-emulator' }
+  );
+
+  // Gateway
+  const hasGateway = config.project.networks?.some((n) => n.loadBalancer?.routes);
+  if (hasGateway) {
+    services.push({ name: 'gateway', type: 'gateway', k8sName: 'gateway' });
+  }
+
+  console.log(chalk.gray('    Name                     Type         K8s Service Name'));
+  console.log(chalk.gray('    ' + '─'.repeat(60)));
+
+  for (const svc of services) {
+    const typeColor =
+      svc.type === 'kernel' ? chalk.magenta :
+      svc.type === 'function' ? chalk.green :
+      svc.type === 'container' ? chalk.blue :
+      svc.type === 'ui' ? chalk.cyan :
+      svc.type === 'gateway' ? chalk.yellow :
+      chalk.gray;
+
+    console.log(
+      `    ${svc.name.padEnd(25)} ${typeColor(svc.type.padEnd(12))} ${svc.k8sName}`
+    );
+  }
+
+  // Show running pods
+  console.log(chalk.bold('\n  Running Pods:\n'));
+  try {
+    const pods = execSync(`kubectl get pods -n ${namespace} --no-headers -o custom-columns=NAME:.metadata.name`, {
+      encoding: 'utf-8',
+    });
+    for (const pod of pods.trim().split('\n')) {
+      if (pod) {
+        // Extract service name from pod name (remove deployment hash suffix)
+        const serviceName = pod.replace(/-[a-z0-9]+-[a-z0-9]+$/, '');
+        console.log(`    ${chalk.gray('●')} ${serviceName.padEnd(25)} ${chalk.gray(pod)}`);
+      }
+    }
+  } catch {
+    console.log(chalk.yellow('    No pods found'));
+  }
+
+  console.log(chalk.bold('\n  Usage:\n'));
+  console.log(chalk.gray('    stacksolo dev --restart <name>    Restart a specific service'));
+  console.log(chalk.gray('    stacksolo dev --logs <name>       Tail logs for a service'));
+  console.log(chalk.gray('    stacksolo dev --describe <name>   Describe a service\n'));
+}
+
+/**
+ * Restart port-forwards or specific service pod
+ */
+async function restartService(service?: string): Promise<void> {
+  console.log(chalk.bold('\n  StackSolo Dev - Restart\n'));
+
+  const config = await loadConfig();
+  const namespace = sanitizeNamespaceName(config.project.name);
+
+  if (service) {
+    // Restart specific service pod
+    const spinner = ora(`Restarting pod: ${service}...`).start();
+    try {
+      // Find and delete the pod - K8s will recreate it
+      execSync(
+        `kubectl delete pod -n ${namespace} -l app.kubernetes.io/name=${service} --grace-period=5`,
+        { stdio: 'pipe' }
+      );
+      spinner.succeed(`Pod ${service} restarted`);
+
+      // Wait for new pod to be ready
+      const waitSpinner = ora(`Waiting for ${service} to be ready...`).start();
+      try {
+        execSync(
+          `kubectl wait --for=condition=ready pod -n ${namespace} -l app.kubernetes.io/name=${service} --timeout=60s`,
+          { stdio: 'pipe' }
+        );
+        waitSpinner.succeed(`${service} is ready`);
+      } catch {
+        waitSpinner.warn(`${service} may not be fully ready yet`);
+      }
+    } catch (error) {
+      spinner.fail(`Failed to restart ${service}`);
+      console.log(chalk.gray(`    Error: ${error instanceof Error ? error.message : error}`));
+      console.log(chalk.gray('\n    Available services:'));
+
+      // List available pods
+      try {
+        const pods = execSync(`kubectl get pods -n ${namespace} -o name`, { encoding: 'utf-8' });
+        for (const pod of pods.trim().split('\n')) {
+          const podName = pod.replace('pod/', '').replace(/-[a-z0-9]+-[a-z0-9]+$/, '');
+          console.log(chalk.gray(`      ${podName}`));
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  } else {
+    // Kill all existing port-forward processes for this namespace
+    const killSpinner = ora('Stopping existing port-forwards...').start();
+    try {
+      execSync(`pkill -f "kubectl port-forward.*${namespace}"`, { stdio: 'pipe' });
+      killSpinner.succeed('Port-forwards stopped');
+    } catch {
+      killSpinner.info('No existing port-forwards to stop');
+    }
+
+    // Wait a moment for processes to die
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Restart port-forwards by loading config and setting up new forwards
+    console.log('');
+    const spinner = ora('Restarting port-forwards...').start();
+
+    // Clear the process array
+    portForwardProcesses.length = 0;
+
+    const portMappings = await setupPortForwarding(namespace, config);
+    spinner.succeed('Port-forwards restarted');
+
+    console.log(chalk.bold('\n  Active Forwards:\n'));
+    for (const mapping of portMappings) {
+      const url = mapping.protocol === 'http'
+        ? `http://localhost:${mapping.localPort}`
+        : `localhost:${mapping.localPort}`;
+      console.log(`    ${chalk.cyan(mapping.name.padEnd(20))} ${url}`);
+    }
+
+    console.log(chalk.bold('\n  Tip:\n'));
+    console.log(chalk.gray('    Run: stacksolo dev --health  to verify endpoints\n'));
+
+    // Keep process running to maintain port-forwards
+    console.log(chalk.gray('  Press Ctrl+C to stop\n'));
+
+    // Setup graceful shutdown
+    const cleanup = async () => {
+      isShuttingDown = true;
+      console.log(chalk.gray('\n  Stopping port-forwards...\n'));
+      for (const proc of portForwardProcesses) {
+        try {
+          proc.kill('SIGTERM');
+        } catch {
+          // Ignore
+        }
+      }
+      process.exit(0);
+    };
+
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
+
+    // Keep alive
+    await new Promise(() => {});
   }
 
   console.log('');

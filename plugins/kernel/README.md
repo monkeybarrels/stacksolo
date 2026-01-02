@@ -408,6 +408,8 @@ async function downloadFile(path: string, firebaseToken: string) {
 
 ### Files API Reference (NATS)
 
+All file operations use request/response pattern via `nc.request()`.
+
 **Subject:** `kernel.files.upload-url`
 
 Request:
@@ -442,6 +444,90 @@ Response:
   "downloadUrl": "https://storage.googleapis.com/...",
   "path": "users/123/uploads/photo.jpg",
   "expiresAt": "2024-01-01T12:00:00.000Z"
+}
+```
+
+**Subject:** `kernel.files.list`
+
+Request:
+```json
+{
+  "prefix": "users/123/",
+  "maxResults": 100,
+  "pageToken": null
+}
+```
+
+Response:
+```json
+{
+  "files": [
+    {
+      "path": "users/123/photo.jpg",
+      "size": 12345,
+      "contentType": "image/jpeg",
+      "created": "2024-01-01T10:00:00.000Z",
+      "updated": "2024-01-01T10:00:00.000Z"
+    }
+  ],
+  "nextPageToken": null
+}
+```
+
+**Subject:** `kernel.files.delete`
+
+Request:
+```json
+{
+  "path": "users/123/uploads/photo.jpg"
+}
+```
+
+Response:
+```json
+{
+  "deleted": true,
+  "path": "users/123/uploads/photo.jpg"
+}
+```
+
+**Subject:** `kernel.files.move`
+
+Request:
+```json
+{
+  "sourcePath": "users/123/old-photo.jpg",
+  "destinationPath": "users/123/new-photo.jpg"
+}
+```
+
+Response:
+```json
+{
+  "moved": true,
+  "sourcePath": "users/123/old-photo.jpg",
+  "destinationPath": "users/123/new-photo.jpg"
+}
+```
+
+**Subject:** `kernel.files.metadata`
+
+Request:
+```json
+{
+  "path": "users/123/uploads/photo.jpg"
+}
+```
+
+Response:
+```json
+{
+  "path": "users/123/uploads/photo.jpg",
+  "size": 12345,
+  "contentType": "image/jpeg",
+  "created": "2024-01-01T10:00:00.000Z",
+  "updated": "2024-01-01T10:00:00.000Z",
+  "metadata": {}
 }
 ```
 
@@ -735,5 +821,9 @@ const token = await firebase.auth().currentUser.getIdToken(true);
 | **Validate a user** | POST to `KERNEL_AUTH_URL/validate` with the Firebase token |
 | **Get upload URL** | NATS request to `kernel.files.upload-url` |
 | **Get download URL** | NATS request to `kernel.files.download-url` |
+| **List files** | NATS request to `kernel.files.list` |
+| **Delete file** | NATS request to `kernel.files.delete` |
+| **Move/rename file** | NATS request to `kernel.files.move` |
+| **Get file metadata** | NATS request to `kernel.files.metadata` |
 | **Publish an event** | NATS publish to `kernel.events.{type}` |
 | **Subscribe to events** | Create a JetStream consumer on `KERNEL_EVENTS` |
