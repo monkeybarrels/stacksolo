@@ -243,6 +243,13 @@ export interface ProjectConfig {
    */
   backend?: 'pulumi' | 'cdktf';
 
+  /**
+   * Plugins to load for this project.
+   * These are npm package names that export Plugin objects.
+   * Example: ["@stacksolo/plugin-gcp-cdktf", "@stacksolo/plugin-kernel"]
+   */
+  plugins?: string[];
+
   // Global resources
   serviceAccount?: ServiceAccountConfig;
   buckets?: BucketConfig[];

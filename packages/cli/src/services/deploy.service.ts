@@ -12,12 +12,12 @@ import { promisify } from 'util';
 import type { StackSoloConfig } from '@stacksolo/blueprint';
 import { resolveConfig } from '@stacksolo/blueprint';
 import { registry } from '@stacksolo/core';
-import { gcpCdktfProvider } from '@stacksolo/plugin-gcp-cdktf';
+import { loadPlugins } from './plugin-loader.service';
 
 const execAsync = promisify(exec);
 
-// Register providers
-registry.registerProvider(gcpCdktfProvider);
+/** Flag to track if plugins have been loaded */
+let pluginsLoaded = false;
 
 export interface DeployResult {
   success: boolean;
@@ -49,6 +49,12 @@ export async function deployConfig(
   };
 
   try {
+    // Load plugins from config (registers providers/resources with registry)
+    if (!pluginsLoaded) {
+      await loadPlugins(config.project.plugins);
+      pluginsLoaded = true;
+    }
+
     // Resolve config to get resources
     const resolved = resolveConfig(config);
 

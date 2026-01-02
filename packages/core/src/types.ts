@@ -125,11 +125,36 @@ export interface DefineAppPatternInput {
   ) => Record<string, string>;
 }
 
+// Plugin service types (for plugins that provide runnable services)
+export interface PluginService {
+  /** Service name (e.g., 'kernel') */
+  name: string;
+  /** Docker image reference (e.g., 'ghcr.io/monkeybarrels/stacksolo-kernel:0.1.0') */
+  image: string;
+  /** Relative path to service source for local dev builds */
+  sourcePath?: string;
+  /** Ports exposed by the service */
+  ports: Record<string, number>;
+  /** Environment variables the service expects */
+  env?: Record<string, string>;
+  /** K8s resource requirements */
+  resources?: {
+    cpu?: string;
+    memory?: string;
+  };
+}
+
 // Plugin types
 export interface Plugin {
+  /** Plugin name (e.g., '@stacksolo/plugin-kernel') */
+  name?: string;
+  /** Plugin version */
+  version?: string;
   providers?: Provider[];
   resources?: ResourceType[];
   patterns?: AppPattern[];
+  /** Services this plugin provides (e.g., kernel container) */
+  services?: PluginService[];
 }
 
 // Define helper input types

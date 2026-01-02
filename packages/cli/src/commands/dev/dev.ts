@@ -14,9 +14,13 @@ import * as path from 'path';
 import type { StackSoloConfig } from '@stacksolo/blueprint';
 import { generateK8sManifests, writeK8sManifests } from '../../generators/k8s';
 import { sanitizeNamespaceName } from '../../generators/k8s/namespace';
+import { loadPlugins, getPluginService, getServiceSourcePath } from '../../services/plugin-loader.service';
 
 // Track port-forward processes for cleanup
 const portForwardProcesses: ChildProcess[] = [];
+
+// Flag to prevent restart during shutdown
+let isShuttingDown = false;
 
 const K8S_OUTPUT_DIR = '.stacksolo/k8s';
 const CONFIG_FILE = '.stacksolo/stacksolo.config.json';
@@ -162,7 +166,7 @@ async function validateSourceDirs(config: StackSoloConfig): Promise<string[]> {
 }
 
 /**
- * Build kernel Docker image from containers/kernel
+ * Build kernel Docker image from plugin service source or containers/kernel
  */
 async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
   if (!config.project.kernel) {
@@ -170,16 +174,35 @@ async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
   }
 
   const kernelName = config.project.kernel.name;
-  const kernelDir = path.join(process.cwd(), 'containers', kernelName);
+
+  // First, try to get kernel from plugin services (for monorepo dev)
+  const kernelService = getPluginService('kernel');
+  let kernelDir: string;
+
+  if (kernelService) {
+    // Get source path from plugin for local development
+    const sourcePath = getServiceSourcePath(kernelService);
+    if (sourcePath) {
+      kernelDir = sourcePath;
+      console.log(chalk.gray(`  Using kernel from plugin: ${kernelDir}`));
+    } else {
+      // Fall back to containers directory
+      kernelDir = path.join(process.cwd(), 'containers', kernelName);
+    }
+  } else {
+    // No plugin, use containers directory
+    kernelDir = path.join(process.cwd(), 'containers', kernelName);
+  }
 
   // Check if kernel directory exists
   try {
     await fs.access(kernelDir);
   } catch {
+    console.log(chalk.gray(`  Kernel directory not found: ${kernelDir}`));
     return false;
   }
 
-  const spinner = ora(`Building kernel image from containers/${kernelName}...`).start();
+  const spinner = ora(`Building kernel image from ${kernelDir}...`).start();
 
   try {
     // Install dependencies first
@@ -219,6 +242,11 @@ async function startEnvironment(options: {
   const projectName = config.project.name;
   const namespace = sanitizeNamespaceName(projectName);
   spinner.succeed(`Project: ${projectName}`);
+
+  // 3. Load plugins from config (registers providers/services)
+  const pluginSpinner = ora('Loading plugins...').start();
+  await loadPlugins(config.project.plugins);
+  pluginSpinner.succeed('Plugins loaded');
 
   // 3. Validate source directories
   const warnings = await validateSourceDirs(config);
@@ -321,6 +349,7 @@ async function startEnvironment(options: {
 
   // Setup graceful shutdown
   const cleanup = async () => {
+    isShuttingDown = true;
     console.log(chalk.gray('\n  Shutting down...\n'));
 
     // Kill all port-forward processes
@@ -357,6 +386,52 @@ interface PortMapping {
   localPort: number;
   targetPort: number;
   protocol: 'http' | 'tcp';
+}
+
+/**
+ * Start a port-forward with auto-restart on failure
+ */
+function startPortForwardWithRestart(
+  namespace: string,
+  service: string,
+  localPort: number,
+  targetPort: number,
+  _name: string
+): ChildProcess {
+  const startForward = (): ChildProcess => {
+    const proc = spawn(
+      'kubectl',
+      ['port-forward', '-n', namespace, `svc/${service}`, `${localPort}:${targetPort}`],
+      { stdio: 'pipe', detached: false }
+    );
+
+    proc.on('exit', (code) => {
+      // Auto-restart if not shutting down and process exited unexpectedly
+      if (!isShuttingDown && code !== 0) {
+        // Wait a bit before restarting to avoid tight loops
+        setTimeout(() => {
+          if (!isShuttingDown) {
+            const newProc = startForward();
+            // Replace in the array
+            const idx = portForwardProcesses.indexOf(proc);
+            if (idx >= 0) {
+              portForwardProcesses[idx] = newProc;
+            } else {
+              portForwardProcesses.push(newProc);
+            }
+          }
+        }, 2000);
+      }
+    });
+
+    proc.on('error', () => {
+      // Errors are handled by exit handler
+    });
+
+    return proc;
+  };
+
+  return startForward();
 }
 
 /**
@@ -417,45 +492,34 @@ async function setupPortForwarding(
     }
   }
 
-  // Start port-forward for each service
+  // Start port-forward for each service with auto-restart
   for (const mapping of portMappings) {
     try {
-      const proc = spawn(
-        'kubectl',
-        ['port-forward', '-n', namespace, `svc/${mapping.service}`, `${mapping.localPort}:${mapping.targetPort}`],
-        { stdio: 'pipe', detached: false }
+      const proc = startPortForwardWithRestart(
+        namespace,
+        mapping.service,
+        mapping.localPort,
+        mapping.targetPort,
+        mapping.name
       );
-
       portForwardProcesses.push(proc);
-
-      // Handle errors silently (service might not exist)
-      proc.on('error', () => {});
     } catch {
       // Ignore errors for individual port forwards
     }
   }
 
-  // Port-forward gateway for unified load balancer access
+  // Port-forward gateway for unified load balancer access with auto-restart
   const hasGateway = config.project.networks?.some((n) => n.loadBalancer?.routes);
   if (hasGateway) {
     try {
-      const gatewayProc = spawn(
-        'kubectl',
-        ['port-forward', '-n', namespace, 'svc/gateway', '8000:8000'],
-        { stdio: 'pipe', detached: false }
+      const gatewayProc = startPortForwardWithRestart(
+        namespace,
+        'gateway',
+        8000,
+        8000,
+        'Load Balancer'
       );
       portForwardProcesses.push(gatewayProc);
-
-      // Log stderr for debugging port-forward failures
-      gatewayProc.stderr?.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg && !msg.includes('Forwarding from')) {
-          console.log(chalk.yellow(`    Gateway port-forward: ${msg}`));
-        }
-      });
-      gatewayProc.on('error', (err) => {
-        console.log(chalk.yellow(`    Gateway port-forward error: ${err.message}`));
-      });
 
       // Add gateway to the mappings for display
       portMappings.unshift({

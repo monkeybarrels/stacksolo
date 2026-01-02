@@ -31,3 +31,20 @@ export { validateConfig, getRequiredEnv } from './validation';
 
 // Storage helpers (GCP)
 export { getStorageClient, uploadFile, downloadFile } from './storage';
+
+// Secrets (GCP Secret Manager)
+export { secrets, getSecret, requireSecret, getSecrets, clearSecretCache, invalidateSecret } from './secrets';
+export type { GetSecretOptions } from './secrets';
+
+// Kernel client (Auth + NATS)
+export { kernel, validateToken, files, events, KernelError, closeConnection, isConnected } from './kernel';
+export type {
+  ValidateTokenResult,
+  ValidateTokenError,
+  ValidateTokenResponse,
+  UploadUrlRequest,
+  UploadUrlResponse,
+  DownloadUrlRequest,
+  DownloadUrlResponse,
+  KernelErrorResponse,
+} from './kernel';

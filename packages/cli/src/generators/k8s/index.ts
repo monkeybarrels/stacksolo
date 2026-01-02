@@ -63,12 +63,14 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
   // 4. Generate kernel (if configured)
   if (config.project.kernel) {
     const kernel = config.project.kernel;
+    // Auto-generate bucket name if not specified (for local dev, this is just a placeholder)
+    const gcsBucket = kernel.gcsBucket || `${config.project.gcpProjectId || 'local'}-${projectName}-kernel-files`;
     manifests.push(
       generateKernelManifests({
         projectName,
         kernelName: kernel.name,
-        firebaseProjectId: kernel.firebaseProjectId,
-        gcsBucket: kernel.gcsBucket,
+        firebaseProjectId: kernel.firebaseProjectId || config.project.gcpProjectId,
+        gcsBucket,
       })
     );
     services.push(kernel.name);

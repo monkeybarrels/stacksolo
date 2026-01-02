@@ -47,14 +47,13 @@ export function generateKernelManifests(options: KernelOptions): GeneratedManife
     { name: 'HTTP_PORT', value: String(httpPort) },
     { name: 'NATS_URL', value: 'nats://localhost:4222' },
     { name: 'FIREBASE_PROJECT_ID', value: options.firebaseProjectId || 'demo-stacksolo' },
+    { name: 'GCP_PROJECT_ID', value: options.firebaseProjectId || 'demo-stacksolo' },
+    { name: 'STACKSOLO_PROJECT_NAME', value: options.projectName },
     // Point to Firebase emulator in the cluster
     { name: 'FIREBASE_AUTH_EMULATOR_HOST', value: 'firebase-emulator:9099' },
+    // GCS bucket (auto-generated if not specified)
+    { name: 'GCS_BUCKET', value: options.gcsBucket || `local-${options.projectName}-kernel-files` },
   ];
-
-  // Add GCS bucket if specified
-  if (options.gcsBucket) {
-    envVars.push({ name: 'GCS_BUCKET', value: options.gcsBucket });
-  }
 
   const deployment: K8sDeployment = {
     apiVersion: 'apps/v1',

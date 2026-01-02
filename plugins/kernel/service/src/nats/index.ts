@@ -3,8 +3,8 @@
  */
 
 import { connect, type NatsConnection } from 'nats';
-import { config } from '../config';
 import { setupFilesHandlers } from './files';
+import { setupEventsHandlers, cleanupEventsHandlers } from './events';
 
 let natsConnection: NatsConnection | null = null;
 
@@ -34,6 +34,9 @@ export async function startNatsHandlers(natsUrl: string): Promise<NatsConnection
   const filesSubs = setupFilesHandlers(natsConnection);
   console.log(`Registered ${filesSubs.length} files handlers`);
 
+  const eventsSubs = setupEventsHandlers(natsConnection);
+  console.log(`Registered ${eventsSubs.length} events handlers`);
+
   return natsConnection;
 }
 
@@ -48,6 +51,9 @@ export function getNatsConnection(): NatsConnection | null {
  * Gracefully drain and close NATS connection
  */
 export async function closeNatsConnection(): Promise<void> {
+  // Cleanup events handlers (stop consumer, clear subscriptions)
+  await cleanupEventsHandlers();
+
   if (natsConnection) {
     await natsConnection.drain();
     natsConnection = null;

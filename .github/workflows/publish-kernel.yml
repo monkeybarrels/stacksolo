@@ -1,0 +1,73 @@
+name: Publish Kernel Image
+
+on:
+  push:
+    paths:
+      - 'plugins/kernel/service/**'
+      - 'plugins/kernel/package.json'
+    branches:
+      - main
+    tags:
+      - 'kernel-v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: monkeybarrels/stacksolo-kernel
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from package.json
+        id: version
+        run: |
+          VERSION=$(node -p "require('./plugins/kernel/package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Kernel version: $VERSION"
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Version tag from package.json
+            type=raw,value=${{ steps.version.outputs.version }}
+            # Latest tag for main branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Git tag (for manual releases)
+            type=ref,event=tag
+
+      - name: Build kernel service
+        working-directory: plugins/kernel/service
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: plugins/kernel/service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64

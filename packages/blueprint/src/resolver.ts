@@ -701,6 +701,8 @@ function resolveCdktfConfig(
   // 4. Kernel (special container at project level)
   const kernelIds: string[] = [];
   const kernelNames: string[] = [];
+  let kernelBucketName: string | undefined;
+  let kernelBucketId: string | undefined;
 
   if (project.kernel) {
     const kernelName = `${projectInfo.name}-${project.kernel.name}`;
@@ -708,8 +710,46 @@ function resolveCdktfConfig(
     kernelIds.push(kernelId);
     kernelNames.push(kernelName);
 
+    // Auto-create a bucket for kernel file operations if not specified
+    kernelBucketName = project.kernel.gcsBucket || `${projectInfo.gcpProjectId}-${projectInfo.name}-kernel-files`;
+    kernelBucketId = `bucket-kernel-files`;
+
+    // Only create the bucket if not explicitly specified (user may have existing bucket)
+    if (!project.kernel.gcsBucket) {
+      resources.push({
+        id: kernelBucketId,
+        type: 'gcp-cdktf:storage_bucket',
+        name: kernelBucketName,
+        config: {
+          name: kernelBucketName,
+          location: projectInfo.region,
+          storageClass: 'STANDARD',
+          uniformBucketLevelAccess: true,
+          versioning: false,
+          cors: [{
+            origin: ['*'],
+            method: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
+            responseHeader: ['Content-Type', 'Authorization'],
+            maxAgeSeconds: 3600,
+          }],
+          projectId: projectInfo.gcpProjectId,
+        },
+        dependsOn: [],
+        network: network.name,
+      });
+    }
+
     // Build image URL from Artifact Registry
     const imageUrl = `${projectInfo.region}-docker.pkg.dev/${projectInfo.gcpProjectId}/${registryName}/${project.kernel.name}:latest`;
+
+    // Kernel environment variables
+    const kernelEnv: Record<string, string> = {
+      FIREBASE_PROJECT_ID: project.kernel.firebaseProjectId || projectInfo.gcpProjectId,
+      GCS_BUCKET: kernelBucketName,
+      GCP_PROJECT_ID: projectInfo.gcpProjectId,
+      STACKSOLO_PROJECT_NAME: projectInfo.name,
+      ...project.kernel.env,
+    };
 
     resources.push({
       id: kernelId,
@@ -720,18 +760,21 @@ function resolveCdktfConfig(
         location: projectInfo.region,
         image: imageUrl,
         port: 8090, // Kernel default port
-        memory: '512Mi',
-        cpu: '1',
-        minInstances: 0,
-        maxInstances: 100,
+        memory: project.kernel.memory || '512Mi',
+        cpu: project.kernel.cpu || '1',
+        minInstances: project.kernel.minInstances ?? 0,
+        maxInstances: project.kernel.maxInstances ?? 100,
         concurrency: 80,
         timeout: '300s',
         vpcConnector: connectorName,
         allowUnauthenticated: true,
+        environmentVariables: kernelEnv,
         projectId: projectInfo.gcpProjectId,
         projectName: projectInfo.name,
       },
-      dependsOn: [connectorId, registryId],
+      dependsOn: project.kernel.gcsBucket
+        ? [connectorId, registryId]
+        : [connectorId, registryId, kernelBucketId],
       network: network.name,
     });
   }

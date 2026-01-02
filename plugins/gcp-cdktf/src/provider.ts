@@ -1,7 +1,7 @@
 import { defineProvider } from '@stacksolo/core';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { vpcNetwork, vpcConnector, cloudFunction, cloudRun, artifactRegistry, loadBalancer, storageWebsite } from './resources/index.js';
+import { vpcNetwork, vpcConnector, cloudFunction, cloudRun, artifactRegistry, loadBalancer, storageBucket, storageWebsite } from './resources/index.js';
 
 const execAsync = promisify(exec);
 
@@ -56,6 +56,7 @@ To authenticate with GCP for CDKTF deployment:
     cloudRun,
     artifactRegistry,
     loadBalancer,
+    storageBucket,
     storageWebsite,
   ],
 });
