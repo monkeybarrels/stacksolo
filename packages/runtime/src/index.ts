@@ -48,3 +48,16 @@ export type {
   DownloadUrlResponse,
   KernelErrorResponse,
 } from './kernel';
+
+// Plugin system
+export {
+  plugins,
+  registerPlugin,
+  getPluginClient,
+  getPluginClientSync,
+  hasPlugin,
+  getRegisteredPlugins,
+  cleanupPlugins,
+  clearPluginRegistry,
+} from './plugins';
+export type { PluginClientConfig, PluginRegistration } from './plugins';

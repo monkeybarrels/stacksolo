@@ -17,6 +17,9 @@ src/
 ├── firestore.ts  # Auto-configured Firestore client
 ├── services.ts   # Inter-service HTTP calls
 ├── storage.ts    # Cloud Storage helpers
+├── secrets.ts    # GCP Secret Manager client
+├── kernel.ts     # Kernel client (auth + files + events)
+├── plugins.ts    # Plugin registration system
 ├── config.ts     # Config loading utilities
 ├── validation.ts # Runtime validation helpers
 └── index.ts      # Public exports
@@ -68,6 +71,45 @@ const response = await services.call('api', '/users', {
 // Typed client
 const api = services.create<MyApiResponse>('api');
 const users = await api.get('/users');
+```
+
+### Plugin System
+Plugins can register their own clients with the runtime:
+
+```typescript
+// In your plugin package (e.g., @my-org/payments-plugin)
+import { registerPlugin } from '@stacksolo/runtime';
+import { PaymentsClient } from './client';
+
+registerPlugin('payments', {
+  createClient: (config) => {
+    const endpoint = config.environment === 'development'
+      ? 'http://localhost:4000'
+      : process.env.PAYMENTS_URL;
+    return new PaymentsClient({ endpoint });
+  },
+  cleanup: (client) => client.close(),
+  envKeys: ['PAYMENTS_URL'],
+});
+```
+
+```typescript
+// In user application code
+import { plugins, getPluginClient } from '@stacksolo/runtime';
+import '@my-org/payments-plugin'; // Side-effect import registers the plugin
+
+// Async access (creates client on first call)
+const payments = await getPluginClient<PaymentsClient>('payments');
+await payments.charge({ amount: 1000 });
+
+// Or use the plugins namespace
+const payments = await plugins.get<PaymentsClient>('payments');
+
+// Sync access (must be initialized first)
+const payments = plugins.getSync<PaymentsClient>('payments');
+
+// Cleanup on shutdown
+await plugins.cleanup();
 ```
 
 ## Environment Variables
@@ -135,6 +177,16 @@ get gatewayUrl(): string {
 3. Use lazy initialization pattern
 4. Export from `index.ts`
 5. Add to README.md
+
+### Plugin Runtime Integration
+Plugins that provide runtime clients should:
+1. Import `registerPlugin` from `@stacksolo/runtime`
+2. Call `registerPlugin()` at module load time (side-effect)
+3. Provide a factory function that creates the client
+4. Optionally provide a cleanup function for graceful shutdown
+5. Document required environment variables via `envKeys`
+
+The plugin system uses lazy initialization - clients are only created when first accessed via `getPluginClient()`.
 
 ### Publishing
 The package auto-publishes to npm when:

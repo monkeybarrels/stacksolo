@@ -258,6 +258,126 @@ const { subscriptions } = await kernel.events.listSubscriptions();
 - `user.*` - Single wildcard (matches `user.created`, `user.updated`)
 - `order.>` - Multi-level wildcard (matches `order.item.added`, `order.payment.completed`)
 
+### Plugin Clients
+
+The runtime has a plugin system that lets StackSolo plugins provide their own clients. This means when you install a plugin, you can use its client through the runtime.
+
+#### What is a Plugin Client?
+
+A plugin client is code that a plugin provides to help you interact with its features. For example, a payments plugin might provide a `PaymentsClient` that lets you charge credit cards.
+
+#### Using a Plugin Client
+
+When you install a plugin that provides a runtime client, you can access it like this:
+
+```typescript
+import { getPluginClient } from '@stacksolo/runtime';
+
+// Import the plugin to register it (this is required!)
+import '@my-org/payments-plugin';
+
+// Get the plugin's client
+const payments = await getPluginClient('payments');
+
+// Now use it
+await payments.charge({ amount: 1000, currency: 'usd' });
+```
+
+**Important:** You must import the plugin package before using `getPluginClient()`. The import registers the plugin with the runtime.
+
+#### Alternative Ways to Access Plugin Clients
+
+```typescript
+import { plugins } from '@stacksolo/runtime';
+import '@my-org/payments-plugin';
+
+// Using the plugins namespace (same as getPluginClient)
+const payments = await plugins.get('payments');
+
+// Check if a plugin is available
+if (plugins.has('payments')) {
+  const payments = await plugins.get('payments');
+}
+
+// See what plugins are registered
+console.log(plugins.list()); // ['payments', 'analytics', ...]
+```
+
+#### TypeScript: Adding Types
+
+For better autocomplete and type checking, pass the client type as a generic:
+
+```typescript
+import { getPluginClient } from '@stacksolo/runtime';
+import type { PaymentsClient } from '@my-org/payments-plugin';
+import '@my-org/payments-plugin';
+
+// Now `payments` has full type information
+const payments = await getPluginClient<PaymentsClient>('payments');
+payments.charge({ amount: 1000 }); // TypeScript knows this method exists
+```
+
+#### Cleanup on Shutdown
+
+If your app needs to gracefully shut down (close connections, etc.), call `plugins.cleanup()`:
+
+```typescript
+import { plugins } from '@stacksolo/runtime';
+
+// When your app is shutting down
+process.on('SIGTERM', async () => {
+  await plugins.cleanup(); // Tells all plugins to clean up
+  process.exit(0);
+});
+```
+
+#### For Plugin Authors
+
+If you're building a plugin that provides a runtime client, here's how to register it:
+
+```typescript
+// In your plugin's main file (e.g., index.ts)
+import { registerPlugin } from '@stacksolo/runtime';
+
+// Create your client class
+class MyServiceClient {
+  constructor(private endpoint: string) {}
+
+  async doSomething() {
+    const response = await fetch(`${this.endpoint}/api/something`);
+    return response.json();
+  }
+
+  close() {
+    // Clean up any connections
+  }
+}
+
+// Register with the runtime
+registerPlugin('my-service', {
+  // Factory function - called when someone first requests the client
+  createClient: (config) => {
+    // config.environment is 'development' or 'production'
+    const endpoint = config.environment === 'development'
+      ? 'http://localhost:3000'
+      : process.env.MY_SERVICE_URL || 'https://my-service.example.com';
+
+    return new MyServiceClient(endpoint);
+  },
+
+  // Optional: cleanup function called during shutdown
+  cleanup: (client) => client.close(),
+
+  // Optional: document what env vars your plugin uses
+  envKeys: ['MY_SERVICE_URL'],
+});
+
+// Export the client type so users can import it
+export type { MyServiceClient };
+```
+
+The `createClient` function is only called once, when the client is first requested. After that, the same instance is reused.
+
 ## Environment Variables
 
 The runtime automatically reads these environment variables:
