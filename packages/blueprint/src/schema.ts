@@ -166,6 +166,29 @@ export interface KernelConfig {
   env?: Record<string, string>;   // Additional environment variables
 }
 
+/**
+ * GCP Kernel Configuration
+ *
+ * A fully GCP-native kernel using Cloud Run + Pub/Sub.
+ * This is the serverless alternative to the NATS-based kernel.
+ * Use this when deploying to GCP without Kubernetes.
+ */
+export interface GcpKernelConfig {
+  name: string;
+  memory?: string;                // Default: '512Mi'
+  cpu?: string;                   // Default: '1'
+  minInstances?: number;          // Default: 0 (scale-to-zero)
+  maxInstances?: number;          // Default: 10
+  firebaseProjectId: string;      // Required: Firebase project for auth validation
+  storageBucket: string;          // Required: GCS bucket for file operations
+  eventRetentionDays?: number;    // Default: 7 - How long to retain events in Pub/Sub
+}
+
+export interface WebAdminConfig {
+  enabled: boolean;               // Whether to start web admin with `stacksolo dev`
+  port?: number;                  // Default: 3000
+}
+
 export interface SubnetConfig {
   name: string;
   ipCidrRange: string;
@@ -259,7 +282,13 @@ export interface ProjectConfig {
   crons?: CronConfig[];
 
   // Kernel (one per project - shared auth/files/events service)
+  // Use `kernel` for NATS-based kernel (requires K8s or container with NATS)
+  // Use `gcpKernel` for GCP-native kernel (Cloud Run + Pub/Sub, serverless)
   kernel?: KernelConfig;
+  gcpKernel?: GcpKernelConfig;
+
+  // Web Admin UI (optional local dev dashboard)
+  webAdmin?: WebAdminConfig;
 
   // Network-scoped resources
   networks?: NetworkConfig[];
@@ -313,7 +342,8 @@ export type ReferenceType =
   | 'queue'
   | 'network'
   | 'ui'
-  | 'kernel';
+  | 'kernel'
+  | 'gcp-kernel';
 
 export interface Reference {
   type: ReferenceType;

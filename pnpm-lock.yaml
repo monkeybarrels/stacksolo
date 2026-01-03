@@ -284,6 +284,28 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  plugins/gcp-kernel:
+    dependencies:
+      '@cdktf/provider-google':
+        specifier: ^14.29.0
+        version: 14.36.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)
+      '@stacksolo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      cdktf:
+        specifier: ^0.20.11
+        version: 0.20.12(constructs@10.4.4)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.27
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@1.21.7)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   plugins/kernel:
     dependencies:
       '@stacksolo/core':

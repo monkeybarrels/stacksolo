@@ -1,0 +1,52 @@
+{
+  "name": "@stacksolo/plugin-gcp-kernel",
+  "version": "0.1.0",
+  "description": "GCP-native kernel plugin for StackSolo (Cloud Run + Pub/Sub)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "service"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stacksolo/core": "workspace:*",
+    "@cdktf/provider-google": "^14.29.0",
+    "cdktf": "^0.20.11"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "@stacksolo/core": ">=0.1.0"
+  },
+  "keywords": [
+    "stacksolo",
+    "plugin",
+    "gcp",
+    "kernel",
+    "cloud-run",
+    "pubsub"
+  ],
+  "author": "MonkeyBarrels",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monkeybarrels/stacksolo.git",
+    "directory": "plugins/gcp-kernel"
+  }
+}

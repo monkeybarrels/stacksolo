@@ -7,3 +7,4 @@ export { artifactRegistry } from './artifact-registry.js';
 export { loadBalancer } from './load-balancer.js';
 export { storageBucket } from './storage-bucket.js';
 export { storageWebsite } from './storage-website.js';
+// GCP Kernel moved to @stacksolo/plugin-gcp-kernel

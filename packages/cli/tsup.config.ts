@@ -12,18 +12,17 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
-  // External: native modules and optional dependencies
+  // External: native modules, optional dependencies, and core (to ensure single registry instance)
   external: [
     'better-sqlite3',   // Native module - must be installed by user
     'kysely',           // Database ORM - peer dependency
     '@stacksolo/api',   // Optional - only needed for `stacksolo serve`
+    '@stacksolo/core',  // MUST be external to share registry with dynamically loaded plugins
   ],
-  // Bundle all workspace packages into the CLI
+  // Bundle all workspace packages into the CLI (except core which must be shared)
   noExternal: [
     '@stacksolo/blueprint',
-    '@stacksolo/core',
     '@stacksolo/registry',
     '@stacksolo/shared',
-    '@stacksolo/plugin-gcp-cdktf',
   ],
 });

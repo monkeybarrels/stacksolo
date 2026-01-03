@@ -97,6 +97,7 @@ function resolveLocalPlugin(monorepoRoot: string, pluginName: string): string | 
   const pluginPaths: Record<string, string> = {
     '@stacksolo/plugin-gcp-cdktf': 'plugins/gcp-cdktf',
     '@stacksolo/plugin-kernel': 'plugins/kernel',
+    '@stacksolo/plugin-gcp-kernel': 'plugins/gcp-kernel',
   };
 
   const relativePath = pluginPaths[pluginName];
@@ -295,7 +296,7 @@ export function getServiceSourcePath(service: PluginService): string | null {
   // Find which plugin owns this service
   for (const [pluginName, plugin] of loadedPlugins.entries()) {
     if (plugin.services?.includes(service)) {
-      // Get the plugin's location
+      // First try monorepo path
       const monorepoRoot = getMonorepoRoot();
       if (monorepoRoot) {
         const localPath = resolveLocalPlugin(monorepoRoot, pluginName);
@@ -305,6 +306,17 @@ export function getServiceSourcePath(service: PluginService): string | null {
             ? path.dirname(path.dirname(localPath))
             : localPath;
           return path.join(pluginDir, service.sourcePath);
+        }
+      }
+
+      // Fall back to node_modules (handles file: references and symlinks)
+      const nodeModulesPath = path.join(process.cwd(), 'node_modules', pluginName);
+      if (fs.existsSync(nodeModulesPath)) {
+        // Resolve symlinks to get the real path
+        const realPath = fs.realpathSync(nodeModulesPath);
+        const servicePath = path.join(realPath, service.sourcePath);
+        if (fs.existsSync(servicePath)) {
+          return servicePath;
         }
       }
     }

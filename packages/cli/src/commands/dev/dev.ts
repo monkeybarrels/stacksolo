@@ -16,8 +16,53 @@ import { generateK8sManifests, writeK8sManifests } from '../../generators/k8s';
 import { sanitizeNamespaceName } from '../../generators/k8s/namespace';
 import { loadPlugins, getPluginService, getServiceSourcePath } from '../../services/plugin-loader.service';
 
+// =============================================================================
+// Kernel Configuration Helper
+// =============================================================================
+
+interface KernelDevConfig {
+  name: string;
+  type: 'nats' | 'gcp';
+  serviceName: string;  // Plugin service name for getPluginService()
+  httpPort: number;
+  natsPort?: number;    // Only for NATS kernel
+  healthPath: string;
+}
+
+/**
+ * Get unified kernel configuration from either kernel or gcpKernel config.
+ * Returns null if no kernel is configured.
+ */
+function getKernelConfig(config: StackSoloConfig): KernelDevConfig | null {
+  if (config.project.kernel) {
+    return {
+      name: config.project.kernel.name,
+      type: 'nats',
+      serviceName: 'kernel',
+      httpPort: 8090,
+      natsPort: 4222,
+      healthPath: '/health',
+    };
+  }
+
+  if (config.project.gcpKernel) {
+    return {
+      name: config.project.gcpKernel.name,
+      type: 'gcp',
+      serviceName: 'gcp-kernel',
+      httpPort: 8080,
+      healthPath: '/health',
+    };
+  }
+
+  return null;
+}
+
 // Track port-forward processes for cleanup
 const portForwardProcesses: ChildProcess[] = [];
+
+// Track web admin process
+let webAdminProcess: ChildProcess | null = null;
 
 // Flag to prevent restart during shutdown
 let isShuttingDown = false;
@@ -155,13 +200,19 @@ async function validateSourceDirs(config: StackSoloConfig): Promise<string[]> {
   const warnings: string[] = [];
   const projectRoot = process.cwd();
 
-  // Check kernel directory if configured
-  if (config.project.kernel) {
-    const kernelDir = path.join(projectRoot, 'containers', config.project.kernel.name);
-    try {
-      await fs.access(kernelDir);
-    } catch {
-      warnings.push(`Kernel directory not found: containers/${config.project.kernel.name}/`);
+  // Check kernel directory if configured (only for local containers, plugins handle their own source)
+  const validateKernelConfig = getKernelConfig(config);
+  if (validateKernelConfig) {
+    // Only warn for containers dir if plugin service doesn't provide the source
+    const kernelService = getPluginService(validateKernelConfig.serviceName);
+    const pluginSourcePath = kernelService ? getServiceSourcePath(kernelService) : null;
+    if (!pluginSourcePath) {
+      const kernelDir = path.join(projectRoot, 'containers', validateKernelConfig.name);
+      try {
+        await fs.access(kernelDir);
+      } catch {
+        warnings.push(`Kernel directory not found: containers/${validateKernelConfig.name}/`);
+      }
     }
   }
 
@@ -191,17 +242,114 @@ async function validateSourceDirs(config: StackSoloConfig): Promise<string[]> {
 }
 
 /**
- * Build kernel Docker image from plugin service source or containers/kernel
+ * Start the web admin UI if enabled in config
+ */
+async function startWebAdmin(config: StackSoloConfig): Promise<number | null> {
+  const webAdmin = config.project.webAdmin;
+  if (!webAdmin?.enabled) {
+    return null;
+  }
+
+  const port = webAdmin.port || 3000;
+  const spinner = ora(`Starting web admin on port ${port}...`).start();
+
+  try {
+    // Try to find the web-admin app in the plugin
+    const webAdminService = getPluginService('web-admin');
+    let appDir: string | null = null;
+
+    if (webAdminService) {
+      const sourcePath = getServiceSourcePath(webAdminService);
+      if (sourcePath) {
+        appDir = sourcePath;
+      }
+    }
+
+    // Fall back to node_modules if not found in plugin
+    if (!appDir) {
+      // Try to find in node_modules
+      const nodeModulesPath = path.join(process.cwd(), 'node_modules', '@stacksolo', 'plugin-web-admin', 'app');
+      try {
+        await fs.access(nodeModulesPath);
+        appDir = nodeModulesPath;
+      } catch {
+        // Not installed
+      }
+    }
+
+    if (!appDir) {
+      spinner.warn('Web admin not found - install @stacksolo/plugin-web-admin or add to plugins');
+      return null;
+    }
+
+    // Check if app is built
+    const buildDir = path.join(appDir, 'build');
+    let useDevMode = false;
+    try {
+      await fs.access(buildDir);
+    } catch {
+      // No build, use dev mode
+      useDevMode = true;
+    }
+
+    const projectPath = process.cwd();
+
+    if (useDevMode) {
+      // Run in dev mode
+      webAdminProcess = spawn('npm', ['run', 'dev', '--', '--port', String(port)], {
+        cwd: appDir,
+        env: {
+          ...process.env,
+          STACKSOLO_PROJECT_PATH: projectPath,
+          PORT: String(port),
+        },
+        stdio: 'pipe',
+        detached: false,
+      });
+    } else {
+      // Run production build
+      webAdminProcess = spawn('node', ['build'], {
+        cwd: appDir,
+        env: {
+          ...process.env,
+          STACKSOLO_PROJECT_PATH: projectPath,
+          PORT: String(port),
+        },
+        stdio: 'pipe',
+        detached: false,
+      });
+    }
+
+    // Wait a moment for startup
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    if (webAdminProcess.exitCode !== null) {
+      spinner.fail('Web admin failed to start');
+      return null;
+    }
+
+    spinner.succeed(`Web admin running at http://localhost:${port}`);
+    return port;
+  } catch (error) {
+    spinner.fail(`Failed to start web admin: ${error instanceof Error ? error.message : error}`);
+    return null;
+  }
+}
+
+/**
+ * Build kernel Docker image from plugin service source or containers directory
+ * Works with both NATS and GCP kernels using unified config
  */
 async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
-  if (!config.project.kernel) {
+  const kernelConfig = getKernelConfig(config);
+  if (!kernelConfig) {
     return false;
   }
 
-  const kernelName = config.project.kernel.name;
+  const { name: kernelName, type: kernelType, serviceName } = kernelConfig;
 
-  // First, try to get kernel from plugin services (for monorepo dev)
-  const kernelService = getPluginService('kernel');
+  // Try to get kernel from plugin services (for monorepo dev)
+  const kernelService = getPluginService(serviceName);
   let kernelDir: string;
 
   if (kernelService) {
@@ -209,7 +357,7 @@ async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
     const sourcePath = getServiceSourcePath(kernelService);
     if (sourcePath) {
       kernelDir = sourcePath;
-      console.log(chalk.gray(`  Using kernel from plugin: ${kernelDir}`));
+      console.log(chalk.gray(`  Using ${kernelType} kernel from plugin: ${kernelDir}`));
     } else {
       // Fall back to containers directory
       kernelDir = path.join(process.cwd(), 'containers', kernelName);
@@ -223,11 +371,11 @@ async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
   try {
     await fs.access(kernelDir);
   } catch {
-    console.log(chalk.gray(`  Kernel directory not found: ${kernelDir}`));
+    console.log(chalk.gray(`  ${kernelType.toUpperCase()} kernel directory not found: ${kernelDir}`));
     return false;
   }
 
-  const spinner = ora(`Building kernel image from ${kernelDir}...`).start();
+  const spinner = ora(`Building ${kernelType} kernel image from ${kernelDir}...`).start();
 
   try {
     // Install dependencies first
@@ -239,11 +387,10 @@ async function buildKernelImage(config: StackSoloConfig): Promise<boolean> {
     // Build Docker image
     execSync(`docker build -t ${kernelName}:dev .`, { cwd: kernelDir, stdio: 'pipe' });
 
-    // Load into Kubernetes (OrbStack automatically shares Docker images)
-    spinner.succeed(`Kernel image built: ${kernelName}:dev`);
+    spinner.succeed(`${kernelType.toUpperCase()} kernel image built: ${kernelName}:dev`);
     return true;
   } catch (error) {
-    spinner.fail(`Failed to build kernel image`);
+    spinner.fail(`Failed to build ${kernelType} kernel image`);
     console.log(chalk.gray(`    Error: ${error instanceof Error ? error.message : error}`));
     return false;
   }
@@ -283,7 +430,7 @@ async function startEnvironment(options: {
     console.log('');
   }
 
-  // 4. Build kernel image if configured
+  // 4. Build kernel image if configured (NATS or GCP)
   await buildKernelImage(config);
 
   // 5. Generate K8s manifests
@@ -335,7 +482,19 @@ async function startEnvironment(options: {
   const portMappings = await setupPortForwarding(namespace, config);
   portForwardSpinner.succeed('Port forwarding active');
 
-  // 8. Print access information
+  // 8. Start web admin if enabled
+  const webAdminPort = await startWebAdmin(config);
+  if (webAdminPort) {
+    portMappings.unshift({
+      name: 'Web Admin',
+      service: 'web-admin',
+      localPort: webAdminPort,
+      targetPort: webAdminPort,
+      protocol: 'http',
+    });
+  }
+
+  // 9. Print access information
   console.log(chalk.bold('\n  Services running:\n'));
 
   // Get pod status
@@ -376,6 +535,15 @@ async function startEnvironment(options: {
   const cleanup = async () => {
     isShuttingDown = true;
     console.log(chalk.gray('\n  Shutting down...\n'));
+
+    // Kill web admin process
+    if (webAdminProcess) {
+      try {
+        webAdminProcess.kill('SIGTERM');
+      } catch {
+        // Ignore
+      }
+    }
 
     // Kill all port-forward processes
     for (const proc of portForwardProcesses) {
@@ -480,13 +648,26 @@ async function setupPortForwarding(
     { name: 'Pub/Sub', service: 'pubsub-emulator', localPort: 8085, targetPort: 8085, protocol: 'tcp' }
   );
 
-  // Kernel ports (if configured)
-  if (config.project.kernel) {
-    const kernelName = config.project.kernel.name;
-    portMappings.push(
-      { name: 'Kernel HTTP', service: kernelName, localPort: 8090, targetPort: 8090, protocol: 'http' },
-      { name: 'Kernel NATS', service: kernelName, localPort: 4222, targetPort: 4222, protocol: 'tcp' }
-    );
+  // Kernel ports (if configured) - works for both NATS and GCP kernels
+  const kernelConfig = getKernelConfig(config);
+  if (kernelConfig) {
+    const label = kernelConfig.type === 'nats' ? 'Kernel' : 'GCP Kernel';
+    portMappings.push({
+      name: `${label} HTTP`,
+      service: kernelConfig.name,
+      localPort: kernelConfig.httpPort,
+      targetPort: kernelConfig.httpPort,
+      protocol: 'http',
+    });
+    if (kernelConfig.natsPort) {
+      portMappings.push({
+        name: `${label} NATS`,
+        service: kernelConfig.name,
+        localPort: kernelConfig.natsPort,
+        targetPort: kernelConfig.natsPort,
+        protocol: 'tcp',
+      });
+    }
   }
 
   // Dynamic ports for functions and UIs from config
@@ -626,10 +807,15 @@ async function showRoutes(): Promise<void> {
   const config = await loadConfig();
 
   // Show kernel if configured
-  if (config.project.kernel) {
-    console.log(chalk.bold('  Kernel:\n'));
-    console.log(`    ${chalk.cyan('●')} ${config.project.kernel.name}`);
-    console.log(chalk.gray(`      Source: containers/${config.project.kernel.name}/`));
+  const kernelConfig = getKernelConfig(config);
+  if (kernelConfig) {
+    const label = kernelConfig.type === 'nats' ? 'Kernel (NATS)' : 'Kernel (GCP)';
+    const detail = kernelConfig.type === 'nats'
+      ? `Source: containers/${kernelConfig.name}/`
+      : 'Type: GCP-native (Cloud Run + Pub/Sub)';
+    console.log(chalk.bold(`  ${label}:\n`));
+    console.log(`    ${chalk.cyan('●')} ${kernelConfig.name}`);
+    console.log(chalk.gray(`      ${detail}`));
     console.log('');
   }
 
@@ -690,9 +876,13 @@ async function showRoutes(): Promise<void> {
 
   console.log(chalk.bold('  Local Access:\n'));
   console.log(`    ${chalk.cyan('Gateway:')}          http://localhost:8000`);
-  if (config.project.kernel) {
-    console.log(`    ${chalk.cyan('Kernel HTTP:')}      http://localhost:8090`);
-    console.log(`    ${chalk.cyan('Kernel NATS:')}      localhost:4222`);
+  const routesKernelConfig = getKernelConfig(config);
+  if (routesKernelConfig) {
+    const label = routesKernelConfig.type === 'nats' ? 'Kernel HTTP' : 'GCP Kernel';
+    console.log(`    ${chalk.cyan(`${label}:`)}${' '.repeat(14 - label.length)}http://localhost:${routesKernelConfig.httpPort}`);
+    if (routesKernelConfig.natsPort) {
+      console.log(`    ${chalk.cyan('Kernel NATS:')}      localhost:${routesKernelConfig.natsPort}`);
+    }
   }
   console.log('');
 }
@@ -782,9 +972,11 @@ async function checkHealth(): Promise<void> {
     healthChecks.push({ name: 'Gateway', port: 8000, path: '/health' });
   }
 
-  // Kernel
-  if (config.project.kernel) {
-    healthChecks.push({ name: 'Kernel HTTP', port: 8090, path: '/health' });
+  // Kernel (NATS or GCP)
+  const healthKernelConfig = getKernelConfig(config);
+  if (healthKernelConfig) {
+    const label = healthKernelConfig.type === 'nats' ? 'Kernel HTTP' : 'GCP Kernel';
+    healthChecks.push({ name: label, port: healthKernelConfig.httpPort, path: healthKernelConfig.healthPath });
   }
 
   // Firebase emulator
@@ -883,13 +1075,14 @@ async function showPorts(): Promise<void> {
   // Pub/Sub
   expectedPorts.push({ name: 'Pub/Sub', service: 'pubsub-emulator', port: 8085 });
 
-  // Kernel
-  if (config.project.kernel) {
-    const kernelName = config.project.kernel.name;
-    expectedPorts.push(
-      { name: 'Kernel HTTP', service: kernelName, port: 8090 },
-      { name: 'Kernel NATS', service: kernelName, port: 4222 }
-    );
+  // Kernel (NATS or GCP)
+  const portsKernelConfig = getKernelConfig(config);
+  if (portsKernelConfig) {
+    const label = portsKernelConfig.type === 'nats' ? 'Kernel' : 'GCP Kernel';
+    expectedPorts.push({ name: `${label} HTTP`, service: portsKernelConfig.name, port: portsKernelConfig.httpPort });
+    if (portsKernelConfig.natsPort) {
+      expectedPorts.push({ name: `${label} NATS`, service: portsKernelConfig.name, port: portsKernelConfig.natsPort });
+    }
   }
 
   // Functions and UIs
@@ -978,12 +1171,13 @@ async function showServiceNames(): Promise<void> {
 
   const services: Array<{ name: string; type: string; k8sName: string }> = [];
 
-  // Kernel
-  if (config.project.kernel) {
+  // Kernel (NATS or GCP)
+  const svcKernelConfig = getKernelConfig(config);
+  if (svcKernelConfig) {
     services.push({
-      name: config.project.kernel.name,
-      type: 'kernel',
-      k8sName: config.project.kernel.name,
+      name: svcKernelConfig.name,
+      type: svcKernelConfig.type === 'nats' ? 'kernel' : 'gcp-kernel',
+      k8sName: svcKernelConfig.name,
     });
   }
 
@@ -1032,6 +1226,7 @@ async function showServiceNames(): Promise<void> {
   for (const svc of services) {
     const typeColor =
       svc.type === 'kernel' ? chalk.magenta :
+      svc.type === 'gcp-kernel' ? chalk.magenta :
       svc.type === 'function' ? chalk.green :
       svc.type === 'container' ? chalk.blue :
       svc.type === 'ui' ? chalk.cyan :

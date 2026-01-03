@@ -616,9 +616,15 @@ function resolveCdktfConfig(
   const containers = network.containers || [];
   const uis = network.uis || [];
   const hasKernelConfig = !!project.kernel;
+  const hasGcpKernelConfig = !!project.gcpKernel;
 
-  if (functions.length === 0 && containers.length === 0 && uis.length === 0 && !hasKernelConfig) {
-    throw new Error('CDKTF backend requires at least one function, container, kernel, or UI');
+  if (functions.length === 0 && containers.length === 0 && uis.length === 0 && !hasKernelConfig && !hasGcpKernelConfig) {
+    throw new Error('CDKTF backend requires at least one function, container, kernel, gcpKernel, or UI');
+  }
+
+  // Can't use both kernel types
+  if (hasKernelConfig && hasGcpKernelConfig) {
+    throw new Error('Cannot use both `kernel` and `gcpKernel`. Choose one: NATS-based (kernel) or GCP-native (gcpKernel).');
   }
 
   // Check for unsupported resources
@@ -676,10 +682,11 @@ function resolveCdktfConfig(
     network: network.name,
   });
 
-  // 3. Artifact Registry (if containers or kernel exist)
+  // 3. Artifact Registry (if containers or NATS kernel exist - GCP kernel doesn't need registry)
   const registryName = `${projectInfo.name}-registry`;
   const registryId = `registry-${network.name}`;
   const hasKernel = !!project.kernel;
+  const hasGcpKernel = !!project.gcpKernel;
 
   if (containers.length > 0 || hasKernel) {
     resources.push({
@@ -775,6 +782,34 @@ function resolveCdktfConfig(
       dependsOn: project.kernel.gcsBucket
         ? [connectorId, registryId]
         : [connectorId, registryId, kernelBucketId],
+      network: network.name,
+    });
+  }
+
+  // 4b. GCP Kernel (serverless Cloud Run + Pub/Sub - no NATS)
+  if (hasGcpKernel && project.gcpKernel) {
+    const gcpKernelName = `${projectInfo.name}-${project.gcpKernel.name}`;
+    const gcpKernelId = `gcp-kernel-${project.gcpKernel.name}`;
+    kernelIds.push(gcpKernelId);
+    kernelNames.push(gcpKernelName);
+
+    resources.push({
+      id: gcpKernelId,
+      type: 'gcp-cdktf:gcp_kernel',
+      name: gcpKernelName,
+      config: {
+        name: project.gcpKernel.name,
+        location: projectInfo.region,
+        memory: project.gcpKernel.memory || '512Mi',
+        cpu: project.gcpKernel.cpu || '1',
+        minInstances: project.gcpKernel.minInstances ?? 0,
+        maxInstances: project.gcpKernel.maxInstances ?? 10,
+        firebaseProjectId: project.gcpKernel.firebaseProjectId,
+        storageBucket: project.gcpKernel.storageBucket,
+        eventRetentionDays: project.gcpKernel.eventRetentionDays ?? 7,
+        projectId: projectInfo.gcpProjectId,
+      },
+      dependsOn: [connectorId],
       network: network.name,
     });
   }

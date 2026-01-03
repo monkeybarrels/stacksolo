@@ -19,6 +19,7 @@ export type {
   CronConfig,
   KernelConfig,
   UIConfig,
+  WebAdminConfig,
   ServiceAccountConfig,
   SubnetConfig,
   FirewallRuleConfig,

@@ -75,6 +75,14 @@ const REFERENCE_OUTPUTS: Record<ReferenceType, Record<string, string>> = {
     authUrl: 'authUrl',
     natsUrl: 'natsUrl',
   },
+  'gcp-kernel': {
+    default: 'url',
+    url: 'url',
+    authUrl: 'authUrl',
+    filesUrl: 'filesUrl',
+    eventsUrl: 'eventsUrl',
+    eventsTopic: 'eventsTopic',
+  },
 };
 
 /**
@@ -101,7 +109,7 @@ export function parseReference(ref: string): Reference | null {
   // Validate type
   const validTypes: ReferenceType[] = [
     'secret', 'database', 'bucket', 'cache',
-    'container', 'function', 'topic', 'queue', 'network', 'ui', 'kernel'
+    'container', 'function', 'topic', 'queue', 'network', 'ui', 'kernel', 'gcp-kernel'
   ];
 
   if (!validTypes.includes(typeStr as ReferenceType)) {
