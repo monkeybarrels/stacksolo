@@ -304,6 +304,3 @@ export const access = {
 
 // Register the access extension on the kernel
 extendKernel('access', access);
-
-// Export types for consumers
-export type { AccessCheckResult, AccessGrantResult, AccessRevokeResult, AccessListResult, AccessMember };
