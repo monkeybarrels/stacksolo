@@ -1,0 +1,60 @@
+{
+  "name": "@stacksolo/plugin-web-admin",
+  "version": "0.1.0",
+  "description": "Web-based admin UI for StackSolo - dashboard, deploy controls, local dev management, and config editor",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm run build:app && pnpm run build:plugin",
+    "build:plugin": "tsup src/index.ts --format esm --dts --target node20",
+    "build:app": "cd app && pnpm run build",
+    "dev": "tsup src/index.ts --format esm --dts --target node20 --watch",
+    "clean": "rm -rf dist && rm -rf app/.svelte-kit && rm -rf app/build",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@stacksolo/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "files": [
+    "dist",
+    "app/build",
+    "app/package.json",
+    "README.md"
+  ],
+  "keywords": [
+    "stacksolo",
+    "plugin",
+    "web-admin",
+    "dashboard",
+    "admin-ui",
+    "infrastructure",
+    "devops",
+    "kubernetes",
+    "sveltekit"
+  ],
+  "author": "MonkeyBarrels",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkeybarrels/stacksolo.git",
+    "directory": "plugins/web-admin"
+  },
+  "bugs": {
+    "url": "https://github.com/monkeybarrels/stacksolo/issues"
+  },
+  "homepage": "https://stacksolo.dev",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
