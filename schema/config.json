@@ -39,7 +39,7 @@
         },
         "backend": {
           "type": "string",
-          "enum": ["pulumi", "cdktf"],
+          "enum": ["cdktf"],
           "default": "cdktf",
           "description": "Infrastructure backend to use for deployment"
         },
@@ -93,6 +93,10 @@
           "type": "array",
           "items": { "$ref": "#/$defs/NetworkConfig" },
           "description": "VPC networks with containers, functions, databases, etc."
+        },
+        "zeroTrust": {
+          "$ref": "#/$defs/ZeroTrustConfig",
+          "description": "Zero Trust access control using Identity-Aware Proxy (IAP)"
         }
       },
       "required": ["name", "region", "gcpProjectId"],
@@ -601,6 +605,92 @@
         }
       },
       "required": ["name"],
+      "additionalProperties": false
+    },
+    "ZeroTrustConfig": {
+      "type": "object",
+      "description": "Zero Trust access control using Identity-Aware Proxy (IAP)",
+      "properties": {
+        "iapWebBackends": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/IapWebBackendConfig" },
+          "description": "IAP-protected web backends (Google login required)"
+        },
+        "iapTunnels": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/IapTunnelConfig" },
+          "description": "IAP tunnels for SSH/TCP access to VMs"
+        }
+      },
+      "additionalProperties": false
+    },
+    "IapWebBackendConfig": {
+      "type": "object",
+      "description": "Protect a web backend with Identity-Aware Proxy",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Configuration name"
+        },
+        "backend": {
+          "type": "string",
+          "description": "Backend name to protect (must match a function, container, or ui)"
+        },
+        "allowedMembers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "IAM members allowed access (user:email, group:email, domain:name)",
+          "examples": [["domain:mycompany.com", "user:contractor@gmail.com"]]
+        },
+        "supportEmail": {
+          "type": "string",
+          "description": "Email shown on OAuth consent screen"
+        },
+        "applicationTitle": {
+          "type": "string",
+          "description": "Title shown on OAuth consent screen"
+        }
+      },
+      "required": ["name", "backend", "allowedMembers", "supportEmail"],
+      "additionalProperties": false
+    },
+    "IapTunnelConfig": {
+      "type": "object",
+      "description": "SSH/TCP tunnel access to VMs via Identity-Aware Proxy",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Configuration name"
+        },
+        "targetInstance": {
+          "type": "string",
+          "description": "VM instance name"
+        },
+        "targetZone": {
+          "type": "string",
+          "description": "Zone where the instance is located",
+          "examples": ["us-central1-a"]
+        },
+        "allowedMembers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "IAM members allowed access (user:email, group:email, domain:name)",
+          "examples": [["group:developers@mycompany.com"]]
+        },
+        "allowedPorts": {
+          "type": "array",
+          "items": { "type": "number" },
+          "default": [22],
+          "description": "Ports allowed through the tunnel",
+          "examples": [[22, 3306, 5432]]
+        },
+        "network": {
+          "type": "string",
+          "default": "default",
+          "description": "VPC network name for firewall rules"
+        }
+      },
+      "required": ["name", "targetInstance", "targetZone", "allowedMembers"],
       "additionalProperties": false
     }
   }

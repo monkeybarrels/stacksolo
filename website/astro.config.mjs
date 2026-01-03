@@ -41,6 +41,7 @@ export default defineConfig({
 					label: 'Plugins',
 					items: [
 						{ label: 'GCP CDKTF', slug: 'plugins/gcp-cdktf' },
+						{ label: 'Zero Trust', slug: 'plugins/zero-trust' },
 						{ label: 'Kernel', slug: 'plugins/kernel' },
 						{ label: 'GCP Kernel', slug: 'plugins/gcp-kernel' },
 					],

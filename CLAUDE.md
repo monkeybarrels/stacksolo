@@ -272,6 +272,61 @@ These defaults must be consistent between scaffold generators and K8s manifest g
 - `packages/api/src/repositories/interfaces.ts` - Repository interfaces
 - `plugins/gcp-cdktf/src/provider.ts` - GCP CDKTF provider definition
 - `plugins/gcp-cdktf/src/resources/` - GCP CDKTF resource type definitions
+
+## Plugin Development & Documentation Requirements
+
+**CRITICAL: When creating or modifying plugins, ALWAYS complete these documentation steps before the PR:**
+
+### 1. Plugin Documentation (Required)
+
+Every plugin MUST have:
+- `README.md` - User-facing documentation with examples
+- `CLAUDE.md` - AI assistant guide for the plugin
+- `docs/` folder with:
+  - `quickstart.md` - 5-minute getting started guide
+  - One doc per resource type (e.g., `iap-tunnel.md`)
+  - `examples.md` - Real-world usage patterns
+
+### 2. Schema Updates (Required)
+
+If the plugin adds new config options, update `schema/config.json`:
+- Add new config types to `$defs` section
+- Reference new types from `ProjectConfig.properties`
+- Include descriptions, examples, and defaults for all properties
+- Keep schema in sync with website documentation
+
+### 3. Website Documentation (Required)
+
+After plugin changes, update the project website (`website/`):
+- Add plugin to `website/astro.config.mjs` sidebar under the Plugins section
+- Create plugin page at `website/src/content/docs/plugins/<plugin-name>.md`
+- Update `website/src/content/docs/reference/config-schema.md` with new config options
+- Update any feature pages that reference the plugin
+- Add usage examples to relevant sections
+
+### 4. Self-Documentation Checklist
+
+Before completing any plugin work, verify:
+- [ ] Plugin README.md exists and is complete
+- [ ] Plugin CLAUDE.md exists for AI assistants
+- [ ] Plugin docs/ folder has quickstart and examples
+- [ ] `schema/config.json` updated with new config types
+- [ ] Website plugin page created at `website/src/content/docs/plugins/<plugin-name>.md`
+- [ ] Website config-schema.md updated with new options
+- [ ] Plugin added to sidebar in `website/astro.config.mjs`
+- [ ] All documentation uses simple, clear language
+- [ ] Examples are copy-paste ready
+
+### 5. Documentation Style
+
+- Keep it dead simple - users should understand in 30 seconds
+- Lead with the simplest example
+- Use tables for configuration options
+- Include "After deployment" sections showing how end users access resources
+- No jargon without explanation
+
+This ensures documentation is live and complete when the PR deploys.
+
 # === END USER INSTRUCTIONS ===
 
 

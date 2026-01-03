@@ -375,6 +375,65 @@ Port for the admin UI.
 
 ---
 
+## Zero Trust (IAP)
+
+Protect backend services with Identity-Aware Proxy. Requires `@stacksolo/plugin-zero-trust`.
+
+### zeroTrust.iapWebBackends
+
+Protect web backends with Google login.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Configuration name |
+| `backend` | `string` | Yes | Backend name to protect (must match a function, container, or ui) |
+| `allowedMembers` | `string[]` | Yes | Who can access (see formats below) |
+| `supportEmail` | `string` | Yes | Email for OAuth consent screen |
+| `applicationTitle` | `string` | No | Title shown on login screen |
+
+#### allowedMembers formats
+
+```
+user:alice@example.com     # Individual user
+group:team@example.com     # Google Group
+domain:example.com         # Entire domain
+```
+
+### zeroTrust.iapTunnels
+
+SSH/TCP access to VMs without public IPs.
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Configuration name |
+| `targetInstance` | `string` | Yes | VM instance name |
+| `targetZone` | `string` | Yes | Zone (e.g., `us-central1-a`) |
+| `allowedMembers` | `string[]` | Yes | Who can access |
+| `allowedPorts` | `number[]` | No | Ports to allow (default: `[22]`) |
+| `network` | `string` | No | VPC network name (default: `default`) |
+
+```json
+{
+  "zeroTrust": {
+    "iapWebBackends": [{
+      "name": "admin-protection",
+      "backend": "admin",
+      "allowedMembers": ["domain:mycompany.com"],
+      "supportEmail": "admin@mycompany.com"
+    }],
+    "iapTunnels": [{
+      "name": "dev-ssh",
+      "targetInstance": "dev-vm",
+      "targetZone": "us-central1-a",
+      "allowedMembers": ["group:developers@mycompany.com"],
+      "allowedPorts": [22, 3306]
+    }]
+  }
+}
+```
+
+---
+
 ## Example: Full Config
 
 ```json
@@ -415,4 +474,106 @@ Port for the admin UI.
     }]
   }
 }
+```
+
+---
+
+## Example: Full Config with Zero Trust
+
+Public API + protected admin panel + SSH access to dev VM.
+
+```json
+{
+  "project": {
+    "name": "my-saas",
+    "gcpProjectId": "my-gcp-project",
+    "region": "us-central1",
+    "backend": "cdktf",
+    "plugins": [
+      "@stacksolo/plugin-gcp-cdktf",
+      "@stacksolo/plugin-zero-trust"
+    ],
+
+    "networks": [{
+      "name": "main",
+      "functions": [
+        { "name": "api", "entryPoint": "api", "allowUnauthenticated": true }
+      ],
+      "containers": [
+        { "name": "admin", "port": 3000 }
+      ],
+      "uis": [
+        { "name": "docs", "framework": "vue" }
+      ],
+      "loadBalancer": {
+        "name": "gateway",
+        "routes": [
+          { "path": "/api/*", "backend": "api" },
+          { "path": "/admin/*", "backend": "admin" },
+          { "path": "/*", "backend": "docs" }
+        ]
+      }
+    }],
+
+    "zeroTrust": {
+      "iapWebBackends": [
+        {
+          "name": "admin-protection",
+          "backend": "admin",
+          "allowedMembers": [
+            "domain:mycompany.com",
+            "user:contractor@gmail.com"
+          ],
+          "supportEmail": "admin@mycompany.com",
+          "applicationTitle": "Admin Dashboard"
+        }
+      ],
+      "iapTunnels": [
+        {
+          "name": "dev-ssh",
+          "targetInstance": "dev-vm",
+          "targetZone": "us-central1-a",
+          "allowedMembers": ["group:engineering@mycompany.com"],
+          "allowedPorts": [22]
+        },
+        {
+          "name": "db-access",
+          "targetInstance": "prod-db",
+          "targetZone": "us-central1-a",
+          "allowedMembers": ["group:dba@mycompany.com"],
+          "allowedPorts": [5432]
+        }
+      ]
+    }
+  }
+}
+```
+
+**What this creates:**
+
+| Resource | Access |
+|----------|--------|
+| `/api/*` | Public (anyone) |
+| `/admin/*` | IAP protected (mycompany.com domain + contractor) |
+| `/*` (docs) | Public (anyone) |
+| `dev-vm` SSH | IAP tunnel (engineering group) |
+| `prod-db` PostgreSQL | IAP tunnel (dba group) |
+
+**After deployment:**
+
+```bash
+# Public API - just works
+curl https://my-saas.example.com/api/health
+
+# Admin panel - visit in browser, Google login required
+open https://my-saas.example.com/admin
+
+# SSH to dev VM
+gcloud compute ssh dev-vm --zone=us-central1-a --tunnel-through-iap
+
+# Connect to prod database
+gcloud compute start-iap-tunnel prod-db 5432 \
+  --zone=us-central1-a \
+  --local-host-port=localhost:5432
+psql -h localhost -p 5432 -U postgres
 ```
