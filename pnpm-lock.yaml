@@ -403,6 +403,21 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  plugins/zero-trust-auth:
+    devDependencies:
+      '@stacksolo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@stacksolo/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      tsup:
+        specifier: ^8.0.1
+        version: 8.5.1(jiti@1.21.7)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
 packages:
 
   7zip-bin@5.2.0:
