@@ -7,26 +7,58 @@ The `@stacksolo/plugin-zero-trust-auth` enables dynamic authorization for Zero T
 
 **Requires:** [`@stacksolo/plugin-zero-trust`](/plugins/zero-trust/) and [`@stacksolo/plugin-gcp-kernel`](/plugins/gcp-kernel/)
 
+## Runtime Usage
+
+**The easiest way to use access control.** Just import the runtime and use `kernel.access`:
+
+```typescript
+import { kernel } from '@stacksolo/runtime';
+import '@stacksolo/plugin-zero-trust-auth/runtime';
+
+// Check access
+const { hasAccess } = await kernel.access.check('admin-dashboard', userEmail, 'read');
+
+// Grant access
+await kernel.access.grant('admin-dashboard', 'bob@example.com', ['read', 'write'], currentUser);
+
+// Revoke access
+await kernel.access.revoke('admin-dashboard', 'bob@example.com', currentUser);
+
+// List members
+const { members } = await kernel.access.list('admin-dashboard');
+```
+
+## Express Middleware
+
+Built-in middleware for protecting routes:
+
+```typescript
+import { kernel } from '@stacksolo/runtime';
+import '@stacksolo/plugin-zero-trust-auth/runtime';
+
+// Protect routes with one line
+app.get('/admin', kernel.access.requireAccess('admin-dashboard', 'read'), handler);
+app.post('/admin/users', kernel.access.requireAccess('admin-dashboard', 'write'), handler);
+app.delete('/admin/users/:id', kernel.access.requireAccess('admin-dashboard', 'admin'), handler);
+```
+
+The middleware:
+- Gets user email from IAP header (`x-goog-authenticated-user-email`)
+- Checks access via kernel
+- Sets `req.user.email` and `req.userPermissions`
+- Returns 401/403 if unauthorized
+
+---
+
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Request Flow                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│   User → IAP (Authentication) → Your App → Kernel (Check)   │
-│                                                              │
-│   1. IAP verifies Google identity (who you are)             │
-│   2. Your app calls kernel.access.check()                   │
-│   3. Kernel checks Firestore (what you can do)              │
-│   4. Access granted or denied                               │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+User → IAP (Google login) → Your App → kernel.access.check() → Firestore
 ```
 
-- **IAP** handles authentication (Google login)
+- **IAP** handles authentication (who you are)
 - **Firestore** stores access grants (via kernel)
-- **Your app** checks authorization at runtime
+- **Your app** calls `kernel.access.*` methods via the runtime
 
 ## Quick Start
 
@@ -185,108 +217,6 @@ GET /access/resources
 {
   "resources": ["admin-dashboard", "api/v1/users", "reports"]
 }
-```
-
----
-
-## Using in Your App
-
-### Check Access in Express
-
-```typescript
-import express from 'express';
-
-const app = express();
-const KERNEL_URL = process.env.KERNEL_URL || 'http://kernel:8080';
-
-// Middleware to check access
-async function requireAccess(resource: string, permission?: string) {
-  return async (req, res, next) => {
-    // Get user email from IAP header
-    const userEmail = req.headers['x-goog-authenticated-user-email']
-      ?.toString()
-      .replace('accounts.google.com:', '');
-
-    if (!userEmail) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
-
-    // Check access via kernel
-    const response = await fetch(`${KERNEL_URL}/access/check`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resource, member: userEmail, permission })
-    });
-
-    const result = await response.json();
-
-    if (!result.hasAccess) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    // Attach permissions to request for later use
-    req.userPermissions = result.permissions;
-    next();
-  };
-}
-
-// Protected routes
-app.get('/admin', requireAccess('admin-dashboard', 'read'), (req, res) => {
-  res.json({ message: 'Welcome to admin' });
-});
-
-app.post('/admin/users', requireAccess('admin-dashboard', 'write'), (req, res) => {
-  res.json({ message: 'User created' });
-});
-
-app.delete('/admin/users/:id', requireAccess('admin-dashboard', 'admin'), (req, res) => {
-  res.json({ message: 'User deleted' });
-});
-```
-
-### Admin Panel for Access Management
-
-```typescript
-// Grant access to a new user
-app.post('/admin/access/grant', requireAccess('admin-dashboard', 'admin'), async (req, res) => {
-  const { email, permissions } = req.body;
-  const grantedBy = req.headers['x-goog-authenticated-user-email']
-    ?.toString()
-    .replace('accounts.google.com:', '');
-
-  await fetch(`${KERNEL_URL}/access/grant`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      resource: 'admin-dashboard',
-      member: email,
-      permissions,
-      grantedBy
-    })
-  });
-
-  res.json({ granted: true });
-});
-
-// Revoke access
-app.post('/admin/access/revoke', requireAccess('admin-dashboard', 'admin'), async (req, res) => {
-  const { email } = req.body;
-  const revokedBy = req.headers['x-goog-authenticated-user-email']
-    ?.toString()
-    .replace('accounts.google.com:', '');
-
-  await fetch(`${KERNEL_URL}/access/revoke`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      resource: 'admin-dashboard',
-      member: email,
-      revokedBy
-    })
-  });
-
-  res.json({ revoked: true });
-});
 ```
 
 ---

@@ -658,13 +658,80 @@ export function isConnected(): boolean {
 }
 
 // =============================================================================
+// Kernel Extension System
+// =============================================================================
+
+/**
+ * Registry for kernel extensions added by plugins
+ */
+const kernelExtensions = new Map<string, unknown>();
+
+/**
+ * Register a kernel extension
+ *
+ * Plugins call this to add their methods to the kernel namespace.
+ * Users can then access them via `kernel.<namespace>.<method>()`.
+ *
+ * @param namespace - Extension namespace (e.g., 'access', 'payments')
+ * @param extension - Object containing the extension methods
+ *
+ * @example
+ * ```ts
+ * // In plugin (e.g., zero-trust-auth)
+ * import { extendKernel } from '@stacksolo/runtime';
+ *
+ * extendKernel('access', {
+ *   check: async (resource, member, permission) => { ... },
+ *   grant: async (resource, member, permissions, grantedBy) => { ... },
+ *   revoke: async (resource, member, revokedBy) => { ... },
+ *   list: async (resource) => { ... },
+ * });
+ *
+ * // In user code
+ * import { kernel } from '@stacksolo/runtime';
+ *
+ * const result = await kernel.access.check('admin-dashboard', userEmail, 'read');
+ * ```
+ */
+export function extendKernel<T extends object>(namespace: string, extension: T): void {
+  if (kernelExtensions.has(namespace)) {
+    console.warn(`Kernel extension '${namespace}' is being overwritten`);
+  }
+  kernelExtensions.set(namespace, extension);
+}
+
+/**
+ * Get a kernel extension by namespace
+ *
+ * @param namespace - Extension namespace
+ * @returns The extension object or undefined if not registered
+ */
+export function getKernelExtension<T = unknown>(namespace: string): T | undefined {
+  return kernelExtensions.get(namespace) as T | undefined;
+}
+
+/**
+ * Check if a kernel extension is registered
+ */
+export function hasKernelExtension(namespace: string): boolean {
+  return kernelExtensions.has(namespace);
+}
+
+/**
+ * List all registered kernel extension namespaces
+ */
+export function getKernelExtensions(): string[] {
+  return Array.from(kernelExtensions.keys());
+}
+
+// =============================================================================
 // Kernel Export
 // =============================================================================
 
 /**
- * Kernel client for StackSolo applications
+ * Base kernel object with core methods
  */
-export const kernel = {
+const kernelBase = {
   // Auth (HTTP)
   validateToken,
   authMiddleware,
@@ -678,4 +745,80 @@ export const kernel = {
   // Connection
   closeConnection,
   isConnected,
+
+  // Extension management
+  extend: extendKernel,
+  getExtension: getKernelExtension,
+  hasExtension: hasKernelExtension,
+  listExtensions: getKernelExtensions,
 };
+
+/**
+ * Kernel client for StackSolo applications
+ *
+ * Provides core functionality (auth, files, events) plus
+ * extension namespaces added by plugins.
+ *
+ * @example Core usage:
+ * ```ts
+ * import { kernel } from '@stacksolo/runtime';
+ *
+ * // Auth
+ * const result = await kernel.validateToken(token);
+ *
+ * // Files
+ * const { uploadUrl } = await kernel.files.getUploadUrl('path/to/file', 'image/png');
+ *
+ * // Events
+ * await kernel.events.publish('user.created', { userId: '123' });
+ * ```
+ *
+ * @example With extensions (added by plugins):
+ * ```ts
+ * import { kernel } from '@stacksolo/runtime';
+ * import '@stacksolo/plugin-zero-trust-auth/runtime'; // Registers kernel.access
+ *
+ * // Access control (from zero-trust-auth)
+ * const { hasAccess } = await kernel.access.check('admin', userEmail, 'read');
+ * await kernel.access.grant('admin', 'bob@example.com', ['read'], currentUser);
+ * ```
+ */
+export const kernel: typeof kernelBase & Record<string, unknown> = new Proxy(kernelBase, {
+  get(target, prop: string) {
+    // Return base property if it exists
+    if (prop in target) {
+      return (target as Record<string, unknown>)[prop];
+    }
+
+    // Check for extension
+    const extension = kernelExtensions.get(prop);
+    if (extension !== undefined) {
+      return extension;
+    }
+
+    // Return undefined for unknown properties
+    return undefined;
+  },
+
+  has(target, prop: string) {
+    return prop in target || kernelExtensions.has(prop);
+  },
+
+  ownKeys(target) {
+    return [...Object.keys(target), ...kernelExtensions.keys()];
+  },
+
+  getOwnPropertyDescriptor(target, prop: string) {
+    if (prop in target) {
+      return Object.getOwnPropertyDescriptor(target, prop);
+    }
+    if (kernelExtensions.has(prop)) {
+      return {
+        configurable: true,
+        enumerable: true,
+        value: kernelExtensions.get(prop),
+      };
+    }
+    return undefined;
+  },
+});

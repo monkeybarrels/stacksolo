@@ -36,8 +36,21 @@ export { getStorageClient, uploadFile, downloadFile } from './storage';
 export { secrets, getSecret, requireSecret, getSecrets, clearSecretCache, invalidateSecret } from './secrets';
 export type { GetSecretOptions } from './secrets';
 
-// Kernel client (Auth + NATS)
-export { kernel, validateToken, files, events, KernelError, closeConnection, isConnected } from './kernel';
+// Kernel client (Auth + NATS + Extensions)
+export {
+  kernel,
+  validateToken,
+  files,
+  events,
+  KernelError,
+  closeConnection,
+  isConnected,
+  // Extension system (for plugins to add methods)
+  extendKernel,
+  getKernelExtension,
+  hasKernelExtension,
+  getKernelExtensions,
+} from './kernel';
 export type {
   ValidateTokenResult,
   ValidateTokenError,

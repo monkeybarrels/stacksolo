@@ -15,6 +15,68 @@ This plugin enables dynamic access control on top of IAP-protected resources. Wh
 
 - `@stacksolo/plugin-zero-trust` - For IAP protection
 - `@stacksolo/plugin-gcp-kernel` - For Firestore access API
+- `@stacksolo/runtime` - For the kernel client
+
+## Runtime Usage
+
+**This is the main way to use access control.** Just import the runtime and use `kernel.access`:
+
+```typescript
+import { kernel } from '@stacksolo/runtime';
+import '@stacksolo/plugin-zero-trust-auth/runtime';
+
+// Check if user has access
+const { hasAccess, permissions } = await kernel.access.check(
+  'admin-dashboard',
+  'bob@example.com',
+  'read'
+);
+
+// Grant access
+await kernel.access.grant(
+  'admin-dashboard',
+  'bob@example.com',
+  ['read', 'write'],
+  'alice@example.com'  // who granted it
+);
+
+// Revoke access
+await kernel.access.revoke(
+  'admin-dashboard',
+  'bob@example.com',
+  'alice@example.com'  // who revoked it
+);
+
+// List members with access
+const { members } = await kernel.access.list('admin-dashboard');
+
+// List all protected resources
+const { resources } = await kernel.access.resources();
+```
+
+## Express Middleware
+
+Use the built-in middleware to protect routes:
+
+```typescript
+import express from 'express';
+import { kernel } from '@stacksolo/runtime';
+import '@stacksolo/plugin-zero-trust-auth/runtime';
+
+const app = express();
+
+// Protect a route - requires 'read' permission
+app.get('/admin', kernel.access.requireAccess('admin-dashboard', 'read'), (req, res) => {
+  // req.user.email is set by the middleware
+  // req.userPermissions contains the user's permissions
+  res.json({ user: req.user, permissions: req.userPermissions });
+});
+
+// Different permissions for different routes
+app.get('/admin/users', kernel.access.requireAccess('admin-dashboard', 'read'), handler);
+app.post('/admin/users', kernel.access.requireAccess('admin-dashboard', 'write'), handler);
+app.delete('/admin/users/:id', kernel.access.requireAccess('admin-dashboard', 'admin'), handler);
+```
 
 ## Quick Start
 
