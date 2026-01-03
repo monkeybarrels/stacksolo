@@ -2,7 +2,9 @@
 
 ## Overview
 
-Build a documentation and marketing website for StackSolo at stacksolo.dev using Astro + Firebase Hosting.
+Build an open source documentation website for StackSolo at stacksolo.dev using Astro + Firebase Hosting.
+
+**This is 100% open source** - no pricing tiers, no sales, just community documentation.
 
 ## Tech Stack
 
@@ -14,7 +16,7 @@ Build a documentation and marketing website for StackSolo at stacksolo.dev using
 
 ```
 stacksolo.dev/
-├── /                     # Landing page (marketing)
+├── /                     # Landing page (what is StackSolo)
 ├── /docs/                # Documentation hub
 │   ├── /getting-started/ # Quickstart, installation
 │   ├── /guides/          # User guides
@@ -192,7 +194,7 @@ jobs:
 
 ### Hero Section
 ```
-Deploy cloud infrastructure without the complexity
+Open source infrastructure for solo developers
 
 StackSolo turns simple JSON configs into production-ready
 GCP deployments. No Terraform expertise required.
@@ -200,13 +202,11 @@ GCP deployments. No Terraform expertise required.
 [Get Started] [View on GitHub]
 ```
 
-### Features Grid
-1. **Simple Config** - Write JSON, not HCL
-2. **Real Infrastructure** - Generates Terraform/CDKTF you can audit
-3. **Local First** - Runs on your machine, no SaaS dependency
-4. **Plugin System** - Extend with custom resources
-5. **Scale to Zero** - GCP-native kernel for serverless deployments
-6. **Eject Anytime** - No vendor lock-in
+### What is StackSolo?
+- Open source CLI tool
+- Generates real Terraform/CDKTF code you own
+- Runs locally - no SaaS, no accounts
+- Plugin-based architecture
 
 ### Code Example
 Show before/after:
@@ -220,6 +220,11 @@ stacksolo init my-app
 cd my-app
 stacksolo dev
 ```
+
+### Community
+- GitHub: github.com/monkeybarrels/stacksolo
+- Issues & discussions welcome
+- Contributions encouraged
 
 ## Firebase Setup Steps
 
