@@ -49,7 +49,10 @@ export const accessControl = defineResource({
     adminRoles: ['admin'],
   },
   generate: (config) => {
-    const { name, resources, firestoreCollection, adminRoles } = config;
+    const name = config.name as string;
+    const resources = (config.resources || []) as string[];
+    const firestoreCollection = (config.firestoreCollection || 'kernel_access') as string;
+    const adminRoles = (config.adminRoles || ['admin']) as string[];
 
     // Generate Firestore security rules
     const firestoreRules = `
@@ -79,8 +82,8 @@ service cloud.firestore {
       'import { ProjectIamMember } from "@cdktf/provider-google/lib/project-iam-member";',
     ];
 
-    const resourceList = resources.map((r: string) => `"${r}"`).join(', ');
-    const adminRolesList = adminRoles.map((r: string) => `"${r}"`).join(', ');
+    const resourceList = resources.map((r) => `"${r}"`).join(', ');
+    const adminRolesList = adminRoles.map((r) => `"${r}"`).join(', ');
 
     const code = `
 // Zero Trust Auth: Access Control for ${name}
