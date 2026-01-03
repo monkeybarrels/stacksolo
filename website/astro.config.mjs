@@ -11,6 +11,7 @@ export default defineConfig({
 			description: 'Open source infrastructure for solo developers. Turn simple JSON configs into production-ready GCP deployments.',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/monkeybarrels/stacksolo' },
+				{ icon: 'external', label: 'npm', href: 'https://www.npmjs.com/package/@stacksolo/cli' },
 			],
 						customCss: ['./src/styles/custom.css'],
 			sidebar: [
