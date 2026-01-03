@@ -1,0 +1,57 @@
+// @ts-check
+import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+
+// https://astro.build/config
+export default defineConfig({
+	site: 'https://stacksolo.dev',
+	integrations: [
+		starlight({
+			title: 'StackSolo',
+			description: 'Open source infrastructure for solo developers. Turn simple JSON configs into production-ready GCP deployments.',
+			social: [
+				{ icon: 'github', label: 'GitHub', href: 'https://github.com/monkeybarrels/stacksolo' },
+			],
+						customCss: ['./src/styles/custom.css'],
+			sidebar: [
+				{
+					label: 'Getting Started',
+					items: [
+						{ label: 'Introduction', slug: 'getting-started/introduction' },
+						{ label: 'Installation', slug: 'getting-started/installation' },
+						{ label: 'Local Development', slug: 'guides/local-development' },
+						{ label: 'Deployment', slug: 'guides/deployment' },
+					],
+				},
+				{
+					label: 'Guides',
+					items: [
+						{ label: 'Configuration', slug: 'guides/configuration' },
+					],
+				},
+				{
+					label: 'Reference',
+					items: [
+						{ label: 'CLI Commands', slug: 'reference/cli' },
+						{ label: 'Config Schema', slug: 'reference/config-schema' },
+					],
+				},
+				{
+					label: 'Plugins',
+					items: [
+						{ label: 'GCP CDKTF', slug: 'plugins/gcp-cdktf' },
+						{ label: 'Kernel', slug: 'plugins/kernel' },
+						{ label: 'GCP Kernel', slug: 'plugins/gcp-kernel' },
+					],
+				},
+				{
+					label: 'Architecture',
+					items: [
+						{ label: 'Overview', slug: 'architecture/overview' },
+						{ label: 'Plugin Development', slug: 'architecture/plugin-development' },
+					],
+				},
+			],
+		}),
+	],
+});

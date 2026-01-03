@@ -1,0 +1,216 @@
+---
+title: Deployment
+description: Deploy your StackSolo project to Google Cloud
+---
+
+This guide covers deploying your StackSolo project to Google Cloud Platform.
+
+## Quick Deploy
+
+```bash
+stacksolo deploy
+```
+
+That's it. StackSolo handles everything else.
+
+## What Happens During Deploy
+
+1. **Validation** - Config is validated
+2. **Code Generation** - CDKTF/Terraform code is generated
+3. **Build** - Container images are built (if any)
+4. **Apply** - Terraform applies the infrastructure
+5. **Output** - URLs and connection strings are displayed
+
+## Deploy Options
+
+### Preview Changes
+
+See what would change without actually deploying:
+
+```bash
+stacksolo deploy --preview
+```
+
+### Skip Image Building
+
+If you've already built and pushed images:
+
+```bash
+stacksolo deploy --skip-build
+```
+
+### Specific Image Tag
+
+Deploy with a specific container image tag:
+
+```bash
+stacksolo deploy --tag v1.2.3
+```
+
+### Force Recreate
+
+Force delete and recreate resources that are stuck:
+
+```bash
+stacksolo deploy --force
+```
+
+## Generated Code
+
+StackSolo generates infrastructure code in `.stacksolo/cdktf/`:
+
+```
+.stacksolo/
+├── cdktf/
+│   ├── main.ts           # Infrastructure definition
+│   ├── cdktf.json        # CDKTF config
+│   └── terraform/        # Generated Terraform
+└── stacksolo.config.json
+```
+
+You can inspect this code to see exactly what will be created.
+
+## Eject
+
+If you want to manage the infrastructure yourself:
+
+1. The generated code in `.stacksolo/cdktf/` is yours
+2. You can run `cdktf deploy` directly
+3. Or export to plain Terraform with `cdktf synth`
+
+## State Management
+
+Terraform state is stored locally in `.stacksolo/cdktf/terraform.tfstate`.
+
+For team environments, consider configuring remote state:
+
+```json
+{
+  "project": {
+    "backend": "cdktf",
+    "stateBackend": {
+      "bucket": "my-terraform-state",
+      "prefix": "stacksolo"
+    }
+  }
+}
+```
+
+## CI/CD
+
+### GitHub Actions Example
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install StackSolo
+        run: npm install -g @stacksolo/cli
+
+      - name: Setup GCP Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy
+        run: stacksolo deploy
+```
+
+## Monitoring Deployment
+
+### Check Status
+
+```bash
+stacksolo status
+```
+
+### View Outputs
+
+```bash
+stacksolo output
+```
+
+### View Logs
+
+```bash
+stacksolo logs --since 1h
+```
+
+## Rollback
+
+StackSolo doesn't have built-in rollback, but you can:
+
+1. Revert your config changes
+2. Run `stacksolo deploy` again
+3. Or use Terraform directly: `cd .stacksolo/cdktf && terraform apply`
+
+## Destroy
+
+Remove all deployed resources:
+
+```bash
+# With confirmation
+stacksolo destroy
+
+# Skip confirmation
+stacksolo destroy --force
+```
+
+**Warning:** This permanently deletes all resources including databases.
+
+## Troubleshooting
+
+### "Permission denied"
+
+Make sure you're authenticated:
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+```
+
+### "API not enabled"
+
+Enable required APIs:
+
+```bash
+gcloud services enable cloudfunctions.googleapis.com
+gcloud services enable cloudbuild.googleapis.com
+gcloud services enable run.googleapis.com
+gcloud services enable compute.googleapis.com
+```
+
+### "Resource already exists"
+
+The resource may have been created outside of StackSolo. Options:
+
+1. Import it: `cd .stacksolo/cdktf && terraform import ...`
+2. Delete it manually in GCP Console
+3. Use `--force` to recreate
+
+### State out of sync
+
+Reset and reimport:
+
+```bash
+stacksolo reset
+stacksolo deploy --refresh
+```
+
+## Next Steps
+
+- [CLI Reference](/reference/cli/) - All deploy options
+- [Configuration Guide](/guides/configuration/) - Config reference

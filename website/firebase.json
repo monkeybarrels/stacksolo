@@ -1,0 +1,38 @@
+{
+  "hosting": {
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/404.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/schema/**",
+        "headers": [
+          { "key": "Access-Control-Allow-Origin", "value": "*" },
+          { "key": "Access-Control-Allow-Methods", "value": "GET" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Cache-Control", "value": "public, max-age=3600" }
+        ]
+      },
+      {
+        "source": "**/*.@(js|css|woff2)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      }
+    ],
+    "redirects": [
+      {
+        "source": "/docs",
+        "destination": "/getting-started/introduction/",
+        "type": 301
+      }
+    ],
+    "cleanUrls": true,
+    "trailingSlash": true
+  }
+}

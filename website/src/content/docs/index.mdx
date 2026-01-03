@@ -1,0 +1,99 @@
+---
+title: StackSolo
+description: Open source infrastructure automation for solo developers.
+template: splash
+hero:
+  title: Run the Whole Stack. Solo.
+  tagline: Own your infrastructure from application to deployment. No DevOps team required.
+  actions:
+    - text: Take Control of Your Stack
+      link: /getting-started/introduction/
+      icon: right-arrow
+      variant: primary
+    - text: GitHub
+      link: https://github.com/monkeybarrels/stacksolo
+      icon: github
+      variant: minimal
+---
+
+<div class="intro">
+
+Solo developers are forced to become their own DevOps team. Terraform, IAM, networking, load balancers, CI/CD. The pressure builds. StackSolo gives you structure to operate at depth without losing control.
+
+</div>
+
+---
+
+## One config. One command. Deployed.
+
+```json
+{
+  "project": {
+    "name": "my-app",
+    "gcpProjectId": "my-gcp-project",
+    "networks": [{
+      "functions": [{ "name": "api" }],
+      "uis": [{ "name": "web" }],
+      "loadBalancer": {
+        "routes": [
+          { "path": "/api/*", "backend": "api" },
+          { "path": "/*", "backend": "web" }
+        ]
+      }
+    }]
+  }
+}
+```
+
+```bash
+stacksolo deploy
+```
+
+Cloud Functions, Firebase Hosting, Load Balancer, IAM, networking. All handled.
+
+---
+
+## Commands
+
+<div class="crew-grid">
+
+<div class="crew-member">
+<strong>stacksolo init</strong>
+<p>Configures your GCP project, enables APIs, creates your config file.</p>
+</div>
+
+<div class="crew-member">
+<strong>stacksolo dev</strong>
+<p>Local Kubernetes stack with Firebase emulators. Test before you ship.</p>
+</div>
+
+<div class="crew-member">
+<strong>stacksolo deploy</strong>
+<p>Generates CDKTF, runs Terraform, deploys to GCP. Production ready.</p>
+</div>
+
+<div class="crew-member">
+<strong>stacksolo destroy</strong>
+<p>Tears down all infrastructure cleanly when you're done.</p>
+</div>
+
+</div>
+
+---
+
+## You stay in control.
+
+StackSolo generates real infrastructure code in `.stacksolo/cdktf/`. Inspect it. Modify it. Eject whenever you want.
+
+No SaaS. No accounts. Runs on your machine with your credentials. Your infrastructure stays yours.
+
+---
+
+## Open source. MIT licensed.
+
+```bash
+npm install -g @stacksolo/cli
+stacksolo init
+```
+
+[View on GitHub](https://github.com/monkeybarrels/stacksolo)

@@ -1,0 +1,43 @@
+name: Deploy Website
+
+on:
+  push:
+    paths:
+      - 'website/**'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: website
+        run: pnpm install
+
+      - name: Build website
+        working-directory: website
+        run: pnpm build
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_STACKSOLO_WEBSITE }}
+          channelId: live
+          projectId: stacksolo-website
+          entryPoint: website
