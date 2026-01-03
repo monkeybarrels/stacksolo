@@ -5,6 +5,8 @@ description: Secure access without VPNs using Identity-Aware Proxy
 
 The `@stacksolo/plugin-zero-trust` provides Zero Trust network access using Google Cloud's Identity-Aware Proxy (IAP). Secure your internal resources without VPNs - users authenticate with their Google identity.
 
+**Requires:** `@stacksolo/plugin-gcp-kernel` or `@stacksolo/plugin-kernel` for dynamic access control via Firestore.
+
 ## Quick Start
 
 Add to your `stacksolo.config.json`:
@@ -14,8 +16,13 @@ Add to your `stacksolo.config.json`:
   "project": {
     "plugins": [
       "@stacksolo/plugin-gcp-cdktf",
+      "@stacksolo/plugin-gcp-kernel",
       "@stacksolo/plugin-zero-trust"
     ],
+    "gcpKernel": {
+      "name": "kernel",
+      "firebaseProjectId": "your-firebase-project"
+    },
     "networks": [{
       "name": "main",
       "containers": [{ "name": "admin", "port": 3000 }],

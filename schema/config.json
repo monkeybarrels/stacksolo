@@ -609,8 +609,14 @@
     },
     "ZeroTrustConfig": {
       "type": "object",
-      "description": "Zero Trust access control using Identity-Aware Proxy (IAP)",
+      "description": "Zero Trust access control using Identity-Aware Proxy (IAP). Requires kernel or gcpKernel config for dynamic access control.",
       "properties": {
+        "accessProvider": {
+          "type": "string",
+          "enum": ["kernel"],
+          "default": "kernel",
+          "description": "Access provider for dynamic authorization. Requires kernel or gcpKernel config."
+        },
         "iapWebBackends": {
           "type": "array",
           "items": { "$ref": "#/$defs/IapWebBackendConfig" },
