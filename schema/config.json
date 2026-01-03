@@ -97,6 +97,10 @@
         "zeroTrust": {
           "$ref": "#/$defs/ZeroTrustConfig",
           "description": "Zero Trust access control using Identity-Aware Proxy (IAP)"
+        },
+        "zeroTrustAuth": {
+          "$ref": "#/$defs/ZeroTrustAuthConfig",
+          "description": "Dynamic authorization for Zero Trust using Firestore (requires kernel and zeroTrust)"
         }
       },
       "required": ["name", "region", "gcpProjectId"],
@@ -609,14 +613,8 @@
     },
     "ZeroTrustConfig": {
       "type": "object",
-      "description": "Zero Trust access control using Identity-Aware Proxy (IAP). Requires kernel or gcpKernel config for dynamic access control.",
+      "description": "Zero Trust access control using Identity-Aware Proxy (IAP)",
       "properties": {
-        "accessProvider": {
-          "type": "string",
-          "enum": ["kernel"],
-          "default": "kernel",
-          "description": "Access provider for dynamic authorization. Requires kernel or gcpKernel config."
-        },
         "iapWebBackends": {
           "type": "array",
           "items": { "$ref": "#/$defs/IapWebBackendConfig" },
@@ -697,6 +695,74 @@
         }
       },
       "required": ["name", "targetInstance", "targetZone", "allowedMembers"],
+      "additionalProperties": false
+    },
+    "ZeroTrustAuthConfig": {
+      "type": "object",
+      "description": "Dynamic authorization for Zero Trust using Firestore. Requires gcpKernel and zeroTrust to be configured.",
+      "properties": {
+        "protectedResources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProtectedResourceConfig" },
+          "description": "Resources to protect with dynamic Firestore-based authorization"
+        },
+        "defaultPermissions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["read"],
+          "description": "Default permissions granted when access is granted",
+          "examples": [["read", "write", "admin"]]
+        },
+        "auditLogging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable audit logging of access changes to Firestore"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProtectedResourceConfig": {
+      "type": "object",
+      "description": "A resource protected by dynamic Firestore authorization",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Resource identifier (e.g., 'admin-dashboard', 'api/v1/users')"
+        },
+        "backend": {
+          "type": "string",
+          "description": "Backend to protect (must match a function, container, or ui)"
+        },
+        "initialMembers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/InitialMemberConfig" },
+          "description": "Initial members to grant access on deployment"
+        },
+        "requirePermission": {
+          "type": "string",
+          "description": "Permission required to access this resource",
+          "examples": ["read", "write", "admin"]
+        }
+      },
+      "required": ["name", "backend"],
+      "additionalProperties": false
+    },
+    "InitialMemberConfig": {
+      "type": "object",
+      "description": "Initial member to grant access on deployment",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Member email address"
+        },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Permissions to grant",
+          "examples": [["read", "write", "admin"]]
+        }
+      },
+      "required": ["email", "permissions"],
       "additionalProperties": false
     }
   }

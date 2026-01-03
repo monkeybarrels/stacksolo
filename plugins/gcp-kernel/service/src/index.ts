@@ -6,6 +6,7 @@
  * - Cloud Pub/Sub for event messaging (replaces NATS/JetStream)
  * - Cloud Storage for file operations
  * - Firebase Admin SDK for token validation
+ * - Firestore for access control
  *
  * Endpoints:
  * - GET  /health          - Health check
@@ -20,6 +21,11 @@
  * - POST /events/subscribe    - Register HTTP push subscription
  * - POST /events/unsubscribe  - Remove subscription
  * - GET  /events/subscriptions - List subscriptions
+ * - POST /access/grant        - Grant access to a resource
+ * - POST /access/revoke       - Revoke access from a resource
+ * - POST /access/check        - Check if member has access
+ * - GET  /access/list         - List members with access
+ * - GET  /access/resources    - List all protected resources
  */
 
 import express from 'express';
@@ -30,6 +36,7 @@ import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { filesRouter } from './routes/files.js';
 import { eventsRouter } from './routes/events.js';
+import { accessRouter } from './routes/access.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8080', 10);
@@ -51,6 +58,7 @@ app.use('/health', healthRouter);
 app.use('/auth', authRouter);
 app.use('/files', filesRouter);
 app.use('/events', eventsRouter);
+app.use('/access', accessRouter);
 
 // Root endpoint
 app.get('/', (_req, res) => {
@@ -63,6 +71,7 @@ app.get('/', (_req, res) => {
       auth: '/auth/validate',
       files: '/files/*',
       events: '/events/*',
+      access: '/access/*',
     },
   });
 });

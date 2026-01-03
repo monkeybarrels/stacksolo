@@ -11,6 +11,7 @@ import { generateFunctionManifests } from './function';
 import { generateUIManifests } from './ui';
 import { generateFirebaseEmulator, generatePubSubEmulator } from './emulators';
 import { generateKernelManifests, generateNatsEmulator } from './kernel';
+import { generateGcpKernelManifests } from './gcp-kernel';
 import { generateGateway } from './gateway';
 import { createPortAllocator } from './ports';
 
@@ -21,6 +22,7 @@ export * from './function';
 export * from './ui';
 export * from './emulators';
 export * from './kernel';
+export * from './gcp-kernel';
 export * from './gateway';
 export * from './ports';
 export * from './runtime';
@@ -77,7 +79,26 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
     servicePortMap[kernel.name] = 8090; // Kernel HTTP port
   }
 
-  // 4. Process networks for functions and UIs
+  // 4b. Generate GCP kernel (if configured) - mutually exclusive with NATS kernel
+  if (config.project.gcpKernel) {
+    const gcpKernel = config.project.gcpKernel;
+    const gcpProjectId = config.project.gcpProjectId || gcpKernel.firebaseProjectId;
+    manifests.push(
+      generateGcpKernelManifests({
+        projectName,
+        kernelName: gcpKernel.name,
+        httpPort: 8080,
+        firebaseProjectId: gcpKernel.firebaseProjectId,
+        gcsBucket: gcpKernel.storageBucket,
+        pubsubEventsTopic: `${projectName}-events`,
+        gcpProjectId,
+      })
+    );
+    services.push(gcpKernel.name);
+    servicePortMap[gcpKernel.name] = 8080; // GCP kernel HTTP port
+  }
+
+  // 5. Process networks for functions and UIs
   for (const network of config.project.networks || []) {
     // Generate function manifests
     for (const func of network.functions || []) {

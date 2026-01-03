@@ -277,15 +277,31 @@ These defaults must be consistent between scaffold generators and K8s manifest g
 
 **CRITICAL: When creating or modifying plugins, ALWAYS complete these documentation steps before the PR:**
 
-### 1. Plugin Documentation (Required)
+### 1. Plugin Documentation (MANDATORY)
 
-Every plugin MUST have:
-- `README.md` - User-facing documentation with examples
-- `CLAUDE.md` - AI assistant guide for the plugin
-- `docs/` folder with:
-  - `quickstart.md` - 5-minute getting started guide
-  - One doc per resource type (e.g., `iap-tunnel.md`)
-  - `examples.md` - Real-world usage patterns
+Every plugin MUST have these files in the plugin root directory:
+
+| File | Purpose | Required |
+|------|---------|----------|
+| `README.md` | User-facing documentation with quick start and examples | **YES** |
+| `CLAUDE.md` | AI assistant guide for maintaining the plugin | **YES** |
+| `docs/` folder | Detailed documentation (quickstart, examples, per-resource docs) | Optional |
+
+**README.md must include:**
+- What the plugin does (one paragraph)
+- Dependencies/requirements
+- Quick start example (copy-paste ready)
+- Configuration reference table
+- Usage examples
+
+**CLAUDE.md must include:**
+- Quick reference table of resources
+- Architecture overview
+- Code generation details
+- Common patterns with examples
+- File structure diagram
+- Dependencies list
+- Coding practices specific to the plugin
 
 ### 2. Schema Updates (Required)
 
