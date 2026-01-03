@@ -17,6 +17,12 @@ import { parseConfig, resolveConfig, topologicalSort } from '@stacksolo/blueprin
 import { getRegistry } from '@stacksolo/registry';
 import { deployConfig } from '../../services/deploy.service';
 import { createCommandLogger, logFullError, getLogPath } from '../../logger';
+import {
+  runPreflightCheck,
+  promptConflictResolution as promptPreflightResolution,
+  executeResolution,
+  PreflightResult,
+} from '../../services/preflight.service';
 
 const execAsync = promisify(exec);
 
@@ -79,6 +85,9 @@ export const deployCommand = new Command('deploy')
   .option('--refresh', 'Refresh Pulumi state and import existing resources')
   .option('--force', 'Force delete and recreate conflicting resources')
   .option('-y, --yes', 'Skip confirmation prompts')
+  .option('--skip-preflight', 'Skip pre-flight conflict detection')
+  .option('--import-conflicts', 'Automatically import conflicting resources')
+  .option('--delete-conflicts', 'Automatically delete conflicting resources')
   .action(async (options) => {
     await runDeploy(options);
   });
@@ -91,6 +100,9 @@ interface DeployOptions {
   refresh?: boolean;
   force?: boolean;
   yes?: boolean;
+  skipPreflight?: boolean;
+  importConflicts?: boolean;
+  deleteConflicts?: boolean;
 }
 
 interface RetryContext {
@@ -364,6 +376,154 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
     }
 
     console.log('');
+  }
+
+  // Pre-flight conflict detection (only on first attempt, not destroy, not force)
+  if (!options.destroy && !options.skipPreflight && !options.force && retryCount === 0) {
+    const preflightSpinner = ora('Checking for resource conflicts...').start();
+
+    try {
+      const preflightResult = await runPreflightCheck(
+        {
+          project: {
+            name: config.project.name,
+            gcpProjectId: config.project.gcpProjectId,
+            region: config.project.region,
+          },
+        },
+        process.cwd()
+      );
+
+      if (preflightResult.hasConflicts) {
+        preflightSpinner.warn(`Found ${preflightResult.conflicts.length} resource conflict(s)`);
+
+        // Handle auto-import or auto-delete options
+        if (options.importConflicts) {
+          const importResult = await executeResolution(
+            { action: 'import_all' },
+            preflightResult.conflicts,
+            {
+              project: {
+                name: config.project.name,
+                gcpProjectId: config.project.gcpProjectId,
+                region: config.project.region,
+              },
+            },
+            process.cwd()
+          );
+          if (!importResult.success) {
+            console.log(chalk.yellow(`\n  ${importResult.message}\n`));
+            console.log(chalk.gray('  Continuing with deploy anyway...\n'));
+          }
+        } else if (options.deleteConflicts) {
+          console.log(chalk.yellow('\n  Auto-delete requires --force flag for safety.\n'));
+          console.log(chalk.gray('  Use: stacksolo deploy --force --delete-conflicts\n'));
+          return;
+        } else {
+          // Interactive prompt
+          const resolution = await promptPreflightResolution(preflightResult.conflicts);
+
+          if (resolution.action === 'cancel') {
+            console.log(chalk.gray('\n  Deploy cancelled.\n'));
+            return;
+          }
+
+          if (resolution.action === 'list_details') {
+            // Show details and re-prompt
+            await executeResolution(
+              resolution,
+              preflightResult.conflicts,
+              {
+                project: {
+                  name: config.project.name,
+                  gcpProjectId: config.project.gcpProjectId,
+                  region: config.project.region,
+                },
+              },
+              process.cwd()
+            );
+            const newResolution = await promptPreflightResolution(preflightResult.conflicts);
+            if (newResolution.action === 'cancel') {
+              console.log(chalk.gray('\n  Deploy cancelled.\n'));
+              return;
+            }
+            if (newResolution.action === 'change_prefix') {
+              await executeResolution(
+                newResolution,
+                preflightResult.conflicts,
+                {
+                  project: {
+                    name: config.project.name,
+                    gcpProjectId: config.project.gcpProjectId,
+                    region: config.project.region,
+                  },
+                },
+                process.cwd()
+              );
+              return;
+            }
+            await executeResolution(
+              newResolution,
+              preflightResult.conflicts,
+              {
+                project: {
+                  name: config.project.name,
+                  gcpProjectId: config.project.gcpProjectId,
+                  region: config.project.region,
+                },
+              },
+              process.cwd()
+            );
+          } else if (resolution.action === 'change_prefix') {
+            await executeResolution(
+              resolution,
+              preflightResult.conflicts,
+              {
+                project: {
+                  name: config.project.name,
+                  gcpProjectId: config.project.gcpProjectId,
+                  region: config.project.region,
+                },
+              },
+              process.cwd()
+            );
+            return;
+          } else {
+            // import_all or delete_all
+            const result = await executeResolution(
+              resolution,
+              preflightResult.conflicts,
+              {
+                project: {
+                  name: config.project.name,
+                  gcpProjectId: config.project.gcpProjectId,
+                  region: config.project.region,
+                },
+              },
+              process.cwd()
+            );
+            if (!result.success && resolution.action !== 'import_all') {
+              console.log(chalk.red(`\n  ${result.message}\n`));
+              return;
+            }
+          }
+        }
+      } else {
+        preflightSpinner.succeed('No resource conflicts detected');
+      }
+
+      // Show any scan errors as warnings
+      if (preflightResult.errors.length > 0) {
+        console.log(chalk.yellow('\n  Some resource scans failed (non-critical):'));
+        for (const err of preflightResult.errors) {
+          console.log(chalk.gray(`    - ${err}`));
+        }
+        console.log();
+      }
+    } catch (error) {
+      preflightSpinner.warn('Could not complete pre-flight check (continuing anyway)');
+      console.log(chalk.gray(`    ${error}\n`));
+    }
   }
 
   // Confirm for destroy (only on first attempt)
