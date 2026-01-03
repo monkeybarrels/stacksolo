@@ -1,0 +1,607 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://stacksolo.dev/schema/config.json",
+  "title": "StackSolo Configuration",
+  "description": "Configuration schema for StackSolo projects",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
+    "version": {
+      "type": "string",
+      "description": "Configuration version"
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectConfig"
+    }
+  },
+  "required": ["project"],
+  "additionalProperties": false,
+  "$defs": {
+    "ProjectConfig": {
+      "type": "object",
+      "description": "Main project configuration",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Project name (used for resource naming)"
+        },
+        "region": {
+          "type": "string",
+          "description": "GCP region for deployment",
+          "examples": ["us-central1", "us-east1", "europe-west1"]
+        },
+        "gcpProjectId": {
+          "type": "string",
+          "description": "Google Cloud project ID"
+        },
+        "backend": {
+          "type": "string",
+          "enum": ["pulumi", "cdktf"],
+          "default": "cdktf",
+          "description": "Infrastructure backend to use for deployment"
+        },
+        "plugins": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Plugins to load (npm package names)",
+          "examples": [["@stacksolo/plugin-gcp-cdktf", "@stacksolo/plugin-gcp-kernel"]]
+        },
+        "serviceAccount": {
+          "$ref": "#/$defs/ServiceAccountConfig"
+        },
+        "buckets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/BucketConfig" },
+          "description": "Cloud Storage buckets"
+        },
+        "topics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TopicConfig" },
+          "description": "Pub/Sub topics"
+        },
+        "queues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/QueueConfig" },
+          "description": "Cloud Tasks queues"
+        },
+        "secrets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SecretConfig" },
+          "description": "Secret Manager secrets"
+        },
+        "crons": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CronConfig" },
+          "description": "Cloud Scheduler cron jobs"
+        },
+        "kernel": {
+          "$ref": "#/$defs/KernelConfig",
+          "description": "NATS-based kernel (requires K8s or always-on container)"
+        },
+        "gcpKernel": {
+          "$ref": "#/$defs/GcpKernelConfig",
+          "description": "GCP-native kernel (Cloud Run + Pub/Sub, serverless)"
+        },
+        "webAdmin": {
+          "$ref": "#/$defs/WebAdminConfig",
+          "description": "Local dev web admin dashboard"
+        },
+        "networks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/NetworkConfig" },
+          "description": "VPC networks with containers, functions, databases, etc."
+        }
+      },
+      "required": ["name", "region", "gcpProjectId"],
+      "additionalProperties": false
+    },
+    "ServiceAccountConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "createKey": { "type": "boolean", "default": false }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "BucketConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": {
+          "type": "string",
+          "examples": ["US", "EU", "ASIA"]
+        },
+        "storageClass": {
+          "type": "string",
+          "enum": ["STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"],
+          "default": "STANDARD"
+        },
+        "versioning": { "type": "boolean", "default": false },
+        "uniformBucketLevelAccess": { "type": "boolean", "default": true },
+        "publicAccess": { "type": "boolean", "default": false },
+        "cors": {
+          "type": "object",
+          "properties": {
+            "origins": { "type": "array", "items": { "type": "string" } },
+            "methods": { "type": "array", "items": { "type": "string" } },
+            "responseHeaders": { "type": "array", "items": { "type": "string" } },
+            "maxAgeSeconds": { "type": "number" }
+          },
+          "required": ["origins", "methods"],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "deleteAfterDays": { "type": "number" },
+            "archiveAfterDays": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "TopicConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "messageRetentionDuration": { "type": "string", "examples": ["604800s"] },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "QueueConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "rateLimits": {
+          "type": "object",
+          "properties": {
+            "maxDispatchesPerSecond": { "type": "number" },
+            "maxConcurrentDispatches": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "retryConfig": {
+          "type": "object",
+          "properties": {
+            "maxAttempts": { "type": "number" },
+            "minBackoff": { "type": "string" },
+            "maxBackoff": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "SecretConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string" },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "CronConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "schedule": {
+          "type": "string",
+          "description": "Cron expression",
+          "examples": ["0 * * * *", "*/5 * * * *"]
+        },
+        "timezone": { "type": "string", "default": "UTC" },
+        "description": { "type": "string" },
+        "target": {
+          "type": "string",
+          "description": "Target resource (e.g., '@container/api', '@function/worker')"
+        },
+        "path": { "type": "string", "default": "/" },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "default": "GET"
+        },
+        "body": { "type": "string" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "retryCount": { "type": "number" },
+        "attemptDeadline": { "type": "string" }
+      },
+      "required": ["name", "schedule", "target"],
+      "additionalProperties": false
+    },
+    "KernelConfig": {
+      "type": "object",
+      "description": "NATS-based kernel for hybrid HTTP + NATS communication",
+      "properties": {
+        "name": { "type": "string" },
+        "memory": { "type": "string", "default": "512Mi" },
+        "cpu": { "type": "string", "default": "1" },
+        "minInstances": { "type": "number", "default": 0 },
+        "maxInstances": { "type": "number", "default": 10 },
+        "firebaseProjectId": { "type": "string" },
+        "storageBucket": { "type": "string" },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "GcpKernelConfig": {
+      "type": "object",
+      "description": "GCP-native kernel using Cloud Run + Pub/Sub (serverless, scales to zero)",
+      "properties": {
+        "name": { "type": "string" },
+        "memory": { "type": "string", "default": "512Mi" },
+        "cpu": { "type": "string", "default": "1" },
+        "minInstances": { "type": "number", "default": 0 },
+        "maxInstances": { "type": "number", "default": 10 },
+        "firebaseProjectId": {
+          "type": "string",
+          "description": "Firebase project for auth validation"
+        },
+        "storageBucket": {
+          "type": "string",
+          "description": "GCS bucket for file operations"
+        },
+        "eventRetentionDays": { "type": "number", "default": 7 }
+      },
+      "required": ["name", "firebaseProjectId", "storageBucket"],
+      "additionalProperties": false
+    },
+    "WebAdminConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "number", "default": 3000 }
+      },
+      "required": ["enabled"],
+      "additionalProperties": false
+    },
+    "NetworkConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "autoCreateSubnetworks": { "type": "boolean" },
+        "routingMode": {
+          "type": "string",
+          "enum": ["REGIONAL", "GLOBAL"]
+        },
+        "mtu": { "type": "number" },
+        "existing": {
+          "type": "boolean",
+          "description": "Use an existing VPC instead of creating a new one"
+        },
+        "loadBalancer": { "$ref": "#/$defs/LoadBalancerConfig" },
+        "subnets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SubnetConfig" }
+        },
+        "firewallRules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FirewallRuleConfig" }
+        },
+        "containers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContainerConfig" }
+        },
+        "functions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FunctionConfig" }
+        },
+        "databases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/DatabaseConfig" }
+        },
+        "caches": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CacheConfig" }
+        },
+        "uis": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UIConfig" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "LoadBalancerConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "routes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LoadBalancerRouteConfig" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "LoadBalancerRouteConfig": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "URL path pattern",
+          "examples": ["/api/*", "/hello/*", "/*"]
+        },
+        "backend": {
+          "type": "string",
+          "description": "Backend service name"
+        }
+      },
+      "required": ["path", "backend"],
+      "additionalProperties": false
+    },
+    "SubnetConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ipCidrRange": {
+          "type": "string",
+          "examples": ["10.0.0.0/24"]
+        },
+        "region": { "type": "string" },
+        "privateGoogleAccess": { "type": "boolean" },
+        "flowLogs": { "type": "boolean" },
+        "secondaryRanges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rangeName": { "type": "string" },
+              "ipCidrRange": { "type": "string" }
+            },
+            "required": ["rangeName", "ipCidrRange"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["name", "ipCidrRange"],
+      "additionalProperties": false
+    },
+    "FirewallRuleConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "direction": {
+          "type": "string",
+          "enum": ["INGRESS", "EGRESS"],
+          "default": "INGRESS"
+        },
+        "priority": { "type": "number", "default": 1000 },
+        "action": {
+          "type": "string",
+          "enum": ["allow", "deny"],
+          "default": "allow"
+        },
+        "protocol": { "type": "string" },
+        "ports": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sourceRanges": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "targetTags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "description": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "ContainerConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "image": { "type": "string" },
+        "port": { "type": "number", "default": 8080 },
+        "memory": { "type": "string", "default": "512Mi" },
+        "cpu": { "type": "string", "default": "1" },
+        "minInstances": { "type": "number", "default": 0 },
+        "maxInstances": { "type": "number", "default": 10 },
+        "concurrency": { "type": "number", "default": 80 },
+        "timeout": { "type": "string", "default": "300s" },
+        "allowUnauthenticated": { "type": "boolean", "default": false },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables (supports @references)"
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Secret references (maps env var to @secret/name)"
+        },
+        "serviceAccount": { "type": "string" },
+        "vpcConnector": { "type": "string" },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "FunctionConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "sourceDir": { "type": "string" },
+        "entryPoint": { "type": "string", "default": "handler" },
+        "runtime": {
+          "type": "string",
+          "enum": ["nodejs20", "nodejs18", "python311", "python310", "go121", "go120"],
+          "default": "nodejs20"
+        },
+        "memory": { "type": "string", "default": "256Mi" },
+        "minInstances": { "type": "number", "default": 0 },
+        "maxInstances": { "type": "number", "default": 100 },
+        "timeout": { "type": "number", "default": 60 },
+        "allowUnauthenticated": { "type": "boolean", "default": false },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "serviceAccount": { "type": "string" },
+        "vpcConnector": { "type": "string" },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "trigger": { "$ref": "#/$defs/FunctionTriggerConfig" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "FunctionTriggerConfig": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["http", "pubsub", "storage"],
+          "default": "http"
+        },
+        "topic": {
+          "type": "string",
+          "description": "Pub/Sub topic name (for pubsub trigger)"
+        },
+        "bucket": {
+          "type": "string",
+          "description": "GCS bucket name (for storage trigger)"
+        },
+        "event": {
+          "type": "string",
+          "description": "Storage event type",
+          "examples": ["finalize", "delete", "archive", "metadataUpdate"]
+        }
+      },
+      "required": ["type"],
+      "additionalProperties": false
+    },
+    "DatabaseConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "databaseVersion": {
+          "type": "string",
+          "enum": ["POSTGRES_15", "POSTGRES_14", "MYSQL_8_0", "MYSQL_5_7"],
+          "default": "POSTGRES_15"
+        },
+        "tier": {
+          "type": "string",
+          "default": "db-f1-micro",
+          "examples": ["db-f1-micro", "db-g1-small", "db-custom-2-4096"]
+        },
+        "diskSize": { "type": "number", "default": 10 },
+        "diskType": {
+          "type": "string",
+          "enum": ["PD_SSD", "PD_HDD"],
+          "default": "PD_SSD"
+        },
+        "databaseName": { "type": "string" },
+        "enablePublicIp": { "type": "boolean", "default": false },
+        "requireSsl": { "type": "boolean", "default": true },
+        "backupEnabled": { "type": "boolean", "default": true },
+        "backupStartTime": { "type": "string", "default": "03:00" },
+        "maintenanceWindowDay": { "type": "number" },
+        "maintenanceWindowHour": { "type": "number" },
+        "flags": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "CacheConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "tier": {
+          "type": "string",
+          "enum": ["BASIC", "STANDARD_HA"],
+          "default": "BASIC"
+        },
+        "memorySizeGb": { "type": "number", "default": 1 },
+        "redisVersion": { "type": "string", "default": "REDIS_7_0" },
+        "authEnabled": { "type": "boolean", "default": true },
+        "transitEncryptionMode": {
+          "type": "string",
+          "enum": ["DISABLED", "SERVER_AUTHENTICATION"],
+          "default": "SERVER_AUTHENTICATION"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "UIConfig": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "sourceDir": {
+          "type": "string",
+          "description": "Source directory (defaults to 'ui/<name>')"
+        },
+        "framework": {
+          "type": "string",
+          "enum": ["react", "vue", "sveltekit", "html"],
+          "description": "UI framework (auto-detected from package.json if not specified)"
+        },
+        "buildCommand": { "type": "string", "default": "npm run build" },
+        "buildOutputDir": {
+          "type": "string",
+          "description": "Build output directory (defaults to 'dist' or 'build')"
+        },
+        "indexDocument": { "type": "string", "default": "index.html" },
+        "errorDocument": {
+          "type": "string",
+          "default": "index.html",
+          "description": "Error document (index.html for SPA routing)"
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    }
+  }
+}
