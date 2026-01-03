@@ -16,7 +16,7 @@ import type { Plugin } from '@stacksolo/core';
 import { gcpKernelResource } from './resources/index';
 
 /** Plugin version - must match package.json */
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 export const plugin: Plugin = {
   name: '@stacksolo/plugin-gcp-kernel',
