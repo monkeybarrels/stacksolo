@@ -1,9 +1,10 @@
 /**
- * Zero Trust Auth - Runtime Extension
+ * Zero Trust Auth - Runtime Extension (Server-side)
  *
  * Registers kernel.access methods for dynamic authorization.
+ * This module is for Node.js/server-side use only.
  *
- * Import this module to enable access control methods on the kernel:
+ * For browser/SPA usage, use `@stacksolo/plugin-zero-trust-auth/client` instead.
  *
  * @example
  * ```ts
