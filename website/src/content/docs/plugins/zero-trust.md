@@ -23,6 +23,9 @@ Add to your `stacksolo.config.json`:
       "containers": [{ "name": "admin", "port": 3000 }],
       "loadBalancer": {
         "name": "gateway",
+        "domain": "app.yourcompany.com",
+        "enableHttps": true,
+        "redirectHttpToHttps": true,
         "routes": [{ "path": "/admin/*", "backend": "admin" }]
       }
     }],
@@ -38,7 +41,23 @@ Add to your `stacksolo.config.json`:
 }
 ```
 
-After deployment, users just visit the URL. Google login appears automatically.
+After deployment:
+1. Get the load balancer IP from outputs
+2. Point your DNS to the load balancer IP
+3. Wait 15-60 minutes for SSL certificate provisioning
+4. Users visit `https://app.yourcompany.com/admin` → Google login appears automatically
+
+:::caution[HTTPS Required]
+IAP requires HTTPS. You must configure `domain` and `enableHttps: true` in your load balancer configuration. The deployment will fail with an error if these are not set.
+:::
+
+:::note[Automatic Setup]
+The deploy command automatically handles all IAP prerequisites:
+- Provisions the IAP service agent
+- Grants the IAP service account Cloud Run Invoker role (for Cloud Run backends)
+- Enables IAP on backend services
+- Configures IAM bindings for allowed members
+:::
 
 ## Resources
 
@@ -184,6 +203,9 @@ Public API + protected admin panel + SSH access to dev VM.
       ],
       "loadBalancer": {
         "name": "gateway",
+        "domain": "my-saas.example.com",
+        "enableHttps": true,
+        "redirectHttpToHttps": true,
         "routes": [
           { "path": "/api/*", "backend": "api" },
           { "path": "/admin/*", "backend": "admin" },
@@ -277,7 +299,53 @@ Standard charges apply for underlying resources (VMs, Load Balancers).
 
 1. Google Cloud CLI installed and authenticated
 2. Terraform installed
-3. OAuth consent screen configured in GCP project (for web backends)
+3. A custom domain for HTTPS (IAP requires HTTPS)
+4. Ability to manage DNS records for your domain
+
+## HTTPS and DNS Setup
+
+IAP requires HTTPS, which means you need:
+
+1. **A custom domain** - Configure `domain` in your load balancer config
+2. **DNS access** - You'll need to create an A record pointing to the load balancer IP
+3. **SSL certificate** - StackSolo uses Google-managed certificates (auto-provisioned)
+
+### Load Balancer Configuration
+
+```json
+{
+  "loadBalancer": {
+    "name": "gateway",
+    "domain": "app.yourcompany.com",
+    "enableHttps": true,
+    "redirectHttpToHttps": true,
+    "routes": [...]
+  }
+}
+```
+
+| Property | Required for IAP | Description |
+|----------|-----------------|-------------|
+| `domain` | Yes | Your custom domain |
+| `enableHttps` | Yes | Must be `true` for IAP |
+| `redirectHttpToHttps` | Recommended | Redirect HTTP to HTTPS |
+
+### After Deployment
+
+1. **Get the load balancer IP** from Terraform outputs:
+   ```bash
+   cd .stacksolo/cdktf && terraform output
+   # Look for: gateway_LoadBalancerIp = "34.102.x.x"
+   ```
+
+2. **Configure DNS** - Create an A record:
+   ```
+   app.yourcompany.com → 34.102.x.x
+   ```
+
+3. **Wait for SSL** - Google-managed certificates take 15-60 minutes to provision. You can check status in the GCP Console under "Certificate Manager"
+
+4. **Access your app** - Visit `https://app.yourcompany.com/admin` - Google login will appear
 
 ## Learn More
 

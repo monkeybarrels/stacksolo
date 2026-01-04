@@ -65,9 +65,10 @@ export async function deployConfig(
     const functionResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:cloud_function');
     const containerResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:cloud_run');
     const uiResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:storage_website');
+    const gcpKernelResources = resolved.resources.filter(r => r.type === 'gcp-kernel:gcp_kernel');
 
-    if (functionResources.length === 0 && containerResources.length === 0 && uiResources.length === 0) {
-      throw new Error('CDKTF backend requires at least one cloud_function, cloud_run, or UI resource');
+    if (functionResources.length === 0 && containerResources.length === 0 && uiResources.length === 0 && gcpKernelResources.length === 0) {
+      throw new Error('CDKTF backend requires at least one cloud_function, cloud_run, gcp_kernel, or UI resource');
     }
 
     // Generate CDKTF code for all resources
@@ -193,78 +194,90 @@ export async function deployConfig(
       sourceZips.push({ name: fnName, zipPath: sourceZipPath });
     }
 
-    // Build and push Docker images for each container (skip during preview)
-    if (!preview && containerResources.length > 0) {
-      // Configure Docker authentication for Artifact Registry
-      const region = config.project.region;
-      log(`Configuring Docker authentication for ${region}-docker.pkg.dev...`);
+    // Note: Container builds are deferred until after Terraform creates the Artifact Registry
+    // See the container build section after the first Terraform apply below
+    const containersToBuild = !preview && containerResources.length > 0;
+
+    // Build and push GCP Kernel image if configured (skip during preview)
+    if (!preview && gcpKernelResources.length > 0) {
+      // Configure Docker authentication for GCR (kernel uses gcr.io)
+      log(`Configuring Docker authentication for gcr.io...`);
       try {
-        await execAsync(`gcloud auth configure-docker ${region}-docker.pkg.dev --quiet`, { timeout: 30000 });
+        await execAsync(`gcloud auth configure-docker gcr.io --quiet`, { timeout: 30000 });
       } catch (error) {
-        log(`Warning: Failed to configure Docker auth: ${error instanceof Error ? error.message : error}`);
-        log('You may need to run: gcloud auth configure-docker ' + region + '-docker.pkg.dev');
+        log(`Warning: Failed to configure Docker auth for GCR: ${error instanceof Error ? error.message : error}`);
       }
 
-      for (const containerResource of containerResources) {
-        const containerName = containerResource.config.name as string;
-        const image = containerResource.config.image as string;
+      for (const kernelResource of gcpKernelResources) {
+        const kernelProjectId = kernelResource.config.projectId as string || config.project.gcpProjectId;
+        const kernelImage = `gcr.io/${kernelProjectId}/stacksolo-gcp-kernel:latest`;
 
-        // Extract registry info from image URL
-        // Format: {region}-docker.pkg.dev/{project}/{registry}/{image}:{tag}
-        const imageMatch = image.match(/^(.+-docker\.pkg\.dev\/[^/]+\/[^/]+)\//);
-        if (!imageMatch) {
-          log(`Skipping container ${containerName} - using pre-built image: ${image}`);
-          continue;
+        log(`Building GCP Kernel service...`);
+
+        // Find the kernel service source in monorepo or node_modules
+        const { getServiceSourcePath, getPluginService } = await import('./plugin-loader.service');
+        const kernelService = getPluginService('gcp-kernel-service');
+        let kernelSourceDir: string | null = null;
+
+        if (kernelService) {
+          kernelSourceDir = getServiceSourcePath(kernelService);
         }
 
-        // Find the source directory for the container
-        // Default to containers/{short-name} where short-name is the name without project prefix
-        const shortName = containerName.replace(`${config.project.name}-`, '');
-        const sourceDir = path.resolve(process.cwd(), `containers/${shortName}`);
-
-        // Check if source directory and Dockerfile exist
-        try {
-          await fs.access(path.join(sourceDir, 'Dockerfile'));
-        } catch {
-          log(`Skipping container ${containerName} - no Dockerfile found at ${sourceDir}`);
-          continue;
+        // Fall back to monorepo path if not found via plugin
+        if (!kernelSourceDir) {
+          const monorepoKernelPath = path.resolve(process.cwd(), '../stacksolo/plugins/gcp-kernel/service');
+          try {
+            await fs.access(path.join(monorepoKernelPath, 'Dockerfile'));
+            kernelSourceDir = monorepoKernelPath;
+          } catch {
+            // Try relative to stacksolo install
+            const nodeModulesPath = path.resolve(process.cwd(), 'node_modules/@stacksolo/plugin-gcp-kernel/service');
+            try {
+              await fs.access(path.join(nodeModulesPath, 'Dockerfile'));
+              kernelSourceDir = nodeModulesPath;
+            } catch {
+              log(`Warning: Could not find GCP Kernel service source. Skipping build.`);
+              log(`Expected at: ${monorepoKernelPath} or ${nodeModulesPath}`);
+              continue;
+            }
+          }
         }
 
-        log(`Building Docker image for ${containerName}...`);
+        log(`Found kernel service at: ${kernelSourceDir}`);
 
-        // Build the TypeScript code first
-        const packageJsonPath = path.join(sourceDir, 'package.json');
+        // Build TypeScript
+        const packageJsonPath = path.join(kernelSourceDir, 'package.json');
         try {
           const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
           const pkg = JSON.parse(packageJsonContent);
 
           // Install dependencies
-          const nodeModulesPath = path.join(sourceDir, 'node_modules');
+          const nodeModulesPath = path.join(kernelSourceDir, 'node_modules');
           try {
             await fs.access(nodeModulesPath);
           } catch {
-            log(`Installing dependencies for ${containerName}...`);
-            await execAsync('npm install', { cwd: sourceDir, timeout: 120000 });
+            log(`Installing dependencies for GCP Kernel...`);
+            await execAsync('npm install', { cwd: kernelSourceDir, timeout: 120000 });
           }
 
           // Run build if script exists
           if (pkg.scripts?.build) {
-            log(`Building ${containerName}...`);
-            await execAsync('npm run build', { cwd: sourceDir, timeout: 60000 });
+            log(`Building GCP Kernel TypeScript...`);
+            await execAsync('npm run build', { cwd: kernelSourceDir, timeout: 60000 });
           }
-        } catch {
-          // No package.json - continue with Docker build
+        } catch (buildError) {
+          log(`Warning: Could not build kernel TypeScript: ${buildError instanceof Error ? buildError.message : buildError}`);
         }
 
-        // Build Docker image
-        log(`Building Docker image: ${image}`);
-        await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
+        // Build Docker image with platform flag for Apple Silicon compatibility
+        log(`Building Docker image: ${kernelImage}`);
+        await execAsync(`docker build --platform linux/amd64 -t "${kernelImage}" .`, { cwd: kernelSourceDir, timeout: 300000 });
 
-        // Push to Artifact Registry
-        log(`Pushing Docker image: ${image}`);
-        await execAsync(`docker push "${image}"`, { timeout: 300000 });
+        // Push to GCR
+        log(`Pushing Docker image: ${kernelImage}`);
+        await execAsync(`docker push "${kernelImage}"`, { timeout: 300000 });
 
-        log(`Container ${containerName} built and pushed successfully`);
+        log(`GCP Kernel built and pushed successfully`);
       }
     }
 
@@ -374,9 +387,123 @@ terraform {
       };
     }
 
-    // Apply
+    // ==========================================================================
+    // TWO-PHASE TERRAFORM APPLY FOR FRESH DEPLOYS
+    // ==========================================================================
+    // CRITICAL ORDERING: Container images need Artifact Registry to exist before
+    // they can be pushed, but Cloud Run needs images to exist before it can start.
+    //
+    // Solution for fresh deploys:
+    // 1. First terraform apply - Creates Artifact Registry (and other infra)
+    //    - This may fail on Cloud Run with "Image not found" error
+    // 2. Build and push container images to the now-existing registry
+    // 3. Second terraform apply - Updates Cloud Run with the available images
+    //
+    // Error patterns to catch (allow first apply to continue):
+    // - "Image 'xxx' not found" - Image doesn't exist yet in registry
+    // - "Revision 'xxx' is not ready" - Cloud Run can't start without image
+    // ==========================================================================
+
     log('Applying Terraform...');
-    await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+    let firstApplyFailed = false;
+    try {
+      await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+    } catch (applyError) {
+      // First apply may fail if Cloud Run references container images that don't exist yet
+      // This is expected for fresh deploys - we'll build containers and apply again
+      const errorStr = String(applyError);
+      const isImageNotFoundError =
+        (errorStr.includes('Image') && errorStr.includes('not found')) ||
+        (errorStr.includes('Revision') && errorStr.includes('is not ready'));
+
+      if (containersToBuild && isImageNotFoundError) {
+        log('First apply partially completed - container images needed');
+        firstApplyFailed = true;
+      } else {
+        throw applyError;
+      }
+    }
+
+    // Build and push Docker images for each container (after registry exists)
+    if (containersToBuild) {
+      // Configure Docker authentication for Artifact Registry
+      const region = config.project.region;
+      log(`Configuring Docker authentication for ${region}-docker.pkg.dev...`);
+      try {
+        await execAsync(`gcloud auth configure-docker ${region}-docker.pkg.dev --quiet`, { timeout: 30000 });
+      } catch (error) {
+        log(`Warning: Failed to configure Docker auth: ${error instanceof Error ? error.message : error}`);
+        log('You may need to run: gcloud auth configure-docker ' + region + '-docker.pkg.dev');
+      }
+
+      for (const containerResource of containerResources) {
+        const containerName = containerResource.config.name as string;
+        const image = containerResource.config.image as string;
+
+        // Extract registry info from image URL
+        // Format: {region}-docker.pkg.dev/{project}/{registry}/{image}:{tag}
+        const imageMatch = image.match(/^(.+-docker\.pkg\.dev\/[^/]+\/[^/]+)\//);
+        if (!imageMatch) {
+          log(`Skipping container ${containerName} - using pre-built image: ${image}`);
+          continue;
+        }
+
+        // Find the source directory for the container
+        // Default to containers/{short-name} where short-name is the name without project prefix
+        const shortName = containerName.replace(`${config.project.name}-`, '');
+        const sourceDir = path.resolve(process.cwd(), `containers/${shortName}`);
+
+        // Check if source directory and Dockerfile exist
+        try {
+          await fs.access(path.join(sourceDir, 'Dockerfile'));
+        } catch {
+          log(`Skipping container ${containerName} - no Dockerfile found at ${sourceDir}`);
+          continue;
+        }
+
+        log(`Building Docker image for ${containerName}...`);
+
+        // Build the TypeScript code first
+        const packageJsonPath = path.join(sourceDir, 'package.json');
+        try {
+          const packageJsonContent = await fs.readFile(packageJsonPath, 'utf-8');
+          const pkg = JSON.parse(packageJsonContent);
+
+          // Install dependencies
+          const nodeModulesPath = path.join(sourceDir, 'node_modules');
+          try {
+            await fs.access(nodeModulesPath);
+          } catch {
+            log(`Installing dependencies for ${containerName}...`);
+            await execAsync('npm install', { cwd: sourceDir, timeout: 120000 });
+          }
+
+          // Run build if script exists
+          if (pkg.scripts?.build) {
+            log(`Building ${containerName}...`);
+            await execAsync('npm run build', { cwd: sourceDir, timeout: 60000 });
+          }
+        } catch {
+          // No package.json - continue with Docker build
+        }
+
+        // Build Docker image
+        log(`Building Docker image: ${image}`);
+        await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
+
+        // Push to Artifact Registry
+        log(`Pushing Docker image: ${image}`);
+        await execAsync(`docker push "${image}"`, { timeout: 300000 });
+
+        log(`Container ${containerName} built and pushed successfully`);
+      }
+
+      // Apply Terraform again to update Cloud Run with the new images
+      if (firstApplyFailed) {
+        log('Re-applying Terraform with container images...');
+        await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+      }
+    }
 
     // Get outputs
     const { stdout: outputJson } = await execAsync('terraform output -json', { cwd: stackDir });
@@ -472,6 +599,109 @@ terraform {
         await execAsync(`gsutil -m rsync -r -d "${distPath}" gs://${bucketName}`, { timeout: 300000 });
 
         log(`UI ${uiName} deployed to gs://${bucketName}`);
+      }
+    }
+
+    // Auto-enable IAP and set IAM bindings on backend services if zeroTrust is configured
+    const iapResources = resolved.resources.filter(r => r.type === 'zero-trust:iap_web_backend');
+    if (iapResources.length > 0) {
+      log('Configuring IAP on backend services...');
+      const gcpProjectId = config.project.gcpProjectId;
+
+      // Step 0: Provision IAP service agent identity (required for IAP to invoke Cloud Run)
+      // This creates service-{PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com
+      log('Provisioning IAP service agent...');
+      let iapServiceAccount: string | null = null;
+      try {
+        const { stdout: identityOutput } = await execAsync(
+          `gcloud beta services identity create --service=iap.googleapis.com --project=${gcpProjectId} 2>&1`,
+          { timeout: 60000 }
+        );
+        // Extract service account from output: "Service identity created: service-xxx@gcp-sa-iap.iam.gserviceaccount.com"
+        const match = identityOutput.match(/service-\d+@gcp-sa-iap\.iam\.gserviceaccount\.com/);
+        if (match) {
+          iapServiceAccount = match[0];
+          log(`IAP service agent: ${iapServiceAccount}`);
+        }
+      } catch (identityError) {
+        const errMsg = identityError instanceof Error ? identityError.message : String(identityError);
+        // Service account might already exist - try to extract from error or fetch project number
+        if (errMsg.includes('already exists') || errMsg.includes('service-')) {
+          const match = errMsg.match(/service-\d+@gcp-sa-iap\.iam\.gserviceaccount\.com/);
+          if (match) {
+            iapServiceAccount = match[0];
+            log(`IAP service agent (existing): ${iapServiceAccount}`);
+          }
+        } else {
+          log(`Warning: Failed to provision IAP service agent: ${errMsg}`);
+        }
+      }
+
+      for (const iapResource of iapResources) {
+        const backendServiceName = iapResource.config.backendService as string;
+        const allowedMembers = iapResource.config.allowedMembers as string[];
+
+        // Determine if this IAP config protects a Cloud Run service
+        // The backend name follows pattern: {projectName}-lb-{projectName}-{serviceName}-backend
+        // We need to extract the service name and check if it's a Cloud Run container
+        const backendMatch = backendServiceName.match(/-([^-]+)-backend$/);
+        const serviceName = backendMatch ? backendMatch[1] : null;
+        const cloudRunService = serviceName
+          ? containerResources.find(r => (r.config.name as string).endsWith(`-${serviceName}`))
+          : null;
+
+        // Grant IAP service account Cloud Run Invoker role if this protects a Cloud Run service
+        if (iapServiceAccount && cloudRunService) {
+          const cloudRunServiceName = cloudRunService.config.name as string;
+          const region = config.project.region;
+          log(`Granting IAP service account invoker role on Cloud Run: ${cloudRunServiceName}`);
+          try {
+            await execAsync(
+              `gcloud run services add-iam-policy-binding ${cloudRunServiceName} --region=${region} --project=${gcpProjectId} --member="serviceAccount:${iapServiceAccount}" --role="roles/run.invoker"`,
+              { timeout: 60000 }
+            );
+          } catch (invokerError) {
+            const invokerErrMsg = invokerError instanceof Error ? invokerError.message : String(invokerError);
+            if (!invokerErrMsg.includes('already exists')) {
+              log(`Warning: Failed to grant invoker role: ${invokerErrMsg}`);
+            }
+          }
+        }
+
+        log(`Enabling IAP on backend: ${backendServiceName}`);
+
+        try {
+          // Step 1: Enable IAP on the backend service
+          await execAsync(
+            `gcloud compute backend-services update ${backendServiceName} --global --project=${gcpProjectId} --iap=enabled`,
+            { timeout: 60000 }
+          );
+          log(`IAP enabled on ${backendServiceName}`);
+
+          // Step 2: Set IAM policy for who can access via IAP
+          // We need to add the IAP accessor role to each allowed member
+          for (const member of allowedMembers) {
+            log(`Granting IAP access to: ${member}`);
+            try {
+              await execAsync(
+                `gcloud iap web add-iam-policy-binding --resource-type=backend-services --service=${backendServiceName} --project=${gcpProjectId} --member="${member}" --role="roles/iap.httpsResourceAccessor"`,
+                { timeout: 60000 }
+              );
+            } catch (iamError) {
+              // Try alternative approach - this handles both new and existing bindings
+              const iamErrorMsg = iamError instanceof Error ? iamError.message : String(iamError);
+              if (!iamErrorMsg.includes('already exists')) {
+                log(`Warning: Failed to add IAP access for ${member}: ${iamErrorMsg}`);
+              }
+            }
+          }
+          log(`IAP configured on ${backendServiceName}`);
+        } catch (iapError) {
+          // Log warning but don't fail deployment - IAP can be enabled manually
+          const iapErrorMsg = iapError instanceof Error ? iapError.message : String(iapError);
+          log(`Warning: Failed to enable IAP on ${backendServiceName}: ${iapErrorMsg}`);
+          log(`You can manually enable IAP: gcloud compute backend-services update ${backendServiceName} --global --iap=enabled`);
+        }
       }
     }
 

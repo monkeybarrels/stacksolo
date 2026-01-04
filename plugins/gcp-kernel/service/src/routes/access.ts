@@ -96,7 +96,12 @@ accessRouter.post('/check', async (req, res) => {
 
   const result = await checkAccess({ resource, member, permission });
 
-  return res.json(result);
+  // Transform response to match runtime expectation (hasAccess instead of allowed)
+  return res.json({
+    hasAccess: result.allowed,
+    permissions: result.permissions || [],
+    reason: result.reason,
+  });
 });
 
 /**
