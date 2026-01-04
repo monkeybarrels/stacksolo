@@ -22,6 +22,8 @@ import {
   promptConflictResolution as promptPreflightResolution,
   executeResolution,
   PreflightResult,
+  runKernelPreflightCheck,
+  displayKernelPreflightResults,
 } from '../../services/preflight.service';
 
 const execAsync = promisify(exec);
@@ -522,6 +524,54 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
       }
     } catch (error) {
       preflightSpinner.warn('Could not complete pre-flight check (continuing anyway)');
+      console.log(chalk.gray(`    ${error}\n`));
+    }
+  }
+
+  // GCP Kernel preflight checks (only on first attempt, not destroy, not preview)
+  const hasGcpKernel = resolved.resources.some((r) => r.type === 'gcp-kernel:gcp_kernel');
+  if (hasGcpKernel && !options.destroy && !options.preview && !options.skipPreflight && retryCount === 0) {
+    const kernelSpinner = ora('Running GCP Kernel preflight checks...').start();
+
+    try {
+      const kernelResult = await runKernelPreflightCheck(
+        config.project.gcpProjectId,
+        process.cwd()
+      );
+
+      if (kernelResult.success) {
+        kernelSpinner.succeed('GCP Kernel preflight checks passed');
+      } else {
+        kernelSpinner.fail('GCP Kernel preflight checks failed');
+        displayKernelPreflightResults(kernelResult);
+
+        // Ask if user wants to continue despite failures
+        const inquirer = await import('inquirer');
+        const { continueAnyway } = await inquirer.default.prompt([
+          {
+            type: 'confirm',
+            name: 'continueAnyway',
+            message: 'Continue with deploy anyway? (may fail)',
+            default: false,
+          },
+        ]);
+
+        if (!continueAnyway) {
+          console.log(chalk.gray('\n  Deploy cancelled. Fix the issues above and try again.\n'));
+          return;
+        }
+      }
+
+      // Show warnings even on success
+      if (kernelResult.warnings.length > 0 && kernelResult.success) {
+        console.log(chalk.yellow('  Warnings (will attempt auto-fix during deploy):'));
+        for (const warning of kernelResult.warnings) {
+          console.log(chalk.gray(`    - ${warning}`));
+        }
+        console.log();
+      }
+    } catch (error) {
+      kernelSpinner.warn('Could not complete GCP Kernel preflight check (continuing anyway)');
       console.log(chalk.gray(`    ${error}\n`));
     }
   }

@@ -85,6 +85,28 @@ export {
   type GeneratedCode,
 } from './generator.js';
 
+// Naming utilities
+export {
+  getLoadBalancerName,
+  getBackendServiceName,
+  getNegName,
+  getCloudRunServiceName,
+  getCloudFunctionName,
+  getVpcNetworkName,
+  getVpcConnectorName,
+  getArtifactRegistryName,
+  getWebsiteBucketName,
+  getBackendBucketName,
+  getSslCertificateName,
+  getStaticIpName,
+  getHttpProxyName,
+  getHttpsProxyName,
+  getUrlMapName,
+  getHttpForwardingRuleName,
+  getHttpsForwardingRuleName,
+  type NamingContext,
+} from './naming.js';
+
 // =============================================================================
 // Convenience Functions
 // =============================================================================

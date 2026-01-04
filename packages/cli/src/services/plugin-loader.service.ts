@@ -98,6 +98,8 @@ function resolveLocalPlugin(monorepoRoot: string, pluginName: string): string | 
     '@stacksolo/plugin-gcp-cdktf': 'plugins/gcp-cdktf',
     '@stacksolo/plugin-kernel': 'plugins/kernel',
     '@stacksolo/plugin-gcp-kernel': 'plugins/gcp-kernel',
+    '@stacksolo/plugin-zero-trust': 'plugins/zero-trust',
+    '@stacksolo/plugin-zero-trust-auth': 'plugins/zero-trust-auth',
   };
 
   const relativePath = pluginPaths[pluginName];

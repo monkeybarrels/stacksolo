@@ -221,6 +221,12 @@ export interface LoadBalancerRouteConfig {
 export interface LoadBalancerConfig {
   name: string;
   routes?: LoadBalancerRouteConfig[];
+  /** Custom domain for HTTPS (requires DNS to point to load balancer IP) */
+  domain?: string;
+  /** Enable HTTPS with managed SSL certificate (requires domain) */
+  enableHttps?: boolean;
+  /** Redirect all HTTP traffic to HTTPS */
+  redirectHttpToHttps?: boolean;
 }
 
 export interface NetworkConfig {
@@ -290,8 +296,38 @@ export interface ProjectConfig {
   // Web Admin UI (optional local dev dashboard)
   webAdmin?: WebAdminConfig;
 
+  // Zero Trust configurations (IAP + dynamic access control)
+  zeroTrust?: ZeroTrustConfig;
+  zeroTrustAuth?: ZeroTrustAuthConfig;
+
   // Network-scoped resources
   networks?: NetworkConfig[];
+}
+
+/**
+ * Zero Trust configuration for IAP-protected backends
+ */
+export interface ZeroTrustConfig {
+  iapWebBackends?: IapWebBackendConfig[];
+}
+
+export interface IapWebBackendConfig {
+  name: string;
+  backend: string;
+  allowedMembers: string[];
+  supportEmail: string;
+  applicationTitle?: string;
+}
+
+/**
+ * Zero Trust Auth configuration for dynamic access control
+ * Uses Firestore via the GCP Kernel for runtime authorization
+ */
+export interface ZeroTrustAuthConfig {
+  name: string;
+  resources: string[];
+  firestoreCollection?: string;
+  adminRoles?: string[];
 }
 
 // =============================================================================

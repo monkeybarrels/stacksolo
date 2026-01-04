@@ -162,8 +162,18 @@ export const cloudRun = defineResource({
       envVars.push({ name: key, value });
     }
 
+    // Generate env vars code, handling CDKTF references like ${kernelService.uri}
     const envVarsCode = envVars
-      .map(e => `          { name: '${e.name}', value: '${e.value}' },`)
+      .map(e => {
+        // Check if value is a CDKTF reference (e.g., ${kernelService.uri})
+        // These are passed through directly as JavaScript code references
+        if (e.value.startsWith('${') && e.value.endsWith('}')) {
+          // Extract the reference without the ${} wrapper
+          const cdktfRef = e.value.slice(2, -1);
+          return `          { name: '${e.name}', value: ${cdktfRef} },`;
+        }
+        return `          { name: '${e.name}', value: '${e.value}' },`;
+      })
       .join('\n');
 
     let code = `// Cloud Run service

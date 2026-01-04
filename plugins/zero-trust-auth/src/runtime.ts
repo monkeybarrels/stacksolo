@@ -89,11 +89,11 @@ async function accessRequest<T>(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(error.error || `Access API error: ${response.status}`);
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string };
+    throw new Error(errorData.error || `Access API error: ${response.status}`);
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
 // =============================================================================

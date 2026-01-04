@@ -56,6 +56,9 @@ The `stacksolo.config.json` file (located in `.stacksolo/`) defines your entire 
       }],
       "loadBalancer": {
         "name": "string",
+        "domain": "string",
+        "enableHttps": true,
+        "redirectHttpToHttps": true,
         "routes": [{
           "path": "string",
           "backend": "string"
@@ -312,12 +315,27 @@ Port the container listens on.
 
 ## Load Balancer
 
-HTTP(S) load balancer with path-based routing.
+HTTP(S) load balancer with path-based routing and optional HTTPS/SSL support.
 
 ### loadBalancer.name
 **Type:** `string` (required)
 
 Load balancer name.
+
+### loadBalancer.domain
+**Type:** `string` (optional, **required for IAP**)
+
+Custom domain for HTTPS. DNS must point to the load balancer IP after deployment.
+
+### loadBalancer.enableHttps
+**Type:** `boolean` (default: `false`, **required for IAP**)
+
+Enable HTTPS with a Google-managed SSL certificate. Requires `domain` to be set.
+
+### loadBalancer.redirectHttpToHttps
+**Type:** `boolean` (default: `false`)
+
+Redirect all HTTP traffic to HTTPS. Recommended when `enableHttps` is true.
 
 ### loadBalancer.routes
 **Type:** `Route[]` (required)
@@ -334,6 +352,8 @@ URL path pattern. Supports `/*` for prefix matching.
 
 Backend service name (must match a function, ui, or container name).
 
+### Basic Example (HTTP only)
+
 ```json
 {
   "loadBalancer": {
@@ -345,6 +365,27 @@ Backend service name (must match a function, ui, or container name).
   }
 }
 ```
+
+### HTTPS Example (required for IAP)
+
+```json
+{
+  "loadBalancer": {
+    "name": "gateway",
+    "domain": "app.example.com",
+    "enableHttps": true,
+    "redirectHttpToHttps": true,
+    "routes": [
+      { "path": "/api/*", "backend": "api" },
+      { "path": "/*", "backend": "web" }
+    ]
+  }
+}
+```
+
+:::note[IAP Requires HTTPS]
+If you're using Zero Trust IAP (`zeroTrust.iapWebBackends`), you **must** configure `domain` and `enableHttps: true`. The deployment will fail with an error otherwise.
+:::
 
 ---
 
@@ -482,6 +523,10 @@ SSH/TCP access to VMs without public IPs.
 
 Public API + protected admin panel + SSH access to dev VM.
 
+:::caution[HTTPS Required for IAP]
+IAP requires HTTPS. Notice the `domain`, `enableHttps`, and `redirectHttpToHttps` settings in the load balancer config below.
+:::
+
 ```json
 {
   "project": {
@@ -507,6 +552,9 @@ Public API + protected admin panel + SSH access to dev VM.
       ],
       "loadBalancer": {
         "name": "gateway",
+        "domain": "my-saas.example.com",
+        "enableHttps": true,
+        "redirectHttpToHttps": true,
         "routes": [
           { "path": "/api/*", "backend": "api" },
           { "path": "/admin/*", "backend": "admin" },

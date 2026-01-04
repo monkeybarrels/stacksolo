@@ -41,6 +41,7 @@
   "devDependencies": {
     "@stacksolo/core": "workspace:*",
     "@stacksolo/runtime": "workspace:*",
+    "@types/node": "^20.11.0",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   }

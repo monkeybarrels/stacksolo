@@ -25,6 +25,12 @@ import type {
   UIConfig,
 } from './schema.js';
 
+import {
+  getLoadBalancerName,
+  getBackendServiceName,
+  type NamingContext,
+} from './naming.js';
+
 /**
  * Resolve a StackSolo config into individual resources
  */
@@ -638,6 +644,27 @@ function resolveCdktfConfig(
     throw new Error('CDKTF backend does not support crons. Use backend: "pulumi" instead.');
   }
 
+  // Validate IAP requires HTTPS (domain + enableHttps)
+  if (project.zeroTrust?.iapWebBackends?.length) {
+    const lbConfig = network.loadBalancer;
+    if (!lbConfig?.domain || !lbConfig?.enableHttps) {
+      throw new Error(
+        'IAP (Identity-Aware Proxy) requires HTTPS. Please configure loadBalancer with:\n' +
+        '  - domain: your domain (e.g., "app.example.com")\n' +
+        '  - enableHttps: true\n' +
+        '  - redirectHttpToHttps: true (recommended)\n\n' +
+        'Example:\n' +
+        '  loadBalancer:\n' +
+        '    name: my-lb\n' +
+        '    domain: app.example.com\n' +
+        '    enableHttps: true\n' +
+        '    redirectHttpToHttps: true\n' +
+        '    routes: [...]\n\n' +
+        'Note: DNS for the domain must point to the load balancer IP after deployment.'
+      );
+    }
+  }
+
   // Check if using existing network (skip VPC creation)
   const useExistingNetwork = network.existing === true;
   const networkName = useExistingNetwork ? network.name : `${projectInfo.name}-${network.name}`;
@@ -645,7 +672,9 @@ function resolveCdktfConfig(
 
   const networkId = `network-${network.name}`;
   const connectorId = `connector-${network.name}`;
-  const lbName = `${projectInfo.name}-lb`;
+  // Use centralized naming for load balancer
+  const namingCtx: NamingContext = { projectName: projectInfo.name, networkName: network.name };
+  const lbName = getLoadBalancerName(namingCtx);
   const loadBalancerId = `lb-${network.name}`;
 
   // 1. VPC Network (skip if using existing)
@@ -795,7 +824,7 @@ function resolveCdktfConfig(
 
     resources.push({
       id: gcpKernelId,
-      type: 'gcp-cdktf:gcp_kernel',
+      type: 'gcp-kernel:gcp_kernel',
       name: gcpKernelName,
       config: {
         name: project.gcpKernel.name,
@@ -818,6 +847,17 @@ function resolveCdktfConfig(
   const containerIds: string[] = [];
   const containerNames: string[] = [];
 
+  // Determine KERNEL_URL if zeroTrustAuth is configured
+  // The kernel URL is needed for containers using the zero-trust-auth runtime
+  let kernelUrl: string | undefined;
+  if (project.zeroTrustAuth && hasGcpKernel && project.gcpKernel) {
+    // The kernel variable name is derived from gcpKernel.name using toVariableName()
+    // e.g., "kernel" -> "kernelService", "my-kernel" -> "my_kernelService"
+    const kernelVarName = project.gcpKernel.name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
+    // Use CDKTF reference to the kernel service URI
+    kernelUrl = `\${${kernelVarName}Service.uri}`;
+  }
+
   for (const container of containers) {
     const containerName = `${projectInfo.name}-${container.name}`;
     const containerId = `container-${container.name}`;
@@ -827,6 +867,18 @@ function resolveCdktfConfig(
     // Build image URL from Artifact Registry
     const imageUrl = container.image ||
       `${projectInfo.region}-docker.pkg.dev/${projectInfo.gcpProjectId}/${registryName}/${container.name}:latest`;
+
+    // Merge container env with kernel URL if zeroTrustAuth is configured
+    const containerEnv = { ...container.env };
+    if (kernelUrl) {
+      containerEnv.KERNEL_URL = kernelUrl;
+    }
+
+    // Container depends on kernel if zeroTrustAuth is configured
+    const containerDeps = [connectorId, registryId];
+    if (project.zeroTrustAuth && hasGcpKernel) {
+      containerDeps.push(`gcp-kernel-${project.gcpKernel?.name}`);
+    }
 
     resources.push({
       id: containerId,
@@ -845,11 +897,11 @@ function resolveCdktfConfig(
         timeout: container.timeout || '300s',
         vpcConnector: connectorName,
         allowUnauthenticated: container.allowUnauthenticated ?? true,
-        environmentVariables: container.env,
+        environmentVariables: containerEnv,
         projectId: projectInfo.gcpProjectId,
         projectName: projectInfo.name,
       },
-      dependsOn: [connectorId, registryId],
+      dependsOn: containerDeps,
       network: network.name,
     });
   }
@@ -961,6 +1013,9 @@ function resolveCdktfConfig(
 
   // Only create load balancer if we have routes
   if (routes.length > 0) {
+    // Get HTTPS configuration from loadBalancer config
+    const lbHttpsConfig = network.loadBalancer as { domain?: string; enableHttps?: boolean; redirectHttpToHttps?: boolean } | undefined;
+
     resources.push({
       id: loadBalancerId,
       type: 'gcp-cdktf:load_balancer',
@@ -971,10 +1026,38 @@ function resolveCdktfConfig(
         routes: mappedRoutes,
         // Keep single function for backwards compat (if functions exist)
         functionName: functionNames.length > 0 ? functionNames[0] : undefined,
+        // HTTPS configuration
+        domain: lbHttpsConfig?.domain,
+        enableHttps: lbHttpsConfig?.enableHttps,
+        redirectHttpToHttps: lbHttpsConfig?.redirectHttpToHttps,
       },
       dependsOn: [...kernelIds, ...containerIds, ...functionIds, ...uiIds],
       network: network.name,
     });
+  }
+
+  // 8. Zero Trust IAP Web Backends (depends on load balancer backend services)
+  if (project.zeroTrust?.iapWebBackends) {
+    for (const iapConfig of project.zeroTrust.iapWebBackends) {
+      // Use centralized naming utility for consistent backend service names
+      const backendServiceName = getBackendServiceName(namingCtx, iapConfig.backend);
+
+      resources.push({
+        id: `iap-web-backend-${iapConfig.name}`,
+        type: 'zero-trust:iap_web_backend',
+        name: iapConfig.name,
+        config: {
+          name: iapConfig.name,
+          backendService: backendServiceName,
+          allowedMembers: iapConfig.allowedMembers,
+          supportEmail: iapConfig.supportEmail,
+          applicationTitle: iapConfig.applicationTitle || `${projectInfo.name} - ${iapConfig.name}`,
+          projectId: projectInfo.gcpProjectId,
+        },
+        dependsOn: [loadBalancerId],
+        network: network.name,
+      });
+    }
   }
 
   return {

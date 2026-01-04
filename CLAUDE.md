@@ -343,6 +343,37 @@ Before completing any plugin work, verify:
 
 This ensures documentation is live and complete when the PR deploys.
 
+Core Infrastructure Automation System delivering cloud resource management through code generation and deployment orchestration.
+## Primary Business Components
+### Infrastructure Code Generation (85/100)
+Location: packages/api/src/services/codegen.service.ts
+- Domain-specific code generation engine converting high-level resource definitions into CDKTF TypeScript
+- Infrastructure template management system with provider-specific configurations
+- Dependency resolution for cloud resource relationships
+### Deployment Control System (80/100)
+Location: packages/cli/src/commands/infra/deploy.ts
+- Infrastructure lifecycle management via Terraform
+- State tracking for deployed cloud resources
+- Conflict detection and auto-cleanup
+- Deployment event coordination
+### Cloud Provider Integration (75/100)
+Location: plugins/gcp-cdktf/src/resources/
+- Provider-specific resource definition implementation
+- Cloud resource naming and validation rules
+- Resource-specific cost estimation
+- CDKTF code generation for provider resources
+### Plugin Management System (70/100)
+Location: packages/core/src/registry.ts
+- Provider plugin architecture
+- Resource type registration and discovery
+- Provider authentication management
+- Cross-provider resource definition coordination
+## Business Logic Architecture
+The system implements three key patterns:
+1. Resource Definition Pattern for standardized cloud resource configuration
+2. Provider Plugin Architecture enabling multi-cloud support
+3. Infrastructure Code Generation with provider-specific optimizations
+Core business value centers on abstracting cloud infrastructure deployment through automated code generation and visual configuration tools.
 # === END USER INSTRUCTIONS ===
 
 
@@ -360,45 +391,166 @@ This ensures documentation is live and complete when the PR deploys.
 - Explain your OBSERVATIONS clearly, then provide REASONING to identify the exact issue. Add console logs when needed to gather more information.
 
 
-Core Infrastructure Automation System delivering cloud resource management through code generation and deployment orchestration.
+Infrastructure Deployment and Management System with four core business domains:
 
-## Primary Business Components
+## Kernel Service Architecture (85/100)
+- Hybrid HTTP+NATS messaging kernel handling cross-service communication
+- Custom file handling with signed URL generation capabilities 
+- JetStream event persistence for reliable message delivery
+- Firebase auth integration with domain-specific validation rules
 
-### Infrastructure Code Generation (85/100)
-Location: packages/api/src/services/codegen.service.ts
-- Domain-specific code generation engine converting high-level resource definitions into CDKTF TypeScript
-- Infrastructure template management system with provider-specific configurations
-- Dependency resolution for cloud resource relationships
+Location: packages/cli/src/scaffold/generators/resources/kernel.ts
 
-### Deployment Control System (80/100)
-Location: packages/cli/src/commands/infra/deploy.ts
-- Infrastructure lifecycle management via Terraform
-- State tracking for deployed cloud resources
-- Conflict detection and auto-cleanup
-- Deployment event coordination
+## Development Environment System (75/100)
+- Specialized local Kubernetes environment mirroring GCP infrastructure
+- Resilient port forwarding with automatic reconnection
+- Coordinated emulator management for Firebase and Pub/Sub services
+- Distributed health check system for service monitoring
 
-### Cloud Provider Integration (75/100)
-Location: plugins/gcp-cdktf/src/resources/
-- Provider-specific resource definition implementation
-- Cloud resource naming and validation rules
-- Resource-specific cost estimation
-- CDKTF code generation for provider resources
+Location: packages/cli/src/commands/dev/dev.ts
 
-### Plugin Management System (70/100)
-Location: packages/core/src/registry.ts
-- Provider plugin architecture
-- Resource type registration and discovery
-- Provider authentication management
-- Cross-provider resource definition coordination
+## Project Initialization Workflow (70/100)
+- GCP project setup with organization policy management
+- API dependency resolution for cloud services
+- Custom billing account integration
+- Project template orchestration with dependency handling
 
-## Business Logic Architecture
+Location: packages/cli/src/commands/project/init.ts
 
-The system implements three key patterns:
-1. Resource Definition Pattern for standardized cloud resource configuration
-2. Provider Plugin Architecture enabling multi-cloud support
-3. Infrastructure Code Generation with provider-specific optimizations
+## Zero Trust Authentication (85/100)
+- Dynamic authorization system for resource-based access control
+- IAP user validation with hierarchical permissions
+- Access control audit logging
+- OAuth-based web backend protection
 
-Core business value centers on abstracting cloud infrastructure deployment through automated code generation and visual configuration tools.
+Location: plugins/zero-trust-auth/src/runtime.ts
+
+The system implements a sophisticated cloud infrastructure management platform focused on secure resource deployment, cross-service messaging, and fine-grained access control.
+
+## GCP Kernel Deployment
+
+### Automatic Provisioning
+
+When `gcpKernel` is configured, the deploy command automatically:
+
+1. **Enables Firestore API** - Uses `ProjectService` resource
+2. **Creates Firestore Database** - Creates `(default)` database in FIRESTORE_NATIVE mode
+3. **Grants IAM Permissions** - `roles/datastore.user`, `roles/pubsub.editor`, `roles/storage.objectAdmin`
+4. **Builds Kernel Service** - Compiles TypeScript and builds Docker image
+5. **Pushes to GCR** - Pushes `gcr.io/{project}/stacksolo-gcp-kernel:latest`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `plugins/gcp-kernel/src/resources/gcp-kernel.ts` | CDKTF resource definition |
+| `plugins/gcp-kernel/service/` | Kernel service source code |
+| `packages/cli/src/services/deploy.service.ts` | Deploy orchestration |
+| `packages/blueprint/src/resolver.ts` | Config resolution |
+
+### Zero Trust Auth Integration
+
+When `zeroTrustAuth` is configured alongside `gcpKernel`:
+
+1. Resolver injects `KERNEL_URL` env var into containers
+2. Containers depend on kernel (deployed first)
+3. CDKTF references kernel service URI: `${kernelService.uri}`
+4. Containers import `@stacksolo/plugin-zero-trust-auth/runtime` for `kernel.access` methods
+
+### Kernel URL Reference Pattern
+
+The resolver generates CDKTF variable references for kernel URLs:
+
+```typescript
+// In resolver.ts
+const kernelVarName = gcpKernel.name.replace(/[^a-zA-Z0-9]/g, '_');
+kernelUrl = `\${${kernelVarName}Service.uri}`;
+
+// For gcpKernel.name = "kernel", generates:
+// KERNEL_URL: kernelService.uri
+```
+
+The cloud-run resource passes through any `${...}` pattern as a CDKTF reference.
+
+### Building After Changes
+
+After modifying kernel-related code:
+
+```bash
+# Rebuild affected packages
+pnpm --filter @stacksolo/plugin-gcp-kernel build
+pnpm --filter @stacksolo/plugin-gcp-cdktf build
+pnpm --filter @stacksolo/blueprint build
+pnpm --filter @stacksolo/cli build
+
+# If modifying kernel service code
+cd plugins/gcp-kernel/service
+npm run build
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Firestore API not enabled | Deploy creates `ProjectService` resource automatically |
+| Firestore database missing | Deploy creates `FirestoreDatabase` resource automatically |
+| Missing IAM permissions | Check `roles/datastore.user` is granted to kernel SA |
+| Kernel image not found | Ensure kernel service TypeScript was built before Docker build |
+| KERNEL_URL not set | Verify `zeroTrustAuth` is configured in stacksolo.config.json |
+| Container can't reach kernel | Check dependency ordering (kernel must deploy first) |
+
+## Container Build Ordering (Critical)
+
+### The Problem
+
+Fresh deploys face a chicken-and-egg ordering problem:
+1. Container images must be pushed to Artifact Registry before Cloud Run can reference them
+2. But Artifact Registry doesn't exist until Terraform creates it
+3. Terraform won't create Cloud Run without a valid image reference
+
+### The Solution: Two-Phase Deploy
+
+The deploy service implements a two-phase approach for fresh deploys:
+
+```
+Phase 1: First Terraform Apply
+├── Creates Artifact Registry
+├── Creates VPC, connectors, other infra
+├── Creates Firestore, Pub/Sub (for kernel)
+└── MAY FAIL on Cloud Run (Image not found - this is expected)
+
+Phase 2: Container Builds
+├── Registry now exists
+├── Build TypeScript for each container
+├── Build Docker images
+└── Push to Artifact Registry
+
+Phase 3: Second Terraform Apply (if Phase 1 failed)
+└── Cloud Run now has valid images to deploy
+```
+
+### Key Code Location
+
+The two-phase logic is in `packages/cli/src/services/deploy.service.ts`:
+
+```typescript
+// Error patterns that indicate "continue to build containers":
+const isImageNotFoundError =
+  (errorStr.includes('Image') && errorStr.includes('not found')) ||
+  (errorStr.includes('Revision') && errorStr.includes('is not ready'));
+```
+
+### Why This Matters
+
+Without this ordering:
+- Fresh deploys always fail on first attempt
+- Users must manually create registry, push images, then deploy again
+- Container-based projects would require 2-3 manual deploy cycles
+
+With this ordering:
+- Fresh deploys work in a single `stacksolo deploy` command
+- System handles the chicken-and-egg automatically
+- Subsequent deploys are faster (registry exists, single apply)
 
 $END$
 

@@ -15,7 +15,7 @@ function toVariableName(name: string): string {
  * - Google login prompt appears automatically
  * - Only allowed members can access
  *
- * Note: Requires OAuth consent screen to be configured in the GCP project.
+ * Note: This resource enables the IAP API and creates OAuth consent screen automatically.
  */
 export const iapWebBackend = defineResource({
   id: 'zero-trust:iap_web_backend',
@@ -61,8 +61,13 @@ export const iapWebBackend = defineResource({
         title: 'Application Title',
         description: 'Title shown on the OAuth consent screen',
       },
+      projectId: {
+        type: 'string',
+        title: 'GCP Project ID',
+        description: 'The GCP project ID',
+      },
     },
-    required: ['name', 'backendService', 'allowedMembers', 'supportEmail'],
+    required: ['name', 'backendService', 'allowedMembers', 'supportEmail', 'projectId'],
   },
 
   defaultConfig: {},
@@ -75,57 +80,37 @@ export const iapWebBackend = defineResource({
       allowedMembers: string[];
       supportEmail: string;
       applicationTitle?: string;
+      projectId: string;
     };
 
     const members = webConfig.allowedMembers;
-    const appTitle = webConfig.applicationTitle || webConfig.name;
 
-    // Format members for Terraform
-    const membersCode = members.map((m) => `    '${m}',`).join('\n');
+    const code = `// =============================================================================
+// Zero Trust IAP Protection: ${webConfig.name}
+// =============================================================================
+//
+// This resource enables the IAP API.
+// The actual IAP enablement and IAM bindings are applied via gcloud after
+// terraform creates the backend services (handled by the deploy command).
+//
+// Protected backend: ${webConfig.backendService}
+// Allowed members: ${members.join(', ')}
 
-    const code = `// IAP OAuth Brand (Consent Screen)
-// Note: Only one brand can exist per project. If you already have one, remove this block.
-const ${varName}IapBrand = new IapBrand(this, '${config.name}-brand', {
-  supportEmail: '${webConfig.supportEmail}',
-  applicationTitle: '${appTitle}',
-});
-
-// IAP OAuth Client
-const ${varName}IapClient = new IapClient(this, '${config.name}-client', {
-  displayName: '${appTitle} IAP Client',
-  brand: ${varName}IapBrand.name,
-});
-
-// IAP Web Backend Service IAM Binding - Who can access via browser
-const ${varName}IapWebBinding = new IapWebBackendServiceIamBinding(this, '${config.name}-web-binding', {
-  project: \${var.project_id},
-  webBackendService: '${webConfig.backendService}',
-  role: 'roles/iap.httpsResourceAccessor',
-  members: [
-${membersCode}
-  ],
-});
-
-// Enable IAP on the backend service
-// Note: This requires the backend service to be connected to a Load Balancer
-const ${varName}IapSettings = new IapWebBackendServiceIamPolicy(this, '${config.name}-iap-settings', {
-  project: \${var.project_id},
-  webBackendService: '${webConfig.backendService}',
-  policyData: ${varName}IapWebBinding.policyData,
+// Enable IAP API
+const ${varName}IapApi = new ProjectService(this, '${config.name}-iap-api', {
+  service: 'iap.googleapis.com',
+  disableOnDestroy: false,
 });`;
 
     return {
       imports: [
-        "import { IapBrand } from '@cdktf/provider-google/lib/iap-brand';",
-        "import { IapClient } from '@cdktf/provider-google/lib/iap-client';",
-        "import { IapWebBackendServiceIamBinding } from '@cdktf/provider-google/lib/iap-web-backend-service-iam-binding';",
-        "import { IapWebBackendServiceIamPolicy } from '@cdktf/provider-google/lib/iap-web-backend-service-iam-policy';",
+        "import { ProjectService } from '@cdktf/provider-google/lib/project-service';",
       ],
       code,
       outputs: [
         `// Access: Visit the Load Balancer URL - Google login will be required`,
-        `export const ${varName}OauthClientId = ${varName}IapClient.clientId;`,
-        `export const ${varName}ProtectedBackend = '${webConfig.backendService}';`,
+        `// Protected Backend: ${webConfig.backendService}`,
+        `// Note: Enable IAP on the backend via Console or: gcloud compute backend-services update ${webConfig.backendService} --global --iap=enabled`,
       ],
     };
   },

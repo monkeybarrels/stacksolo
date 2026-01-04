@@ -340,15 +340,41 @@
     },
     "LoadBalancerConfig": {
       "type": "object",
+      "description": "Load balancer configuration. When using IAP (zeroTrust.iapWebBackends), domain and enableHttps are required.",
       "properties": {
         "name": { "type": "string" },
         "routes": {
           "type": "array",
           "items": { "$ref": "#/$defs/LoadBalancerRouteConfig" }
+        },
+        "domain": {
+          "type": "string",
+          "description": "Custom domain for HTTPS (required for IAP). DNS must point to load balancer IP after deployment.",
+          "examples": ["app.example.com", "api.myproject.dev"]
+        },
+        "enableHttps": {
+          "type": "boolean",
+          "description": "Enable HTTPS with Google-managed SSL certificate (requires domain). Required for IAP.",
+          "default": false
+        },
+        "redirectHttpToHttps": {
+          "type": "boolean",
+          "description": "Redirect all HTTP traffic to HTTPS. Recommended when enableHttps is true.",
+          "default": false
         }
       },
       "required": ["name"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "enableHttps": { "const": true }
+        },
+        "required": ["enableHttps"]
+      },
+      "then": {
+        "required": ["domain"],
+        "errorMessage": "When enableHttps is true, domain is required"
+      }
     },
     "LoadBalancerRouteConfig": {
       "type": "object",
@@ -630,7 +656,7 @@
     },
     "IapWebBackendConfig": {
       "type": "object",
-      "description": "Protect a web backend with Identity-Aware Proxy",
+      "description": "Protect a web backend with Identity-Aware Proxy. IMPORTANT: IAP requires HTTPS - ensure loadBalancer has domain and enableHttps configured.",
       "properties": {
         "name": {
           "type": "string",

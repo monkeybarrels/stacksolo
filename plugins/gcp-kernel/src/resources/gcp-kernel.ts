@@ -111,6 +111,23 @@ export const gcpKernelResource = defineResource({
 // GCP Kernel - Serverless kernel using Cloud Run + Pub/Sub
 // =============================================================================
 
+// Enable required APIs
+const ${varName}FirestoreApi = new ProjectService(this, '${name}-firestore-api', {
+  service: 'firestore.googleapis.com',
+  disableOnDestroy: false,
+});
+
+// Create Firestore database (required for access control)
+// Using FIRESTORE_NATIVE mode for document-based access control
+const ${varName}FirestoreDb = new FirestoreDatabase(this, '${name}-firestore-db', {
+  project: '${projectId}',
+  name: '(default)',
+  locationId: '${location}',
+  type: 'FIRESTORE_NATIVE',
+  deleteProtectionState: 'DELETE_PROTECTION_DISABLED',
+  dependsOn: [${varName}FirestoreApi],
+});
+
 // Service account for the GCP kernel
 const ${varName}Sa = new ServiceAccount(this, '${name}-sa', {
   accountId: '${name}-gcp-kernel',
@@ -128,6 +145,13 @@ new ProjectIamMember(this, '${name}-storage-iam', {
 new ProjectIamMember(this, '${name}-pubsub-iam', {
   project: '${projectId}',
   role: 'roles/pubsub.editor',
+  member: \`serviceAccount:\${${varName}Sa.email}\`,
+});
+
+// Grant Firestore/Datastore access for access control
+new ProjectIamMember(this, '${name}-firestore-iam', {
+  project: '${projectId}',
+  role: 'roles/datastore.user',
   member: \`serviceAccount:\${${varName}Sa.email}\`,
 });
 
@@ -155,6 +179,7 @@ const ${varName}Service = new CloudRunV2Service(this, '${name}', {
   name: '${name}-gcp-kernel',
   location: '${location}',
   ingress: 'INGRESS_TRAFFIC_ALL',
+  deletionProtection: false,
 
   template: {
     serviceAccount: ${varName}Sa.email,
@@ -168,7 +193,7 @@ const ${varName}Service = new CloudRunV2Service(this, '${name}', {
         },
       },
       env: [
-        { name: 'PORT', value: '8080' },
+        // Note: PORT is automatically set by Cloud Run, don't specify it
         { name: 'GCP_PROJECT_ID', value: '${projectId}' },
         { name: 'FIREBASE_PROJECT_ID', value: '${firebaseProjectId}' },
         { name: 'GCS_BUCKET', value: '${storageBucket}' },
@@ -194,6 +219,8 @@ new CloudRunV2ServiceIamMember(this, '${name}-public', {
 
     return {
       imports: [
+        "import { ProjectService } from '@cdktf/provider-google/lib/project-service';",
+        "import { FirestoreDatabase } from '@cdktf/provider-google/lib/firestore-database';",
         "import { ServiceAccount } from '@cdktf/provider-google/lib/service-account';",
         "import { ProjectIamMember } from '@cdktf/provider-google/lib/project-iam-member';",
         "import { CloudRunV2Service } from '@cdktf/provider-google/lib/cloud-run-v2-service';",

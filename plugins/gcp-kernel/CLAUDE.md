@@ -28,11 +28,13 @@ plugins/gcp-kernel/
     │   │   ├── auth.ts   # /auth/validate
     │   │   ├── health.ts # /health
     │   │   ├── files.ts  # /files/*
-    │   │   └── events.ts # /events/publish
+    │   │   ├── events.ts # /events/publish
+    │   │   └── access.ts # /access/* (zero-trust-auth)
     │   └── services/
     │       ├── firebase.ts # Token validation
     │       ├── storage.ts  # GCS signed URLs
-    │       └── pubsub.ts   # Cloud Pub/Sub
+    │       ├── pubsub.ts   # Cloud Pub/Sub
+    │       └── access.ts   # Firestore access control
     ├── Dockerfile
     └── package.json
 ```
@@ -186,7 +188,107 @@ The service reads:
 
 ### CDKTF Resource
 The CDKTF resource (`src/resources/gcp-kernel.ts`) generates:
-- Service account with storage + pubsub permissions
-- Cloud Run service
+- Firestore API enablement via `ProjectService`
+- Firestore database in FIRESTORE_NATIVE mode
+- Service account with storage, pubsub, and datastore.user permissions
+- Cloud Run service with `deletionProtection: false`
 - Pub/Sub topic for events
 - IAM bindings for invoker access
+
+### Access Control Endpoints
+
+Added for zero-trust-auth integration:
+
+#### POST /access/grant
+Grant access to a resource:
+```typescript
+await fetch(`${kernelUrl}/access/grant`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    resource: 'admin-dashboard',
+    member: 'user@example.com',
+    permissions: ['read', 'write'],
+    grantedBy: 'admin@example.com',
+  }),
+});
+```
+
+#### POST /access/revoke
+Revoke access from a resource.
+
+#### POST /access/check
+Check if a member has access to a resource.
+
+#### GET /access/list?resource=xxx
+List all members with access to a resource.
+
+#### GET /access/resources
+List all protected resources.
+
+## Deployment Requirements
+
+### Automatic Provisioning
+
+The deploy command automatically handles:
+
+1. **Firestore API** - Enabled via `google_project_service`
+2. **Firestore Database** - Created via `google_firestore_database`
+3. **IAM Permissions** - Granted via `google_project_iam_member`
+4. **Docker Build** - Compiles TypeScript and builds image with `--platform linux/amd64`
+5. **GCR Push** - Pushes to `gcr.io/{project}/stacksolo-gcp-kernel:latest`
+
+### Building After Code Changes
+
+**IMPORTANT**: Always rebuild the kernel service TypeScript before Docker build:
+
+```bash
+# 1. Build the service TypeScript
+cd plugins/gcp-kernel/service
+npm run build
+
+# 2. Verify dist/routes/access.js exists
+ls dist/routes/
+
+# 3. Build Docker image
+docker build --platform linux/amd64 -t gcr.io/{project}/stacksolo-gcp-kernel:latest .
+```
+
+The deploy service does this automatically, but manual rebuilds require this sequence.
+
+### Preflight Checks
+
+The deploy command runs preflight checks before deploying GCP Kernel resources:
+
+| Check | Description | Auto-Fix |
+|-------|-------------|----------|
+| Docker | Verifies Docker is installed and running | No |
+| gcloud CLI | Verifies gcloud is installed | No |
+| GCP Authentication | Verifies user is authenticated with gcloud | No |
+| Docker GCR Auth | Checks if Docker is configured for gcr.io | Yes (during deploy) |
+| Kernel Source | Verifies kernel service source is available | No |
+| GCP APIs | Checks if required APIs are enabled | Yes (during deploy) |
+
+Use `--skip-preflight` to bypass these checks (not recommended).
+
+### Troubleshooting
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| `/access/list` returns 404 | Missing `access.js` in dist | Rebuild service: `npm run build` |
+| Firestore permission denied | Missing IAM role | Kernel SA needs `roles/datastore.user` |
+| Firestore API not enabled | API not activated | Deploy creates `ProjectService` resource |
+| exec format error | Wrong platform | Use `--platform linux/amd64` in Dockerfile |
+| Cloud Run deletion blocked | Protection enabled | Set `deletionProtection: false` in resource |
+| Docker daemon not running | Docker not started | Start Docker Desktop |
+| Not authenticated with gcloud | gcloud auth expired | Run: `gcloud auth login` |
+| Kernel source not found | Plugin not installed | Install `@stacksolo/plugin-gcp-kernel` |
+
+### Zero Trust Auth Integration
+
+When used with `@stacksolo/plugin-zero-trust-auth`:
+
+1. Configure `zeroTrustAuth` in stacksolo.config.json
+2. Resolver auto-injects `KERNEL_URL` into containers
+3. Containers import `@stacksolo/plugin-zero-trust-auth/runtime`
+4. Access `kernel.access.check()`, `kernel.access.grant()`, etc.

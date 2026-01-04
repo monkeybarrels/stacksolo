@@ -1,6 +1,9 @@
 import path from 'path';
+import * as fs from 'fs/promises';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import {
   GcpResource,
   TerraformState,
@@ -15,6 +18,8 @@ import {
   importConflicts,
   getImportCommand,
 } from './terraform-import.service';
+
+const execAsync = promisify(exec);
 
 export interface PreflightOptions {
   skipPreflight?: boolean;
@@ -245,6 +250,275 @@ export function displayResourceDetails(
 /**
  * Execute the chosen resolution strategy
  */
+// =============================================================================
+// GCP Kernel Preflight Checks
+// =============================================================================
+
+export interface KernelPreflightResult {
+  success: boolean;
+  checks: KernelPreflightCheck[];
+  errors: string[];
+  warnings: string[];
+}
+
+export interface KernelPreflightCheck {
+  name: string;
+  status: 'pass' | 'fail' | 'warn';
+  message: string;
+  fix?: string;
+}
+
+/**
+ * Run preflight checks specific to GCP Kernel deployment
+ * Validates Docker, gcloud auth, and kernel source availability
+ */
+export async function runKernelPreflightCheck(
+  gcpProjectId: string,
+  cwd: string = process.cwd()
+): Promise<KernelPreflightResult> {
+  const checks: KernelPreflightCheck[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // Check 1: Docker installed and running
+  try {
+    await execAsync('docker info', { timeout: 10000 });
+    checks.push({
+      name: 'Docker',
+      status: 'pass',
+      message: 'Docker is installed and running',
+    });
+  } catch (error) {
+    const errorStr = String(error);
+    if (errorStr.includes('Cannot connect') || errorStr.includes('not running')) {
+      checks.push({
+        name: 'Docker',
+        status: 'fail',
+        message: 'Docker daemon is not running',
+        fix: 'Start Docker Desktop or run: sudo systemctl start docker',
+      });
+      errors.push('Docker daemon is not running');
+    } else if (errorStr.includes('command not found') || errorStr.includes('not recognized')) {
+      checks.push({
+        name: 'Docker',
+        status: 'fail',
+        message: 'Docker is not installed',
+        fix: 'Install Docker from https://docs.docker.com/get-docker/',
+      });
+      errors.push('Docker is not installed');
+    } else {
+      checks.push({
+        name: 'Docker',
+        status: 'fail',
+        message: `Docker check failed: ${errorStr.slice(0, 100)}`,
+        fix: 'Ensure Docker is installed and running',
+      });
+      errors.push('Docker check failed');
+    }
+  }
+
+  // Check 2: gcloud CLI installed
+  try {
+    await execAsync('gcloud --version', { timeout: 10000 });
+    checks.push({
+      name: 'gcloud CLI',
+      status: 'pass',
+      message: 'gcloud CLI is installed',
+    });
+  } catch {
+    checks.push({
+      name: 'gcloud CLI',
+      status: 'fail',
+      message: 'gcloud CLI is not installed',
+      fix: 'Install from https://cloud.google.com/sdk/docs/install',
+    });
+    errors.push('gcloud CLI is not installed');
+  }
+
+  // Check 3: gcloud authenticated
+  try {
+    const { stdout } = await execAsync('gcloud auth list --filter=status:ACTIVE --format="value(account)"', { timeout: 10000 });
+    if (stdout.trim()) {
+      checks.push({
+        name: 'GCP Authentication',
+        status: 'pass',
+        message: `Authenticated as ${stdout.trim()}`,
+      });
+    } else {
+      checks.push({
+        name: 'GCP Authentication',
+        status: 'fail',
+        message: 'Not authenticated with gcloud',
+        fix: 'Run: gcloud auth login',
+      });
+      errors.push('Not authenticated with gcloud');
+    }
+  } catch {
+    checks.push({
+      name: 'GCP Authentication',
+      status: 'warn',
+      message: 'Could not verify gcloud authentication',
+      fix: 'Run: gcloud auth login',
+    });
+    warnings.push('Could not verify gcloud authentication');
+  }
+
+  // Check 4: Docker auth for GCR configured
+  try {
+    // Check if gcr.io is in Docker config
+    const dockerConfigPath = path.join(process.env.HOME || '~', '.docker', 'config.json');
+    const configContent = await fs.readFile(dockerConfigPath, 'utf-8');
+    const dockerConfig = JSON.parse(configContent);
+
+    const hasGcr =
+      dockerConfig.credHelpers?.['gcr.io'] === 'gcloud' ||
+      dockerConfig.auths?.['gcr.io'] ||
+      dockerConfig.auths?.['https://gcr.io'];
+
+    if (hasGcr) {
+      checks.push({
+        name: 'Docker GCR Auth',
+        status: 'pass',
+        message: 'Docker is configured to authenticate with gcr.io',
+      });
+    } else {
+      checks.push({
+        name: 'Docker GCR Auth',
+        status: 'warn',
+        message: 'Docker may not be configured for gcr.io',
+        fix: 'Run: gcloud auth configure-docker gcr.io',
+      });
+      warnings.push('Docker may not be configured for gcr.io (will be auto-configured during deploy)');
+    }
+  } catch {
+    checks.push({
+      name: 'Docker GCR Auth',
+      status: 'warn',
+      message: 'Could not verify Docker GCR configuration',
+      fix: 'Run: gcloud auth configure-docker gcr.io',
+    });
+    warnings.push('Could not verify Docker GCR configuration (will be auto-configured during deploy)');
+  }
+
+  // Check 5: Kernel service source exists
+  // Try multiple locations where the kernel service could be
+  const possiblePaths = [
+    path.resolve(cwd, '../stacksolo/plugins/gcp-kernel/service'),
+    path.resolve(cwd, 'node_modules/@stacksolo/plugin-gcp-kernel/service'),
+    path.resolve(cwd, 'plugins/gcp-kernel/service'),
+  ];
+
+  let kernelSourceFound = false;
+  let foundPath = '';
+
+  for (const sourcePath of possiblePaths) {
+    try {
+      await fs.access(path.join(sourcePath, 'Dockerfile'));
+      await fs.access(path.join(sourcePath, 'package.json'));
+      kernelSourceFound = true;
+      foundPath = sourcePath;
+      break;
+    } catch {
+      // Try next path
+    }
+  }
+
+  if (kernelSourceFound) {
+    checks.push({
+      name: 'Kernel Source',
+      status: 'pass',
+      message: `Found kernel service at ${foundPath}`,
+    });
+  } else {
+    checks.push({
+      name: 'Kernel Source',
+      status: 'fail',
+      message: 'Could not find GCP Kernel service source',
+      fix: 'Ensure @stacksolo/plugin-gcp-kernel is installed or kernel source is in plugins/gcp-kernel/service',
+    });
+    errors.push('Could not find GCP Kernel service source');
+  }
+
+  // Check 6: Project has required APIs enabled (best effort)
+  if (gcpProjectId) {
+    try {
+      const { stdout } = await execAsync(
+        `gcloud services list --project=${gcpProjectId} --format="value(config.name)" --filter="config.name:(run.googleapis.com OR cloudbuild.googleapis.com OR firestore.googleapis.com)"`,
+        { timeout: 30000 }
+      );
+
+      const enabledApis = stdout.trim().split('\n').filter(Boolean);
+      const requiredApis = ['run.googleapis.com', 'cloudbuild.googleapis.com', 'firestore.googleapis.com'];
+      const missingApis = requiredApis.filter(api => !enabledApis.includes(api));
+
+      if (missingApis.length === 0) {
+        checks.push({
+          name: 'GCP APIs',
+          status: 'pass',
+          message: 'Required GCP APIs are enabled',
+        });
+      } else {
+        checks.push({
+          name: 'GCP APIs',
+          status: 'warn',
+          message: `Missing APIs: ${missingApis.join(', ')}`,
+          fix: `Run: gcloud services enable ${missingApis.join(' ')} --project=${gcpProjectId}`,
+        });
+        warnings.push(`Some GCP APIs may need to be enabled: ${missingApis.join(', ')}`);
+      }
+    } catch {
+      checks.push({
+        name: 'GCP APIs',
+        status: 'warn',
+        message: 'Could not verify GCP API status',
+      });
+      warnings.push('Could not verify GCP API status');
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    checks,
+    errors,
+    warnings,
+  };
+}
+
+/**
+ * Display kernel preflight results
+ */
+export function displayKernelPreflightResults(result: KernelPreflightResult): void {
+  console.log(chalk.cyan('\n  GCP Kernel Preflight Checks:\n'));
+
+  for (const check of result.checks) {
+    const icon = check.status === 'pass' ? chalk.green('✓') :
+                 check.status === 'warn' ? chalk.yellow('⚠') :
+                 chalk.red('✗');
+
+    console.log(`    ${icon} ${chalk.white(check.name)}: ${check.message}`);
+
+    if (check.fix && check.status !== 'pass') {
+      console.log(chalk.gray(`      Fix: ${check.fix}`));
+    }
+  }
+
+  if (result.errors.length > 0) {
+    console.log(chalk.red('\n  Errors that must be fixed before deploy:'));
+    for (const error of result.errors) {
+      console.log(chalk.red(`    - ${error}`));
+    }
+  }
+
+  if (result.warnings.length > 0) {
+    console.log(chalk.yellow('\n  Warnings (may auto-resolve during deploy):'));
+    for (const warning of result.warnings) {
+      console.log(chalk.yellow(`    - ${warning}`));
+    }
+  }
+
+  console.log();
+}
+
 export async function executeResolution(
   resolution: ResolutionChoice,
   conflicts: ConflictResult[],
