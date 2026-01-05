@@ -1,0 +1,9 @@
+# Kubernetes Namespace
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: simple-api-k8s
+  labels:
+    app.kubernetes.io/managed-by: stacksolo
+    stacksolo.dev/project: simple-api-k8s

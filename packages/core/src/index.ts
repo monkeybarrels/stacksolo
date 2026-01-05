@@ -18,6 +18,11 @@ export type {
   InfrastructureSpec,
   BuildSpec,
   DefineAppPatternInput,
+  // Output formatter types
+  OutputFormatter,
+  OutputFormatterOptions,
+  ResolvedResource,
+  GeneratedOutput,
 } from './types';
 
 // Define helpers

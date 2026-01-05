@@ -1,0 +1,10 @@
+# Configuration
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: simple-api-k8s-config
+  namespace: simple-api-k8s
+data:
+  STACKSOLO_PROJECT_NAME: simple-api-k8s
+  GCP_PROJECT_ID: refinery-platform-main

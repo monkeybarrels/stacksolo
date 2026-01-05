@@ -1,0 +1,43 @@
+{
+  "project": {
+    "name": "simple-api-k8s",
+    "region": "us-central1",
+    "gcpProjectId": "refinery-platform-main",
+    "backend": "kubernetes",
+    "kubernetes": {
+      "registry": {
+        "url": "gcr.io/refinery-platform-main"
+      },
+      "replicas": 1,
+      "resources": {
+        "defaultMemoryLimit": "256Mi",
+        "defaultCpuLimit": "250m",
+        "defaultMemoryRequest": "128Mi",
+        "defaultCpuRequest": "100m"
+      },
+      "ingress": {
+        "className": "nginx",
+        "host": "simple-api.example.com"
+      }
+    },
+    "networks": [
+      {
+        "name": "main",
+        "functions": [
+          {
+            "name": "api",
+            "runtime": "nodejs20",
+            "entryPoint": "api",
+            "memory": "256Mi"
+          }
+        ],
+        "loadBalancer": {
+          "name": "gateway",
+          "routes": [
+            { "path": "/*", "backend": "api" }
+          ]
+        }
+      }
+    ]
+  }
+}

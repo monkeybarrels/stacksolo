@@ -1,0 +1,19 @@
+# Service: simple-api-k8s-api
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-api-k8s-api
+  namespace: simple-api-k8s
+  labels:
+    app: simple-api-k8s-api
+    app.kubernetes.io/name: simple-api-k8s-api
+    app.kubernetes.io/managed-by: stacksolo
+spec:
+  selector:
+    app: simple-api-k8s-api
+  ports:
+  - port: 80
+    targetPort: 8080
+    name: http
+  type: ClusterIP

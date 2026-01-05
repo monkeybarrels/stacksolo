@@ -1,4 +1,4 @@
-import type { Provider, ResourceType, AppPattern, Plugin } from './types';
+import type { Provider, ResourceType, AppPattern, Plugin, OutputFormatter } from './types';
 
 /**
  * Registry for providers and resource types
@@ -7,6 +7,7 @@ export class PluginRegistry {
   private providers: Map<string, Provider> = new Map();
   private resources: Map<string, ResourceType> = new Map();
   private patterns: Map<string, AppPattern> = new Map();
+  private formatters: Map<string, OutputFormatter> = new Map();
 
   /**
    * Register a plugin (provider with its resources and patterns)
@@ -25,6 +26,11 @@ export class PluginRegistry {
     if (plugin.patterns) {
       for (const pattern of plugin.patterns) {
         this.registerPattern(pattern);
+      }
+    }
+    if (plugin.outputFormatters) {
+      for (const formatter of plugin.outputFormatters) {
+        this.registerFormatter(formatter);
       }
     }
   }
@@ -139,6 +145,30 @@ export class PluginRegistry {
       }
     }
     return detected;
+  }
+
+  /**
+   * Register an output formatter
+   */
+  registerFormatter(formatter: OutputFormatter): void {
+    if (this.formatters.has(formatter.id)) {
+      throw new Error(`Output formatter already registered: ${formatter.id}`);
+    }
+    this.formatters.set(formatter.id, formatter);
+  }
+
+  /**
+   * Get an output formatter by ID
+   */
+  getFormatter(id: string): OutputFormatter | undefined {
+    return this.formatters.get(id);
+  }
+
+  /**
+   * Get all registered output formatters
+   */
+  getAllFormatters(): OutputFormatter[] {
+    return Array.from(this.formatters.values());
   }
 }
 

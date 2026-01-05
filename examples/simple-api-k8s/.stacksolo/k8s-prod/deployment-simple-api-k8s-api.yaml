@@ -1,0 +1,53 @@
+# Deployment: simple-api-k8s-api
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-api-k8s-api
+  namespace: simple-api-k8s
+  labels:
+    app: simple-api-k8s-api
+    app.kubernetes.io/name: simple-api-k8s-api
+    app.kubernetes.io/managed-by: stacksolo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simple-api-k8s-api
+  template:
+    metadata:
+      labels:
+        app: simple-api-k8s-api
+        app.kubernetes.io/name: simple-api-k8s-api
+    spec:
+      containers:
+      - name: simple-api-k8s-api
+        image: "gcr.io/refinery-platform-main/api:latest"
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: FUNCTION_TARGET
+          value: api
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3

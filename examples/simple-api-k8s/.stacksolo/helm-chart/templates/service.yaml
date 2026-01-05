@@ -1,0 +1,23 @@
+{{- range $name, $deployment := .Values.deployments }}
+{{- if $deployment.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "simple-api-k8s.fullname" $ }}-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "simple-api-k8s.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $deployment.servicePort | default 80 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "simple-api-k8s.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+{{- end }}
+{{- end }}

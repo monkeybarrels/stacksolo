@@ -189,6 +189,64 @@ export interface WebAdminConfig {
   port?: number;                  // Default: 3000
 }
 
+/**
+ * Kubernetes Backend Configuration
+ *
+ * Configuration for deploying to any Kubernetes cluster (GKE, EKS, AKS, self-hosted).
+ * Use with `backend: 'kubernetes'` in project config.
+ */
+export interface KubernetesConfig {
+  /** Container registry configuration */
+  registry: {
+    /** Registry URL (e.g., "gcr.io/my-project", "docker.io/myuser", "123456.dkr.ecr.us-east-1.amazonaws.com") */
+    url: string;
+    /** K8s secret name for imagePullSecrets (optional if using node-level auth) */
+    authSecret?: string;
+  };
+
+  /** Override auto-generated namespace (default: project name) */
+  namespace?: string;
+
+  /** Default replicas for deployments (default: 1) */
+  replicas?: number;
+
+  /** Resource defaults for all deployments */
+  resources?: {
+    defaultMemoryLimit?: string;    // e.g., "512Mi"
+    defaultCpuLimit?: string;       // e.g., "500m"
+    defaultMemoryRequest?: string;  // e.g., "256Mi"
+    defaultCpuRequest?: string;     // e.g., "100m"
+  };
+
+  /** Ingress configuration for external access */
+  ingress?: {
+    /** Ingress class (e.g., "nginx", "traefik", "gce") */
+    className?: string;
+    /** Hostname for the ingress (e.g., "app.example.com") */
+    host?: string;
+    /** TLS secret name for HTTPS */
+    tlsSecretName?: string;
+    /** Additional annotations for the ingress */
+    annotations?: Record<string, string>;
+  };
+
+  /** Kubernetes context to use (default: current context) */
+  context?: string;
+
+  /** Path to kubeconfig file (default: ~/.kube/config) */
+  kubeconfig?: string;
+
+  /** Helm chart output configuration (used with --helm flag) */
+  helm?: {
+    /** Chart version (default: 0.1.0) */
+    chartVersion?: string;
+    /** App version (default: latest or --tag value) */
+    appVersion?: string;
+    /** Override default values in values.yaml */
+    values?: Record<string, unknown>;
+  };
+}
+
 export interface SubnetConfig {
   name: string;
   ipCidrRange: string;
@@ -268,9 +326,10 @@ export interface ProjectConfig {
   /**
    * Infrastructure backend to use for deployment.
    * - "pulumi" (default): Uses Pulumi Automation API
-   * - "cdktf": Uses CDK for Terraform (only supports function-api template)
+   * - "cdktf": Uses CDK for Terraform (GCP Cloud Run, Cloud Functions)
+   * - "kubernetes": Deploys to any Kubernetes cluster (GKE, EKS, AKS, self-hosted)
    */
-  backend?: 'pulumi' | 'cdktf';
+  backend?: 'pulumi' | 'cdktf' | 'kubernetes';
 
   /**
    * Plugins to load for this project.
@@ -299,6 +358,9 @@ export interface ProjectConfig {
   // Zero Trust configurations (IAP + dynamic access control)
   zeroTrust?: ZeroTrustConfig;
   zeroTrustAuth?: ZeroTrustAuthConfig;
+
+  // Kubernetes-specific configuration (required when backend: 'kubernetes')
+  kubernetes?: KubernetesConfig;
 
   // Network-scoped resources
   networks?: NetworkConfig[];

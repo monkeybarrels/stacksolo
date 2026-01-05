@@ -267,11 +267,59 @@ These defaults must be consistent between scaffold generators and K8s manifest g
 
 ## Key Files to Know
 
-- `packages/core/src/types.ts` - Core interfaces
-- `packages/core/src/registry.ts` - Plugin registry
+- `packages/core/src/types.ts` - Core interfaces (Plugin, Provider, OutputFormatter)
+- `packages/core/src/registry.ts` - Plugin registry (resources, formatters)
 - `packages/api/src/repositories/interfaces.ts` - Repository interfaces
 - `plugins/gcp-cdktf/src/provider.ts` - GCP CDKTF provider definition
 - `plugins/gcp-cdktf/src/resources/` - GCP CDKTF resource type definitions
+- `plugins/helm/src/formatter.ts` - Helm chart OutputFormatter implementation
+
+## OutputFormatter Plugin Capability
+
+Plugins can provide output formatters via the `outputFormatters` array in the Plugin interface:
+
+```typescript
+interface OutputFormatter {
+  id: string;           // e.g., 'helm'
+  name: string;         // e.g., 'Helm Chart'
+  description: string;
+  generate: (options: OutputFormatterOptions) => GeneratedOutput[];
+}
+
+interface OutputFormatterOptions {
+  projectName: string;
+  resources: ResolvedResource[];
+  config: Record<string, unknown>;
+  outputDir: string;
+}
+
+// Usage in plugin
+export const plugin: Plugin = {
+  name: '@stacksolo/plugin-helm',
+  outputFormatters: [helmFormatter],
+};
+```
+
+The `--helm` flag on `stacksolo deploy` uses this capability for Kubernetes backend projects.
+
+## Helm Plugin
+
+The `@stacksolo/plugin-helm` generates Helm charts from K8s resources:
+
+```bash
+# Generate Helm chart
+stacksolo deploy --helm --preview
+
+# Deploy via Helm
+stacksolo deploy --helm
+```
+
+Key files:
+- `plugins/helm/src/formatter.ts` - Main OutputFormatter
+- `plugins/helm/src/templates/*.ts` - Template generators
+- `plugins/helm/src/types.ts` - HelmValues, DeploymentValues types
+
+Generated output: `.stacksolo/helm-chart/` with Chart.yaml, values.yaml, and templates/
 
 ## CLI Command Documentation Requirements
 

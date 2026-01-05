@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
-import type { Plugin, PluginService } from '@stacksolo/core';
+import type { Plugin, PluginService, OutputFormatter } from '@stacksolo/core';
 import { registry } from '@stacksolo/core';
 
 /** Default plugins that are always loaded */
@@ -100,6 +100,7 @@ function resolveLocalPlugin(monorepoRoot: string, pluginName: string): string | 
     '@stacksolo/plugin-gcp-kernel': 'plugins/gcp-kernel',
     '@stacksolo/plugin-zero-trust': 'plugins/zero-trust',
     '@stacksolo/plugin-zero-trust-auth': 'plugins/zero-trust-auth',
+    '@stacksolo/plugin-helm': 'plugins/helm',
   };
 
   const relativePath = pluginPaths[pluginName];
@@ -251,6 +252,17 @@ export async function loadPlugins(configPlugins?: string[]): Promise<Plugin[]> {
           }
         }
       }
+
+      // Register output formatters
+      if (plugin.outputFormatters) {
+        for (const formatter of plugin.outputFormatters) {
+          try {
+            registry.registerFormatter(formatter);
+          } catch {
+            // Already registered, skip
+          }
+        }
+      }
     } catch (error) {
       console.error(`Warning: Failed to load plugin ${pluginName}:`, error);
     }
@@ -325,6 +337,34 @@ export function getServiceSourcePath(service: PluginService): string | null {
   }
 
   return null;
+}
+
+/**
+ * Get all output formatters from loaded plugins
+ */
+export function getPluginFormatters(): OutputFormatter[] {
+  const formatters: OutputFormatter[] = [];
+
+  for (const plugin of loadedPlugins.values()) {
+    if (plugin.outputFormatters) {
+      formatters.push(...plugin.outputFormatters);
+    }
+  }
+
+  return formatters;
+}
+
+/**
+ * Get a specific output formatter by ID
+ */
+export function getPluginFormatter(formatterId: string): OutputFormatter | undefined {
+  for (const plugin of loadedPlugins.values()) {
+    const formatter = plugin.outputFormatters?.find((f) => f.id === formatterId);
+    if (formatter) {
+      return formatter;
+    }
+  }
+  return undefined;
 }
 
 /**

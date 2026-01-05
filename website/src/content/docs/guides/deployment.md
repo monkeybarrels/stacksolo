@@ -57,8 +57,9 @@ stacksolo deploy --force
 
 ## Generated Code
 
-StackSolo generates infrastructure code in `.stacksolo/cdktf/`:
+StackSolo generates infrastructure code in `.stacksolo/`:
 
+**CDKTF Backend (GCP):**
 ```
 .stacksolo/
 ├── cdktf/
@@ -68,7 +69,33 @@ StackSolo generates infrastructure code in `.stacksolo/cdktf/`:
 └── stacksolo.config.json
 ```
 
+**Kubernetes Backend with Helm:**
+```
+.stacksolo/
+├── helm-chart/
+│   ├── Chart.yaml        # Chart metadata
+│   ├── values.yaml       # Default values
+│   └── templates/        # K8s manifests
+└── stacksolo.config.json
+```
+
 You can inspect this code to see exactly what will be created.
+
+## Helm Charts (Kubernetes)
+
+For Kubernetes backend projects, use `--helm` to generate Helm charts:
+
+```bash
+stacksolo deploy --helm --preview
+```
+
+Helm charts enable:
+- **Multi-environment deployments** via values files (`values-dev.yaml`, `values-prod.yaml`)
+- **GitOps workflows** with ArgoCD or Flux
+- **Rollbacks** with `helm rollback`
+- **Templated configuration** with `--set` overrides
+
+See [Helm Plugin](/plugins/helm/) for full documentation.
 
 ## Eject
 

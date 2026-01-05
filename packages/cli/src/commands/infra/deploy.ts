@@ -28,6 +28,11 @@ import {
   logEvent,
 } from '@stacksolo/registry';
 import { deployConfig } from '../../services/deploy.service';
+import {
+  deployToKubernetes,
+  buildAndPushImages,
+  checkKubernetesConnection,
+} from '../../services/k8s-deploy.service';
 import { createCommandLogger, logFullError, getLogPath } from '../../logger';
 import {
   runPreflightCheck,
@@ -38,6 +43,7 @@ import {
   displayKernelPreflightResults,
   ensureCloudFunctionsPrerequisites,
 } from '../../services/preflight.service';
+import { getPluginFormatter, loadPlugins } from '../../services/plugin-loader.service';
 
 const execAsync = promisify(exec);
 
@@ -104,6 +110,7 @@ export const deployCommand = new Command('deploy')
   .option('--import-conflicts', 'Automatically import conflicting resources')
   .option('--delete-conflicts', 'Automatically delete conflicting resources')
   .option('-v, --verbose', 'Show real-time Terraform and Docker output')
+  .option('--helm', 'Generate Helm chart instead of raw K8s manifests (kubernetes backend only)')
   .action(async (options) => {
     await runDeploy(options);
   });
@@ -120,6 +127,7 @@ interface DeployOptions {
   importConflicts?: boolean;
   deleteConflicts?: boolean;
   verbose?: boolean;
+  helm?: boolean;
 }
 
 interface RetryContext {
@@ -837,6 +845,198 @@ async function runDeploy(
     }, { project: projectName });
   }
 
+  // Handle Kubernetes backend
+  if (config.project.backend === 'kubernetes') {
+    const k8sConfig = config.project.kubernetes!;
+
+    // Handle --helm flag: generate Helm chart instead of raw manifests
+    if (options.helm) {
+      if (spinner) spinner.text = 'Loading Helm plugin...';
+
+      // Load plugins including helm
+      const plugins = config.project.plugins || [];
+      if (!plugins.includes('@stacksolo/plugin-helm')) {
+        plugins.push('@stacksolo/plugin-helm');
+      }
+      await loadPlugins(plugins);
+
+      // Get the helm formatter
+      const helmFormatter = getPluginFormatter('helm');
+      if (!helmFormatter) {
+        if (spinner) spinner.fail('Helm plugin not found');
+        console.log(chalk.red('\n  Error: @stacksolo/plugin-helm not installed'));
+        console.log(chalk.gray('  Add "@stacksolo/plugin-helm" to your plugins array in stacksolo.config.json\n'));
+        if (sessionId) await endSession(sessionId, 1);
+        return;
+      }
+
+      if (spinner) spinner.text = 'Generating Helm chart...';
+
+      // Generate helm chart
+      const helmOutputDir = path.join(process.cwd(), '.stacksolo', 'helm-chart');
+      const helmConfig = k8sConfig.helm || {};
+
+      const helmFiles = helmFormatter.generate({
+        projectName: config.project.name,
+        resources: resolved.resources.map(r => ({
+          id: r.id,
+          type: r.type,
+          name: r.name,
+          config: r.config,
+          dependsOn: r.dependsOn,
+          network: r.network,
+        })),
+        config: {
+          chartVersion: helmConfig.chartVersion || '0.1.0',
+          appVersion: options.tag || helmConfig.appVersion || 'latest',
+          ...helmConfig.values,
+        },
+        outputDir: helmOutputDir,
+      });
+
+      // Create output directories
+      await fs.mkdir(path.join(helmOutputDir, 'templates'), { recursive: true });
+
+      // Write all helm files
+      for (const file of helmFiles) {
+        const filePath = path.join(helmOutputDir, file.path);
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, file.content);
+      }
+
+      if (spinner) spinner.succeed('Helm chart generated');
+
+      console.log(chalk.cyan('\n  Chart:'), config.project.name);
+      console.log(chalk.cyan('  Location:'), '.stacksolo/helm-chart/');
+      console.log(chalk.cyan('  Files:'), helmFiles.length);
+
+      if (!options.preview) {
+        // Deploy with helm
+        if (spinner) spinner.text = 'Deploying with Helm...';
+        const namespace = k8sConfig.namespace || config.project.name;
+        const releaseName = config.project.name;
+
+        try {
+          await execAsync(
+            `helm upgrade --install ${releaseName} ${helmOutputDir} --namespace ${namespace} --create-namespace`
+          );
+          console.log(chalk.green('\n  Deployed successfully with Helm!'));
+          console.log(chalk.gray(`\n  Release: ${releaseName}`));
+          console.log(chalk.gray(`  Namespace: ${namespace}\n`));
+        } catch (error) {
+          console.log(chalk.red(`\n  Helm deployment failed: ${error}`));
+          if (sessionId) await endSession(sessionId, 1);
+          return;
+        }
+      } else {
+        console.log(chalk.gray('\n  Preview mode - chart generated but not deployed'));
+        console.log(chalk.gray('\n  To deploy manually:'));
+        console.log(chalk.cyan(`    helm install ${config.project.name} .stacksolo/helm-chart -n ${k8sConfig.namespace || config.project.name}`));
+        console.log(chalk.gray('\n  For different environments:'));
+        console.log(chalk.cyan(`    helm install ${config.project.name}-dev .stacksolo/helm-chart -f values-dev.yaml`));
+        console.log(chalk.cyan(`    helm install ${config.project.name}-staging .stacksolo/helm-chart -f values-staging.yaml`));
+        console.log(chalk.cyan(`    helm install ${config.project.name}-prod .stacksolo/helm-chart -f values-prod.yaml\n`));
+      }
+
+      if (sessionId) {
+        await logPhaseEnd(sessionId, phase, { project: projectName });
+        await endSession(sessionId, 0);
+      }
+
+      return;
+    }
+
+    // Check kubernetes connection (skip for preview - just generate manifests)
+    if (!options.preview) {
+      const connCheck = await checkKubernetesConnection(k8sConfig.context, k8sConfig.kubeconfig);
+      if (!connCheck.connected) {
+        if (spinner) spinner.fail('Cannot connect to Kubernetes cluster');
+        console.log(chalk.red(`\n  Error: ${connCheck.error}`));
+        console.log(chalk.gray('\n  Make sure kubectl is configured and can access your cluster.\n'));
+        if (sessionId) await endSession(sessionId, 1);
+        return;
+      }
+    }
+
+    // Build and push images (unless preview or skip-build)
+    if (!options.preview && !options.skipBuild && !options.destroy) {
+      if (spinner) spinner.text = 'Building container images...';
+      const buildResult = await buildAndPushImages(
+        config,
+        resolved.resources,
+        options.tag || 'latest',
+        {
+          onLog: (msg) => {
+            logs.push(msg);
+            if (options.verbose) console.log(chalk.gray(`  ${msg}`));
+          },
+          onVerbose: (msg) => {
+            if (options.verbose) console.log(chalk.gray(`  ${msg}`));
+          },
+          verbose: options.verbose,
+        }
+      );
+
+      if (!buildResult.success) {
+        if (spinner) spinner.fail('Image build failed');
+        console.log(chalk.red(`\n  Error: ${buildResult.error}`));
+        if (sessionId) await endSession(sessionId, 1);
+        return;
+      }
+
+      if (buildResult.images.length > 0) {
+        logs.push(`Built ${buildResult.images.length} images`);
+      }
+    }
+
+    // Deploy to Kubernetes
+    if (spinner) spinner.text = `${action} to Kubernetes...`;
+    const k8sResult = await deployToKubernetes({
+      config,
+      resources: resolved.resources,
+      imageTag: options.tag || 'latest',
+      dryRun: options.preview,
+      verbose: options.verbose,
+      onLog: (msg) => {
+        logs.push(msg);
+        if (options.verbose) console.log(chalk.gray(`  ${msg}`));
+      },
+      onVerbose: (msg) => {
+        if (options.verbose) console.log(chalk.gray(`  ${msg}`));
+      },
+    });
+
+    if (k8sResult.success) {
+      const successMsg = options.preview ? 'Preview complete' : 'Deployed to Kubernetes successfully';
+      if (spinner) {
+        spinner.succeed(successMsg);
+      } else {
+        console.log(chalk.green(`\n  ✓ ${successMsg}`));
+      }
+
+      // Show outputs
+      console.log(chalk.cyan('\n  Namespace:'), k8sResult.outputs.namespace);
+      if (k8sResult.outputs.ingressUrl) {
+        console.log(chalk.cyan('  Ingress URL:'), k8sResult.outputs.ingressUrl);
+      }
+      console.log(chalk.cyan('  Services:'), Object.keys(k8sResult.outputs.services).length);
+
+      if (sessionId) {
+        await logPhaseEnd(sessionId, phase, { project: projectName });
+        await endSession(sessionId, 0);
+      }
+
+      console.log(chalk.gray(`\n  Manifests written to: .stacksolo/k8s-prod/\n`));
+    } else {
+      if (spinner) spinner.fail('Kubernetes deployment failed');
+      console.log(chalk.red(`\n  Error: ${k8sResult.error}`));
+      if (sessionId) await endSession(sessionId, 1);
+    }
+
+    return;
+  }
+
+  // CDKTF/Terraform deploy (existing logic)
   const result = await deployConfig(config, STATE_DIR, {
     preview: options.preview,
     destroy: options.destroy,

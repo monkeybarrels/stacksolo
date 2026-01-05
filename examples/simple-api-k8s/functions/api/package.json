@@ -1,0 +1,11 @@
+{
+  "name": "simple-api-k8s-function",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "npx functions-framework --target=api"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.3.0"
+  }
+}

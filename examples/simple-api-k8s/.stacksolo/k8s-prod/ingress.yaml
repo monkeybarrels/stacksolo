@@ -1,0 +1,22 @@
+# Ingress
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simple-api-k8s-ingress
+  namespace: simple-api-k8s
+  labels:
+    app.kubernetes.io/managed-by: stacksolo
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: simple-api.example.com
+    http:
+      paths:
+      - path: ""
+        pathType: Prefix
+        backend:
+          service:
+            name: simple-api-k8s-api
+            port:
+              number: 80

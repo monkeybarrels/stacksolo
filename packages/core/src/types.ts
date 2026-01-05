@@ -125,6 +125,51 @@ export interface DefineAppPatternInput {
   ) => Record<string, string>;
 }
 
+// Output formatter types (for plugins that transform manifest output)
+export interface OutputFormatter {
+  /** Formatter ID (e.g., 'helm', 'kustomize') */
+  id: string;
+  /** Display name */
+  name: string;
+  /** Description */
+  description: string;
+  /** Transform resolved resources to output format */
+  generate: (options: OutputFormatterOptions) => GeneratedOutput[];
+}
+
+export interface OutputFormatterOptions {
+  /** Project name from config */
+  projectName: string;
+  /** Resolved K8s resources */
+  resources: ResolvedResource[];
+  /** Formatter-specific config (e.g., helm settings) */
+  config: Record<string, unknown>;
+  /** Output directory path */
+  outputDir: string;
+}
+
+export interface ResolvedResource {
+  /** Unique identifier (e.g., 'k8s:deployment-api') */
+  id: string;
+  /** Resource type (e.g., 'k8s:deployment') */
+  type: string;
+  /** User-defined name */
+  name: string;
+  /** Resource configuration */
+  config: Record<string, unknown>;
+  /** IDs of resources this depends on */
+  dependsOn: string[];
+  /** Network name if VPC-bound */
+  network?: string;
+}
+
+export interface GeneratedOutput {
+  /** Relative path within output (e.g., 'templates/deployment.yaml') */
+  path: string;
+  /** File content */
+  content: string;
+}
+
 // Plugin service types (for plugins that provide runnable services)
 export interface PluginService {
   /** Service name (e.g., 'kernel') */
@@ -155,6 +200,8 @@ export interface Plugin {
   patterns?: AppPattern[];
   /** Services this plugin provides (e.g., kernel container) */
   services?: PluginService[];
+  /** Output formatters this plugin provides (e.g., helm, kustomize) */
+  outputFormatters?: OutputFormatter[];
 }
 
 // Define helper input types

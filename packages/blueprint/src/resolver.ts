@@ -23,6 +23,7 @@ import type {
   FirewallRuleConfig,
   LoadBalancerRouteConfig,
   UIConfig,
+  KubernetesConfig,
 } from './schema.js';
 
 import {
@@ -45,7 +46,11 @@ export function resolveConfig(config: StackSoloConfig): ResolvedConfig {
     gcpProjectId: project.gcpProjectId,
   };
 
-  // CDKTF backend uses composite resources
+  // Route to backend-specific resolvers
+  if (project.backend === 'kubernetes') {
+    return resolveKubernetesConfig(config, projectInfo);
+  }
+
   if (project.backend === 'cdktf') {
     return resolveCdktfConfig(config, projectInfo);
   }
@@ -1059,6 +1064,311 @@ function resolveCdktfConfig(
         network: network.name,
       });
     }
+  }
+
+  return {
+    project: projectInfo,
+    resources,
+    order: resources.map((r) => r.id),
+  };
+}
+
+// =============================================================================
+// Kubernetes Backend Resolution
+// =============================================================================
+
+/**
+ * Resolve config for Kubernetes backend
+ * Creates K8s resources: Namespace, ConfigMap, Deployments, Services, Ingress
+ */
+function resolveKubernetesConfig(
+  config: StackSoloConfig,
+  projectInfo: { name: string; region: string; gcpProjectId: string }
+): ResolvedConfig {
+  const project = config.project;
+  const resources: ResolvedResource[] = [];
+
+  // Validate kubernetes config is present
+  if (!project.kubernetes) {
+    throw new Error('Kubernetes backend requires kubernetes configuration with registry settings');
+  }
+
+  const k8sConfig = project.kubernetes;
+  const namespace = k8sConfig.namespace || project.name;
+
+  // Validate we have at least one network with deployable resources
+  const network = project.networks?.[0];
+  if (!network) {
+    throw new Error('Kubernetes backend requires at least one network with containers or functions');
+  }
+
+  const containers = network.containers || [];
+  const functions = network.functions || [];
+  const uis = network.uis || [];
+  const hasKernel = !!project.kernel;
+
+  if (containers.length === 0 && functions.length === 0 && uis.length === 0 && !hasKernel) {
+    throw new Error('Kubernetes backend requires at least one container, function, UI, or kernel');
+  }
+
+  // Kubernetes doesn't support GCP-native features
+  if (project.gcpKernel) {
+    throw new Error('Kubernetes backend uses kernel (NATS-based), not gcpKernel. Remove gcpKernel or use backend: "cdktf"');
+  }
+  if (project.crons?.length) {
+    throw new Error('Kubernetes backend does not support crons. Use CronJob resources directly or backend: "cdktf"');
+  }
+
+  // 1. Namespace
+  const namespaceId = 'k8s-namespace';
+  resources.push({
+    id: namespaceId,
+    type: 'k8s:namespace',
+    name: namespace,
+    config: {
+      name: namespace,
+      labels: {
+        'app.kubernetes.io/managed-by': 'stacksolo',
+        'stacksolo.dev/project': project.name,
+      },
+    },
+    dependsOn: [],
+  });
+
+  // 2. ConfigMap for environment variables
+  const configMapId = 'k8s-configmap';
+  const configMapEnv: Record<string, string> = {
+    STACKSOLO_PROJECT_NAME: project.name,
+    GCP_PROJECT_ID: project.gcpProjectId,
+  };
+  resources.push({
+    id: configMapId,
+    type: 'k8s:configmap',
+    name: `${project.name}-config`,
+    config: {
+      name: `${project.name}-config`,
+      namespace,
+      data: configMapEnv,
+    },
+    dependsOn: [namespaceId],
+  });
+
+  // 3. Kernel (if configured)
+  const kernelIds: string[] = [];
+  if (project.kernel) {
+    const kernelName = `${project.name}-${project.kernel.name}`;
+    const kernelId = `k8s-kernel-${project.kernel.name}`;
+    kernelIds.push(kernelId);
+
+    resources.push({
+      id: kernelId,
+      type: 'k8s:deployment',
+      name: kernelName,
+      config: {
+        name: kernelName,
+        namespace,
+        image: `${k8sConfig.registry.url}/${project.kernel.name}:latest`,
+        port: 8090,
+        replicas: k8sConfig.replicas || 1,
+        memory: project.kernel.memory || '512Mi',
+        cpu: project.kernel.cpu || '500m',
+        env: {
+          ...configMapEnv,
+          ...project.kernel.env,
+        },
+        imagePullSecret: k8sConfig.registry.authSecret,
+        resourceDefaults: k8sConfig.resources,
+      },
+      dependsOn: [namespaceId, configMapId],
+      network: network.name,
+    });
+
+    // Kernel Service
+    resources.push({
+      id: `k8s-service-${project.kernel.name}`,
+      type: 'k8s:service',
+      name: kernelName,
+      config: {
+        name: kernelName,
+        namespace,
+        port: 8090,
+        targetPort: 8090,
+        selector: kernelName,
+      },
+      dependsOn: [kernelId],
+      network: network.name,
+    });
+  }
+
+  // 4. Containers
+  const containerIds: string[] = [];
+  for (const container of containers) {
+    const containerName = `${project.name}-${container.name}`;
+    const containerId = `k8s-deployment-${container.name}`;
+    containerIds.push(containerId);
+
+    resources.push({
+      id: containerId,
+      type: 'k8s:deployment',
+      name: containerName,
+      config: {
+        name: containerName,
+        namespace,
+        image: container.image || `${k8sConfig.registry.url}/${container.name}:latest`,
+        port: container.port || 8080,
+        replicas: container.minInstances || k8sConfig.replicas || 1,
+        memory: container.memory || k8sConfig.resources?.defaultMemoryLimit || '512Mi',
+        cpu: container.cpu || k8sConfig.resources?.defaultCpuLimit || '500m',
+        env: container.env || {},
+        imagePullSecret: k8sConfig.registry.authSecret,
+        resourceDefaults: k8sConfig.resources,
+      },
+      dependsOn: [namespaceId, configMapId, ...kernelIds],
+      network: network.name,
+    });
+
+    // Container Service
+    resources.push({
+      id: `k8s-service-${container.name}`,
+      type: 'k8s:service',
+      name: containerName,
+      config: {
+        name: containerName,
+        namespace,
+        port: 80,
+        targetPort: container.port || 8080,
+        selector: containerName,
+      },
+      dependsOn: [containerId],
+      network: network.name,
+    });
+  }
+
+  // 5. Functions (as Deployments using functions-framework image)
+  const functionIds: string[] = [];
+  for (const fn of functions) {
+    const functionName = `${project.name}-${fn.name}`;
+    const functionId = `k8s-deployment-fn-${fn.name}`;
+    functionIds.push(functionId);
+
+    resources.push({
+      id: functionId,
+      type: 'k8s:deployment',
+      name: functionName,
+      config: {
+        name: functionName,
+        namespace,
+        image: `${k8sConfig.registry.url}/${fn.name}:latest`,
+        port: 8080,
+        replicas: fn.minInstances || k8sConfig.replicas || 1,
+        memory: fn.memory || k8sConfig.resources?.defaultMemoryLimit || '256Mi',
+        cpu: k8sConfig.resources?.defaultCpuLimit || '250m',
+        env: {
+          FUNCTION_TARGET: fn.entryPoint || fn.name,
+          ...fn.env,
+        },
+        imagePullSecret: k8sConfig.registry.authSecret,
+        resourceDefaults: k8sConfig.resources,
+        sourceDir: fn.sourceDir || `functions/${fn.name}`,
+        runtime: fn.runtime || 'nodejs20',
+      },
+      dependsOn: [namespaceId, configMapId],
+      network: network.name,
+    });
+
+    // Function Service
+    resources.push({
+      id: `k8s-service-fn-${fn.name}`,
+      type: 'k8s:service',
+      name: functionName,
+      config: {
+        name: functionName,
+        namespace,
+        port: 80,
+        targetPort: 8080,
+        selector: functionName,
+      },
+      dependsOn: [functionId],
+      network: network.name,
+    });
+  }
+
+  // 6. UIs (as Deployments serving static files via nginx)
+  const uiIds: string[] = [];
+  for (const ui of uis) {
+    const uiName = `${project.name}-${ui.name}`;
+    const uiId = `k8s-deployment-ui-${ui.name}`;
+    uiIds.push(uiId);
+
+    resources.push({
+      id: uiId,
+      type: 'k8s:deployment',
+      name: uiName,
+      config: {
+        name: uiName,
+        namespace,
+        image: `${k8sConfig.registry.url}/${ui.name}:latest`,
+        port: 80,
+        replicas: k8sConfig.replicas || 1,
+        memory: k8sConfig.resources?.defaultMemoryLimit || '128Mi',
+        cpu: k8sConfig.resources?.defaultCpuLimit || '100m',
+        imagePullSecret: k8sConfig.registry.authSecret,
+        resourceDefaults: k8sConfig.resources,
+        sourceDir: ui.sourceDir || `ui/${ui.name}`,
+        framework: ui.framework,
+        buildCommand: ui.buildCommand,
+        buildOutputDir: ui.buildOutputDir,
+      },
+      dependsOn: [namespaceId],
+      network: network.name,
+    });
+
+    // UI Service
+    resources.push({
+      id: `k8s-service-ui-${ui.name}`,
+      type: 'k8s:service',
+      name: uiName,
+      config: {
+        name: uiName,
+        namespace,
+        port: 80,
+        targetPort: 80,
+        selector: uiName,
+      },
+      dependsOn: [uiId],
+      network: network.name,
+    });
+  }
+
+  // 7. Ingress (if routes are configured)
+  if (network.loadBalancer?.routes && k8sConfig.ingress) {
+    const ingressId = 'k8s-ingress';
+    const routes = network.loadBalancer.routes.map((route) => {
+      // Determine service name based on backend type
+      let serviceName = `${project.name}-${route.backend}`;
+      return {
+        path: route.path,
+        serviceName,
+        servicePort: 80,
+      };
+    });
+
+    resources.push({
+      id: ingressId,
+      type: 'k8s:ingress',
+      name: `${project.name}-ingress`,
+      config: {
+        name: `${project.name}-ingress`,
+        namespace,
+        className: k8sConfig.ingress.className || 'nginx',
+        host: k8sConfig.ingress.host,
+        tlsSecretName: k8sConfig.ingress.tlsSecretName,
+        annotations: k8sConfig.ingress.annotations,
+        routes,
+      },
+      dependsOn: [...containerIds, ...functionIds, ...uiIds],
+      network: network.name,
+    });
   }
 
   return {

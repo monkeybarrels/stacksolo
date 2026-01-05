@@ -128,6 +128,21 @@ stacksolo deploy [options]
 | `--tag <tag>` | Container image tag (default: `latest`) |
 | `--refresh` | Refresh Terraform state first |
 | `--force` | Force recreate conflicting resources |
+| `--helm` | Generate Helm chart (Kubernetes backend only) |
+
+**Helm Output:**
+
+For Kubernetes backend projects, use `--helm` to generate a Helm chart instead of raw manifests:
+
+```bash
+# Preview Helm chart
+stacksolo deploy --helm --preview
+
+# Generate and deploy via Helm
+stacksolo deploy --helm
+```
+
+The chart is generated to `.stacksolo/helm-chart/`. See [Helm Plugin](/plugins/helm/) for multi-environment deployment workflows.
 
 ### `stacksolo destroy`
 
