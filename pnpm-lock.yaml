@@ -197,6 +197,22 @@ importers:
         specifier: ^5.0.0
         version: 5.9.3
 
+  packages/mcp-knowledge:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.0.0
+        version: 1.25.1(hono@4.11.3)(zod@3.25.76)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.27
+        version: 20.19.27
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@1.21.7)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+
   packages/registry:
     dependencies:
       better-sqlite3:
@@ -312,6 +328,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.27
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@1.21.7)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
