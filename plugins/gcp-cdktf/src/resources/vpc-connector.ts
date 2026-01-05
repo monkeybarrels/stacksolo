@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -69,11 +70,14 @@ export const vpcConnector = defineResource({
       minThroughput?: number;
       maxThroughput?: number;
       existingNetwork?: boolean;
+      projectName?: string;
     };
 
     const ipCidr = connectorConfig.ipCidrRange || '10.8.0.0/28';
     const minThroughput = connectorConfig.minThroughput || 200;
     const maxThroughput = connectorConfig.maxThroughput || 300;
+    const projectName = connectorConfig.projectName || '${var.project_name}';
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.VPC_CONNECTOR);
     const networkVar = toVariableName(connectorConfig.network);
     const useExistingNetwork = connectorConfig.existingNetwork === true;
 
@@ -89,6 +93,7 @@ export const vpcConnector = defineResource({
   ipCidrRange: '${ipCidr}',
   minThroughput: ${minThroughput},
   maxThroughput: ${maxThroughput},
+  ${labelsCode}
 });`;
 
     return {

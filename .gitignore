@@ -41,3 +41,11 @@ coverage/
 # Misc
 *.tsbuildinfo
 _docs/
+
+# StackSolo generated files
+**/.stacksolo/cdktf/
+**/.stacksolo/terraform-state/
+**/.stacksolo/debug.log
+
+# Giga AI
+.giga/

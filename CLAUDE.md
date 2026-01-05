@@ -374,13 +374,144 @@ The system implements three key patterns:
 2. Provider Plugin Architecture enabling multi-cloud support
 3. Infrastructure Code Generation with provider-specific optimizations
 Core business value centers on abstracting cloud infrastructure deployment through automated code generation and visual configuration tools.
+
+- IAP user validation with hierarchical permissions
+## GCP Kernel Deployment
+### Automatic Provisioning
+When `gcpKernel` is configured, the deploy command automatically:
+1. **Enables Firestore API** - Uses `ProjectService` resource
+2. **Creates Firestore Database** - Creates `(default)` database in FIRESTORE_NATIVE mode
+3. **Grants IAM Permissions** - `roles/datastore.user`, `roles/pubsub.editor`, `roles/storage.objectAdmin`
+4. **Builds Kernel Service** - Compiles TypeScript and builds Docker image
+5. **Pushes to GCR** - Pushes `gcr.io/{project}/stacksolo-gcp-kernel:latest`
+### Key Files
+| File | Purpose |
+|------|---------|
+| `plugins/gcp-kernel/src/resources/gcp-kernel.ts` | CDKTF resource definition |
+| `plugins/gcp-kernel/service/` | Kernel service source code |
+| `packages/cli/src/services/deploy.service.ts` | Deploy orchestration |
+| `packages/blueprint/src/resolver.ts` | Config resolution |
+### Zero Trust Auth Integration
+When `zeroTrustAuth` is configured alongside `gcpKernel`:
+1. Resolver injects `KERNEL_URL` env var into containers
+2. Containers depend on kernel (deployed first)
+3. CDKTF references kernel service URI: `${kernelService.uri}`
+4. Containers import `@stacksolo/plugin-zero-trust-auth/runtime` for `kernel.access` methods
+### Kernel URL Reference Pattern
+The resolver generates CDKTF variable references for kernel URLs:
+```typescript
+// In resolver.ts
+const kernelVarName = gcpKernel.name.replace(/[^a-zA-Z0-9]/g, '_');
+kernelUrl = `\${${kernelVarName}Service.uri}`;
+// For gcpKernel.name = "kernel", generates:
+// KERNEL_URL: kernelService.uri
+```
+The cloud-run resource passes through any `${...}` pattern as a CDKTF reference.
+### Building After Changes
+After modifying kernel-related code:
+```bash
+# Rebuild affected packages
+pnpm --filter @stacksolo/plugin-gcp-kernel build
+pnpm --filter @stacksolo/plugin-gcp-cdktf build
+pnpm --filter @stacksolo/blueprint build
+pnpm --filter @stacksolo/cli build
+# If modifying kernel service code
+cd plugins/gcp-kernel/service
+npm run build
+```
+### Troubleshooting
+| Issue | Solution |
+|-------|----------|
+| Firestore API not enabled | Deploy creates `ProjectService` resource automatically |
+| Firestore database missing | Deploy creates `FirestoreDatabase` resource automatically |
+| Missing IAM permissions | Check `roles/datastore.user` is granted to kernel SA |
+| Kernel image not found | Ensure kernel service TypeScript was built before Docker build |
+| KERNEL_URL not set | Verify `zeroTrustAuth` is configured in stacksolo.config.json |
+| Container can't reach kernel | Check dependency ordering (kernel must deploy first) |
+## Cloud Functions Gen2 Preflight Setup
+
+### The Problem
+Cloud Functions Gen2 deployments fail with `artifactregistry.repositories.downloadArtifacts` permission denied errors on the `gcf-artifacts` repository. This is a common GCP issue documented in [firebase-tools#8431](https://github.com/firebase/firebase-tools/issues/8431).
+
+### The Solution
+The deploy command runs an automated preflight check (`ensureCloudFunctionsPrerequisites()`) that:
+
+1. **Enables Required APIs:**
+   - cloudfunctions.googleapis.com
+   - cloudbuild.googleapis.com
+   - run.googleapis.com
+   - artifactregistry.googleapis.com
+   - vpcaccess.googleapis.com
+   - compute.googleapis.com
+
+2. **Grants IAM Roles to 4 Service Accounts:**
+
+   | Service Account | Roles |
+   |-----------------|-------|
+   | `{projectNumber}@cloudbuild.gserviceaccount.com` | storage.objectViewer, logging.logWriter, artifactregistry.writer, artifactregistry.reader |
+   | `service-{projectNumber}@serverless-robot-prod.iam.gserviceaccount.com` | cloudbuild.builds.builder, storage.objectAdmin, artifactregistry.reader, artifactregistry.writer |
+   | `service-{projectNumber}@gcf-admin-robot.iam.gserviceaccount.com` | artifactregistry.writer, artifactregistry.reader (on gcf-artifacts repo) |
+   | `{projectNumber}-compute@developer.gserviceaccount.com` | **cloudbuild.builds.builder** (KEY FIX), artifactregistry.reader, artifactregistry.writer |
+
+3. **Creates/Configures gcf-artifacts Repository:**
+   - Creates the repository if it doesn't exist
+   - Grants reader and writer permissions to all service accounts
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `packages/cli/src/services/preflight.service.ts` | `ensureCloudFunctionsPrerequisites()` function |
+| `packages/cli/src/commands/infra/deploy.ts` | Integration point (runs before deploy if Cloud Functions detected) |
+
+### Critical Insight
+The **default compute service account** (`{projectNumber}-compute@developer.gserviceaccount.com`) requires `roles/cloudbuild.builds.builder`. This was the key fix from firebase-tools#8431 that resolved the permission denied errors.
+
+## Container Build Ordering (Critical)
+### The Problem
+Fresh deploys face a chicken-and-egg ordering problem:
+1. Container images must be pushed to Artifact Registry before Cloud Run can reference them
+2. But Artifact Registry doesn't exist until Terraform creates it
+3. Terraform won't create Cloud Run without a valid image reference
+### The Solution: Two-Phase Deploy
+The deploy service implements a two-phase approach for fresh deploys:
+```
+Phase 1: First Terraform Apply
+├── Creates Artifact Registry
+├── Creates VPC, connectors, other infra
+├── Creates Firestore, Pub/Sub (for kernel)
+└── MAY FAIL on Cloud Run (Image not found - this is expected)
+Phase 2: Container Builds
+├── Registry now exists
+├── Build TypeScript for each container
+├── Build Docker images
+└── Push to Artifact Registry
+Phase 3: Second Terraform Apply (if Phase 1 failed)
+└── Cloud Run now has valid images to deploy
+```
+### Key Code Location
+The two-phase logic is in `packages/cli/src/services/deploy.service.ts`:
+```typescript
+// Error patterns that indicate "continue to build containers":
+const isImageNotFoundError =
+  (errorStr.includes('Image') && errorStr.includes('not found')) ||
+  (errorStr.includes('Revision') && errorStr.includes('is not ready'));
+```
+### Why This Matters
+Without this ordering:
+- Fresh deploys always fail on first attempt
+- Users must manually create registry, push images, then deploy again
+- Container-based projects would require 2-3 manual deploy cycles
+With this ordering:
+- Fresh deploys work in a single `stacksolo deploy` command
+- System handles the chicken-and-egg automatically
+- Subsequent deploys are faster (registry exists, single apply)
 # === END USER INSTRUCTIONS ===
 
 
 # main-overview
 
 > **Giga Operational Instructions**
-> Read the relevant Markdown inside `.cursor/rules` before citing project context. Reference the exact file you used in your response.
+> Read the relevant Markdown inside `.giga/rules` before citing project context. Reference the exact file you used in your response.
 
 ## Development Guidelines
 
@@ -391,166 +522,52 @@ Core business value centers on abstracting cloud infrastructure deployment throu
 - Explain your OBSERVATIONS clearly, then provide REASONING to identify the exact issue. Add console logs when needed to gather more information.
 
 
-Infrastructure Deployment and Management System with four core business domains:
+Infrastructure Deployment Architecture
 
-## Kernel Service Architecture (85/100)
-- Hybrid HTTP+NATS messaging kernel handling cross-service communication
-- Custom file handling with signed URL generation capabilities 
-- JetStream event persistence for reliable message delivery
-- Firebase auth integration with domain-specific validation rules
+## Core Resource Management
+The system implements a two-phase deployment orchestration focused on GCP resource management with intelligent dependency resolution. Key components:
 
-Location: packages/cli/src/scaffold/generators/resources/kernel.ts
+1. Deployment Orchestrator (packages/cli/src/services/deploy.service.ts)
+- Two-phase infrastructure provisioning strategy
+- Container image build coordination
+- IAP and service account security configuration
+Importance Score: 85
 
-## Development Environment System (75/100)
-- Specialized local Kubernetes environment mirroring GCP infrastructure
-- Resilient port forwarding with automatic reconnection
-- Coordinated emulator management for Firebase and Pub/Sub services
-- Distributed health check system for service monitoring
+2. Blueprint Dependency System (packages/blueprint/src/dependencies.ts)
+- Resource dependency resolution with topological ordering
+- Parallel deployment batch organization
+- Cross-resource relationship management
+Importance Score: 85
 
-Location: packages/cli/src/commands/dev/dev.ts
+## Resource Handling
 
-## Project Initialization Workflow (70/100)
-- GCP project setup with organization policy management
-- API dependency resolution for cloud services
-- Custom billing account integration
-- Project template orchestration with dependency handling
+1. Resource Scanner (packages/cli/src/services/gcp-scanner.service.ts)
+- Project pattern detection for existing infrastructure
+- Resource type validation and mapping
+- Complex naming pattern resolution
+Importance Score: 75
 
-Location: packages/cli/src/commands/project/init.ts
+2. Resource Generation (packages/blueprint/src/generator.ts)
+- Provider-specific infrastructure code generation
+- Resource relationship mapping
+- Configuration template management
+Importance Score: 90
 
-## Zero Trust Authentication (85/100)
-- Dynamic authorization system for resource-based access control
-- IAP user validation with hierarchical permissions
-- Access control audit logging
-- OAuth-based web backend protection
+## State Management
 
-Location: plugins/zero-trust-auth/src/runtime.ts
+1. Registry Service (packages/registry/src/services/registry.service.ts)
+- Project state tracking
+- Configuration change detection
+- Resource lifecycle management
+Importance Score: 75
 
-The system implements a sophisticated cloud infrastructure management platform focused on secure resource deployment, cross-service messaging, and fine-grained access control.
+2. Reference Resolution (packages/blueprint/src/references.ts)
+- Cross-resource property resolution
+- Output mapping system
+- Environment variable handling
+Importance Score: 80
 
-## GCP Kernel Deployment
-
-### Automatic Provisioning
-
-When `gcpKernel` is configured, the deploy command automatically:
-
-1. **Enables Firestore API** - Uses `ProjectService` resource
-2. **Creates Firestore Database** - Creates `(default)` database in FIRESTORE_NATIVE mode
-3. **Grants IAM Permissions** - `roles/datastore.user`, `roles/pubsub.editor`, `roles/storage.objectAdmin`
-4. **Builds Kernel Service** - Compiles TypeScript and builds Docker image
-5. **Pushes to GCR** - Pushes `gcr.io/{project}/stacksolo-gcp-kernel:latest`
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `plugins/gcp-kernel/src/resources/gcp-kernel.ts` | CDKTF resource definition |
-| `plugins/gcp-kernel/service/` | Kernel service source code |
-| `packages/cli/src/services/deploy.service.ts` | Deploy orchestration |
-| `packages/blueprint/src/resolver.ts` | Config resolution |
-
-### Zero Trust Auth Integration
-
-When `zeroTrustAuth` is configured alongside `gcpKernel`:
-
-1. Resolver injects `KERNEL_URL` env var into containers
-2. Containers depend on kernel (deployed first)
-3. CDKTF references kernel service URI: `${kernelService.uri}`
-4. Containers import `@stacksolo/plugin-zero-trust-auth/runtime` for `kernel.access` methods
-
-### Kernel URL Reference Pattern
-
-The resolver generates CDKTF variable references for kernel URLs:
-
-```typescript
-// In resolver.ts
-const kernelVarName = gcpKernel.name.replace(/[^a-zA-Z0-9]/g, '_');
-kernelUrl = `\${${kernelVarName}Service.uri}`;
-
-// For gcpKernel.name = "kernel", generates:
-// KERNEL_URL: kernelService.uri
-```
-
-The cloud-run resource passes through any `${...}` pattern as a CDKTF reference.
-
-### Building After Changes
-
-After modifying kernel-related code:
-
-```bash
-# Rebuild affected packages
-pnpm --filter @stacksolo/plugin-gcp-kernel build
-pnpm --filter @stacksolo/plugin-gcp-cdktf build
-pnpm --filter @stacksolo/blueprint build
-pnpm --filter @stacksolo/cli build
-
-# If modifying kernel service code
-cd plugins/gcp-kernel/service
-npm run build
-```
-
-### Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Firestore API not enabled | Deploy creates `ProjectService` resource automatically |
-| Firestore database missing | Deploy creates `FirestoreDatabase` resource automatically |
-| Missing IAM permissions | Check `roles/datastore.user` is granted to kernel SA |
-| Kernel image not found | Ensure kernel service TypeScript was built before Docker build |
-| KERNEL_URL not set | Verify `zeroTrustAuth` is configured in stacksolo.config.json |
-| Container can't reach kernel | Check dependency ordering (kernel must deploy first) |
-
-## Container Build Ordering (Critical)
-
-### The Problem
-
-Fresh deploys face a chicken-and-egg ordering problem:
-1. Container images must be pushed to Artifact Registry before Cloud Run can reference them
-2. But Artifact Registry doesn't exist until Terraform creates it
-3. Terraform won't create Cloud Run without a valid image reference
-
-### The Solution: Two-Phase Deploy
-
-The deploy service implements a two-phase approach for fresh deploys:
-
-```
-Phase 1: First Terraform Apply
-├── Creates Artifact Registry
-├── Creates VPC, connectors, other infra
-├── Creates Firestore, Pub/Sub (for kernel)
-└── MAY FAIL on Cloud Run (Image not found - this is expected)
-
-Phase 2: Container Builds
-├── Registry now exists
-├── Build TypeScript for each container
-├── Build Docker images
-└── Push to Artifact Registry
-
-Phase 3: Second Terraform Apply (if Phase 1 failed)
-└── Cloud Run now has valid images to deploy
-```
-
-### Key Code Location
-
-The two-phase logic is in `packages/cli/src/services/deploy.service.ts`:
-
-```typescript
-// Error patterns that indicate "continue to build containers":
-const isImageNotFoundError =
-  (errorStr.includes('Image') && errorStr.includes('not found')) ||
-  (errorStr.includes('Revision') && errorStr.includes('is not ready'));
-```
-
-### Why This Matters
-
-Without this ordering:
-- Fresh deploys always fail on first attempt
-- Users must manually create registry, push images, then deploy again
-- Container-based projects would require 2-3 manual deploy cycles
-
-With this ordering:
-- Fresh deploys work in a single `stacksolo deploy` command
-- System handles the chicken-and-egg automatically
-- Subsequent deploys are faster (registry exists, single apply)
+The architecture emphasizes secure infrastructure deployment with robust dependency management and state tracking, specifically designed for complex cloud resource orchestration.
 
 $END$
 

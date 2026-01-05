@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -134,9 +135,10 @@ export const cloudFunction = defineResource({
     const maxInstances = fnConfig.maxInstances ?? 100;
     const allowUnauthenticated = fnConfig.allowUnauthenticated ?? true;
     const projectId = fnConfig.projectId || '${var.project_id}';
-    const projectName = fnConfig.projectName || '';
+    const projectName = fnConfig.projectName || '${var.project_name}';
     const gatewayUrl = fnConfig.gatewayUrl || '';
     const additionalEnv = fnConfig.environmentVariables || {};
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.CLOUD_FUNCTION);
 
     // Source bucket and zip (each function has its own source zip)
     // Use relative path - the zip will be copied to the terraform stack directory
@@ -192,6 +194,7 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
 
     code += `
   },
+  ${labelsCode}
 });`;
 
     // Add IAM binding for unauthenticated access (Gen2 functions need Cloud Run invoker)

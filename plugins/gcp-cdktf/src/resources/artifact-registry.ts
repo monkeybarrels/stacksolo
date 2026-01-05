@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -45,6 +46,12 @@ export const artifactRegistry = defineResource({
         description: 'Prevent tag overwrites',
         default: false,
       },
+      existing: {
+        type: 'boolean',
+        title: 'Use Existing Registry',
+        description: 'Reference an existing Artifact Registry instead of creating a new one.',
+        default: false,
+      },
     },
     required: ['name', 'location'],
   },
@@ -62,14 +69,40 @@ export const artifactRegistry = defineResource({
       format?: string;
       description?: string;
       immutableTags?: boolean;
+      existing?: boolean;
       projectId?: string;
+      projectName?: string;
     };
 
     const location = registryConfig.location;
+    const projectId = registryConfig.projectId || '${var.project_id}';
+
+    // If using an existing registry, use a data source lookup
+    if (registryConfig.existing) {
+      const code = `// Artifact Registry repository (existing)
+const ${varName}Registry = new DataGoogleArtifactRegistryRepository(this, '${config.name}', {
+  repositoryId: '${config.name}',
+  location: '${location}',
+});`;
+
+      return {
+        imports: [
+          "import { DataGoogleArtifactRegistryRepository } from '@cdktf/provider-google/lib/data-google-artifact-registry-repository';",
+        ],
+        code,
+        outputs: [
+          `export const ${varName}RegistryUrl = \`${location}-docker.pkg.dev/${projectId}/${config.name}\`;`,
+          `export const ${varName}RegistryName = ${varName}Registry.repositoryId;`,
+        ],
+      };
+    }
+
+    // Create a new registry
     const format = registryConfig.format || 'DOCKER';
     const description = registryConfig.description || `Container registry for ${config.name}`;
     const immutableTags = registryConfig.immutableTags ?? false;
-    const projectId = registryConfig.projectId || '${var.project_id}';
+    const projectName = registryConfig.projectName || '${var.project_name}';
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.ARTIFACT_REGISTRY);
 
     const code = `// Artifact Registry repository
 const ${varName}Registry = new ArtifactRegistryRepository(this, '${config.name}', {
@@ -80,6 +113,7 @@ const ${varName}Registry = new ArtifactRegistryRepository(this, '${config.name}'
   dockerConfig: {
     immutableTags: true,
   },` : ''}
+  ${labelsCode}
 });`;
 
     return {

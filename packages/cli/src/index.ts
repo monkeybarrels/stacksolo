@@ -20,6 +20,7 @@ import {
   infraCommand,
   listCommand,
   eventsCommand,
+  inventoryCommand,
   // Development commands
   buildCommand,
   devCommand,
@@ -53,6 +54,7 @@ program.addCommand(resetCommand);
 program.addCommand(infraCommand);
 program.addCommand(listCommand);
 program.addCommand(eventsCommand);
+program.addCommand(inventoryCommand);
 
 // Development commands
 program.addCommand(buildCommand);

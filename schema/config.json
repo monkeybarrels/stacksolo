@@ -151,6 +151,11 @@
             "archiveAfterDays": { "type": "number" }
           },
           "additionalProperties": false
+        },
+        "existing": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reference an existing Cloud Storage bucket instead of creating a new one"
         }
       },
       "required": ["name"],

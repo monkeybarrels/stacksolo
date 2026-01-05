@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -67,6 +68,12 @@ export const storageBucket = defineResource({
           },
         },
       },
+      existing: {
+        type: 'boolean',
+        title: 'Use Existing Bucket',
+        description: 'Reference an existing Cloud Storage bucket instead of creating a new one.',
+        default: false,
+      },
     },
     required: ['name'],
   },
@@ -87,14 +94,38 @@ export const storageBucket = defineResource({
       uniformBucketLevelAccess?: boolean;
       versioning?: boolean;
       cors?: CorsConfig[];
+      existing?: boolean;
       projectId?: string;
+      projectName?: string;
     };
 
+    // If using an existing bucket, use a data source lookup
+    if (bucketConfig.existing) {
+      const code = `// GCS bucket (existing): ${config.name}
+const ${varName}Bucket = new DataGoogleStorageBucket(this, '${varName}-bucket', {
+  name: '${config.name}',
+});`;
+
+      return {
+        imports: [
+          "import { DataGoogleStorageBucket } from '@cdktf/provider-google/lib/data-google-storage-bucket';",
+        ],
+        code,
+        outputs: [
+          `export const ${varName}BucketName = ${varName}Bucket.name;`,
+          `export const ${varName}BucketUrl = ${varName}Bucket.url;`,
+        ],
+      };
+    }
+
+    // Create a new bucket
     const location = bucketConfig.location || 'US';
     const storageClass = bucketConfig.storageClass || 'STANDARD';
     const uniformBucketLevelAccess = bucketConfig.uniformBucketLevelAccess ?? true;
     const versioning = bucketConfig.versioning ?? false;
     const projectId = bucketConfig.projectId || '${var.project_id}';
+    const projectName = bucketConfig.projectName || '${var.project_name}';
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.STORAGE_BUCKET);
 
     // CORS configuration
     let corsBlock = '';
@@ -122,6 +153,7 @@ const ${varName}Bucket = new StorageBucket(this, '${varName}-bucket', {
     enabled: ${versioning},
   },${corsBlock}
   forceDestroy: true,
+  ${labelsCode}
 });`;
 
     return {

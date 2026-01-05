@@ -36,6 +36,7 @@ import {
   PreflightResult,
   runKernelPreflightCheck,
   displayKernelPreflightResults,
+  ensureCloudFunctionsPrerequisites,
 } from '../../services/preflight.service';
 
 const execAsync = promisify(exec);
@@ -629,6 +630,35 @@ async function runDeploy(
       }
     } catch (error) {
       kernelSpinner.warn('Could not complete GCP Kernel preflight check (continuing anyway)');
+      console.log(chalk.gray(`    ${error}\n`));
+    }
+  }
+
+  // Cloud Functions Gen2 preflight setup (only on first attempt, not destroy, not preview)
+  const hasCloudFunctions = resolved.resources.some((r) => r.type === 'gcp-cdktf:cloud_function');
+  if (hasCloudFunctions && !options.destroy && !options.preview && !options.skipPreflight && retryCount === 0) {
+    const cfSpinner = ora('Setting up Cloud Functions prerequisites...').start();
+
+    try {
+      const cfResult = await ensureCloudFunctionsPrerequisites(
+        config.project.gcpProjectId,
+        config.project.region
+      );
+
+      if (cfResult.success) {
+        if (cfResult.actionsPerformed.length > 0) {
+          cfSpinner.succeed(`Cloud Functions setup complete (${cfResult.actionsPerformed.length} actions)`);
+        } else {
+          cfSpinner.succeed('Cloud Functions prerequisites already configured');
+        }
+      } else {
+        cfSpinner.warn('Some Cloud Functions setup steps had issues (continuing anyway)');
+        for (const error of cfResult.errors) {
+          console.log(chalk.yellow(`    - ${error}`));
+        }
+      }
+    } catch (error) {
+      cfSpinner.warn('Could not complete Cloud Functions setup (continuing anyway)');
       console.log(chalk.gray(`    ${error}\n`));
     }
   }

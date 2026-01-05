@@ -36,7 +36,7 @@ Core business value centers on abstracting cloud infrastructure deployment throu
 # main-overview
 
 > **Giga Operational Instructions**
-> Read the relevant Markdown inside `.cursor/rules` before citing project context. Reference the exact file you used in your response.
+> Read the relevant Markdown inside `.giga/rules` before citing project context. Reference the exact file you used in your response.
 
 ## Development Guidelines
 
@@ -47,41 +47,52 @@ Core business value centers on abstracting cloud infrastructure deployment throu
 - Explain your OBSERVATIONS clearly, then provide REASONING to identify the exact issue. Add console logs when needed to gather more information.
 
 
-Infrastructure Deployment and Management System with four core business domains:
+Infrastructure Deployment Architecture
 
-## Kernel Service Architecture (85/100)
-- Hybrid HTTP+NATS messaging kernel handling cross-service communication
-- Custom file handling with signed URL generation capabilities 
-- JetStream event persistence for reliable message delivery
-- Firebase auth integration with domain-specific validation rules
+## Core Resource Management
+The system implements a two-phase deployment orchestration focused on GCP resource management with intelligent dependency resolution. Key components:
 
-Location: packages/cli/src/scaffold/generators/resources/kernel.ts
+1. Deployment Orchestrator (packages/cli/src/services/deploy.service.ts)
+- Two-phase infrastructure provisioning strategy
+- Container image build coordination
+- IAP and service account security configuration
+Importance Score: 85
 
-## Development Environment System (75/100)
-- Specialized local Kubernetes environment mirroring GCP infrastructure
-- Resilient port forwarding with automatic reconnection
-- Coordinated emulator management for Firebase and Pub/Sub services
-- Distributed health check system for service monitoring
+2. Blueprint Dependency System (packages/blueprint/src/dependencies.ts)
+- Resource dependency resolution with topological ordering
+- Parallel deployment batch organization
+- Cross-resource relationship management
+Importance Score: 85
 
-Location: packages/cli/src/commands/dev/dev.ts
+## Resource Handling
 
-## Project Initialization Workflow (70/100)
-- GCP project setup with organization policy management
-- API dependency resolution for cloud services
-- Custom billing account integration
-- Project template orchestration with dependency handling
+1. Resource Scanner (packages/cli/src/services/gcp-scanner.service.ts)
+- Project pattern detection for existing infrastructure
+- Resource type validation and mapping
+- Complex naming pattern resolution
+Importance Score: 75
 
-Location: packages/cli/src/commands/project/init.ts
+2. Resource Generation (packages/blueprint/src/generator.ts)
+- Provider-specific infrastructure code generation
+- Resource relationship mapping
+- Configuration template management
+Importance Score: 90
 
-## Zero Trust Authentication (85/100)
-- Dynamic authorization system for resource-based access control
-- IAP user validation with hierarchical permissions 
-- Access control audit logging
-- OAuth-based web backend protection
+## State Management
 
-Location: plugins/zero-trust-auth/src/runtime.ts
+1. Registry Service (packages/registry/src/services/registry.service.ts)
+- Project state tracking
+- Configuration change detection
+- Resource lifecycle management
+Importance Score: 75
 
-The system implements a sophisticated cloud infrastructure management platform focused on secure resource deployment, cross-service messaging, and fine-grained access control.
+2. Reference Resolution (packages/blueprint/src/references.ts)
+- Cross-resource property resolution
+- Output mapping system
+- Environment variable handling
+Importance Score: 80
+
+The architecture emphasizes secure infrastructure deployment with robust dependency management and state tracking, specifically designed for complex cloud resource orchestration.
 
 $END$
 

@@ -22,6 +22,7 @@ export {
   infraCommand,
   listCommand,
   eventsCommand,
+  inventoryCommand,
 } from './infra';
 
 // Development commands

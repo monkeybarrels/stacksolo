@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -32,6 +33,12 @@ export const vpcNetwork = defineResource({
         description: 'Automatically create subnets in each region',
         default: true,
       },
+      existing: {
+        type: 'boolean',
+        title: 'Use Existing Network',
+        description: 'Reference an existing VPC network instead of creating a new one. When true, a data source lookup will be used.',
+        default: false,
+      },
     },
     required: ['name'],
   },
@@ -46,13 +53,38 @@ export const vpcNetwork = defineResource({
       name: string;
       description?: string;
       autoCreateSubnetworks?: boolean;
+      existing?: boolean;
+      projectName?: string;
     };
 
+    // If using an existing network, use a data source lookup
+    if (vpcConfig.existing) {
+      const code = `const ${varName}Network = new DataGoogleComputeNetwork(this, '${config.name}', {
+  name: '${config.name}',
+});`;
+
+      return {
+        imports: [
+          "import { DataGoogleComputeNetwork } from '@cdktf/provider-google/lib/data-google-compute-network';",
+        ],
+        code,
+        outputs: [
+          `export const ${varName}NetworkName = ${varName}Network.name;`,
+          `export const ${varName}NetworkId = ${varName}Network.id;`,
+          `export const ${varName}NetworkSelfLink = ${varName}Network.selfLink;`,
+        ],
+      };
+    }
+
+    // Create a new network
     const autoCreate = vpcConfig.autoCreateSubnetworks ?? true;
+    const projectName = vpcConfig.projectName || '${var.project_name}';
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.VPC_NETWORK);
 
     const code = `const ${varName}Network = new ComputeNetwork(this, '${config.name}', {
   name: '${config.name}',
   autoCreateSubnetworks: ${autoCreate},
+  ${labelsCode}
 });`;
 
     return {

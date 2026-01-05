@@ -625,3 +625,207 @@ export async function executeResolution(
       return { success: false, message: 'Cancelled by user' };
   }
 }
+
+// =============================================================================
+// Cloud Functions Gen2 Preflight Setup
+// =============================================================================
+
+export interface CloudFunctionsPreflightResult {
+  success: boolean;
+  actionsPerformed: string[];
+  errors: string[];
+}
+
+/**
+ * Ensure all required APIs and IAM permissions are configured for Cloud Functions Gen2.
+ * This runs proactively before deploy to avoid permission errors during build.
+ */
+export async function ensureCloudFunctionsPrerequisites(
+  gcpProjectId: string,
+  region: string
+): Promise<CloudFunctionsPreflightResult> {
+  const actionsPerformed: string[] = [];
+  const errors: string[] = [];
+
+  // 1. Get project number
+  let projectNumber: string;
+  try {
+    const { stdout } = await execAsync(
+      `gcloud projects describe ${gcpProjectId} --format="value(projectNumber)"`
+    );
+    projectNumber = stdout.trim();
+  } catch (error) {
+    errors.push(`Failed to get project number: ${error}`);
+    return { success: false, actionsPerformed, errors };
+  }
+
+  // 2. Enable required APIs
+  const requiredApis = [
+    'cloudfunctions.googleapis.com',
+    'cloudbuild.googleapis.com',
+    'run.googleapis.com',
+    'artifactregistry.googleapis.com',
+    'vpcaccess.googleapis.com',
+    'compute.googleapis.com',
+  ];
+
+  for (const api of requiredApis) {
+    try {
+      await execAsync(
+        `gcloud services enable ${api} --project=${gcpProjectId} --quiet`,
+        { timeout: 60000 }
+      );
+      actionsPerformed.push(`Enabled API: ${api}`);
+    } catch {
+      // API might already be enabled, continue
+    }
+  }
+
+  // 3. Grant required roles to all relevant service accounts
+  // Based on: https://github.com/firebase/firebase-tools/issues/8431
+  // The DEFAULT COMPUTE service account needs cloudbuild.builds.builder role
+  const cloudBuildSa = `${projectNumber}@cloudbuild.gserviceaccount.com`;
+  const serverlessRobotSa = `service-${projectNumber}@serverless-robot-prod.iam.gserviceaccount.com`;
+  const gcfAdminSa = `service-${projectNumber}@gcf-admin-robot.iam.gserviceaccount.com`;
+  const defaultComputeSa = `${projectNumber}-compute@developer.gserviceaccount.com`;
+
+  // Roles needed for Cloud Build service account
+  const cloudBuildRoles = [
+    'roles/storage.objectViewer',
+    'roles/logging.logWriter',
+    'roles/artifactregistry.writer',
+    'roles/artifactregistry.reader',
+  ];
+
+  for (const role of cloudBuildRoles) {
+    try {
+      await execAsync(
+        `gcloud projects add-iam-policy-binding ${gcpProjectId} ` +
+          `--member="serviceAccount:${cloudBuildSa}" ` +
+          `--role="${role}" --condition=None --quiet`,
+        { timeout: 30000 }
+      );
+      actionsPerformed.push(`Granted ${role} to Cloud Build SA`);
+    } catch {
+      // Role might already be granted
+    }
+  }
+
+  // Roles needed for serverless robot
+  const serverlessRoles = [
+    'roles/cloudbuild.builds.builder',
+    'roles/storage.objectAdmin',
+    'roles/artifactregistry.reader',
+    'roles/artifactregistry.writer',
+  ];
+
+  for (const role of serverlessRoles) {
+    try {
+      await execAsync(
+        `gcloud projects add-iam-policy-binding ${gcpProjectId} ` +
+          `--member="serviceAccount:${serverlessRobotSa}" ` +
+          `--role="${role}" --condition=None --quiet`,
+        { timeout: 30000 }
+      );
+      actionsPerformed.push(`Granted ${role} to Serverless Robot SA`);
+    } catch {
+      // Role might already be granted
+    }
+  }
+
+  // CRITICAL: Default compute service account needs cloudbuild.builds.builder
+  // This is the key fix from firebase-tools#8431
+  const computeRoles = [
+    'roles/cloudbuild.builds.builder',
+    'roles/artifactregistry.reader',
+    'roles/artifactregistry.writer',
+  ];
+
+  for (const role of computeRoles) {
+    try {
+      await execAsync(
+        `gcloud projects add-iam-policy-binding ${gcpProjectId} ` +
+          `--member="serviceAccount:${defaultComputeSa}" ` +
+          `--role="${role}" --condition=None --quiet`,
+        { timeout: 30000 }
+      );
+      actionsPerformed.push(`Granted ${role} to Default Compute SA`);
+    } catch {
+      // Role might already be granted
+    }
+  }
+
+  // 4. Check if gcf-artifacts repository exists and configure permissions
+  try {
+    await execAsync(
+      `gcloud artifacts repositories describe gcf-artifacts ` +
+        `--location=${region} --project=${gcpProjectId}`,
+      { timeout: 30000 }
+    );
+
+    // Repository exists, grant permissions (both reader and writer for full access)
+    const serviceAccounts = [cloudBuildSa, serverlessRobotSa, gcfAdminSa, defaultComputeSa];
+    const repoRoles = ['roles/artifactregistry.writer', 'roles/artifactregistry.reader'];
+
+    for (const sa of serviceAccounts) {
+      for (const role of repoRoles) {
+        try {
+          await execAsync(
+            `gcloud artifacts repositories add-iam-policy-binding gcf-artifacts ` +
+              `--location=${region} --project=${gcpProjectId} ` +
+              `--member="serviceAccount:${sa}" ` +
+              `--role="${role}" --quiet`,
+            { timeout: 30000 }
+          );
+          actionsPerformed.push(`Granted ${role.split('/')[1]} on gcf-artifacts to ${sa.split('@')[0]}`);
+        } catch {
+          // Permission might already exist
+        }
+      }
+    }
+  } catch {
+    // Repository doesn't exist yet - that's fine, GCP will create it on first function deploy
+    // But we should create it proactively to avoid permission issues
+    try {
+      await execAsync(
+        `gcloud artifacts repositories create gcf-artifacts ` +
+          `--repository-format=docker ` +
+          `--location=${region} ` +
+          `--project=${gcpProjectId} ` +
+          `--description="Cloud Functions artifacts" --quiet`,
+        { timeout: 60000 }
+      );
+      actionsPerformed.push(`Created gcf-artifacts repository`);
+
+      // Now grant permissions on the newly created repo (both reader and writer)
+      const serviceAccounts = [cloudBuildSa, serverlessRobotSa, gcfAdminSa, defaultComputeSa];
+      const repoRoles = ['roles/artifactregistry.writer', 'roles/artifactregistry.reader'];
+
+      for (const sa of serviceAccounts) {
+        for (const role of repoRoles) {
+          try {
+            await execAsync(
+              `gcloud artifacts repositories add-iam-policy-binding gcf-artifacts ` +
+                `--location=${region} --project=${gcpProjectId} ` +
+                `--member="serviceAccount:${sa}" ` +
+                `--role="${role}" --quiet`,
+              { timeout: 30000 }
+            );
+          } catch {
+            // Continue
+          }
+        }
+      }
+      actionsPerformed.push(`Configured gcf-artifacts permissions`);
+    } catch (createError) {
+      // Failed to create - might be a timing issue, continue anyway
+      errors.push(`Note: gcf-artifacts repo creation deferred: ${createError}`);
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    actionsPerformed,
+    errors,
+  };
+}

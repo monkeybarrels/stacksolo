@@ -2,25 +2,26 @@
   "project": {
     "name": "simple-api",
     "region": "us-central1",
-    "gcpProjectId": "my-project",
+    "gcpProjectId": "refinery-platform-main",
     "backend": "cdktf",
-    "secrets": [
-      { "name": "api-key" }
-    ],
     "networks": [
       {
         "name": "main",
-        "containers": [
+        "functions": [
           {
             "name": "api",
-            "image": "gcr.io/my-project/api:latest",
-            "memory": "512Mi",
-            "allowUnauthenticated": true,
-            "env": {
-              "API_KEY": "@secret/api-key"
-            }
+            "runtime": "nodejs20",
+            "entryPoint": "api",
+            "memory": "256Mi",
+            "allowUnauthenticated": true
           }
-        ]
+        ],
+        "loadBalancer": {
+          "name": "gateway",
+          "routes": [
+            { "path": "/*", "backend": "api" }
+          ]
+        }
       }
     ]
   }

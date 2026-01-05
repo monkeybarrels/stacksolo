@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -140,9 +141,10 @@ export const cloudRun = defineResource({
     const timeout = runConfig.timeout || '300s';
     const allowUnauthenticated = runConfig.allowUnauthenticated ?? true;
     const projectId = runConfig.projectId || '${var.project_id}';
-    const projectName = runConfig.projectName || '';
+    const projectName = runConfig.projectName || '${var.project_name}';
     const gatewayUrl = runConfig.gatewayUrl || '';
     const additionalEnv = runConfig.environmentVariables || {};
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.CLOUD_RUN);
 
     // Parse timeout to seconds (e.g., "300s" -> 300)
     const timeoutSeconds = parseInt(timeout.replace('s', ''), 10) || 300;
@@ -211,6 +213,7 @@ ${envVarsCode}
     annotations: {
       'run.googleapis.com/ingress': 'all',
     },
+    ${labelsCode}
   },
   autogenerateRevisionName: true,
 });`;

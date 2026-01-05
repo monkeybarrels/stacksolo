@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -92,7 +93,11 @@ export const loadBalancer = defineResource({
       enableHttps?: boolean;
       redirectHttpToHttps?: boolean;
       iap?: IapConfig[];
+      projectName?: string;
     };
+
+    const projectName = lbConfig.projectName || '${var.project_name}';
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.LOAD_BALANCER);
 
     // Get routes (or use default function if specified)
     const routes = lbConfig.routes || (lbConfig.functionName ? [{ path: '/*', functionName: lbConfig.functionName }] : []);
@@ -362,6 +367,7 @@ ${urlMapConfig}
 // Global IP Address
 const ${varName}Ip = new ComputeGlobalAddress(this, '${config.name}-ip', {
   name: '${config.name}-ip',
+  ${labelsCode}
 });
 ${httpsCode}${httpRedirectCode}${httpOnlyCode}`;
 

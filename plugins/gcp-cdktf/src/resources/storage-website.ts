@@ -1,4 +1,5 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
+import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -65,6 +66,7 @@ export const storageWebsite = defineResource({
       errorDocument?: string;
       enableCdn?: boolean;
       projectId?: string;
+      projectName?: string;
     };
 
     const location = uiConfig.location || 'US';
@@ -72,6 +74,8 @@ export const storageWebsite = defineResource({
     const errorDocument = uiConfig.errorDocument || 'index.html';
     const enableCdn = uiConfig.enableCdn ?? true;
     const projectId = uiConfig.projectId || '${var.project_id}';
+    const projectName = uiConfig.projectName || '${var.project_name}';
+    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.STORAGE_WEBSITE);
 
     // Generate bucket name - must be globally unique
     const bucketName = `${projectId}-${config.name}`;
@@ -86,6 +90,7 @@ const ${varName}Bucket = new StorageBucket(this, '${config.name}', {
     mainPageSuffix: '${indexDocument}',
     notFoundPage: '${errorDocument}',
   },
+  ${labelsCode}
 });
 
 // Public access for website
