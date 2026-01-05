@@ -202,6 +202,15 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.25.1(hono@4.11.3)(zod@3.25.76)
+      '@stacksolo/blueprint':
+        specifier: workspace:*
+        version: link:../blueprint
+      '@stacksolo/core':
+        specifier: workspace:*
+        version: link:../core
+      '@stacksolo/plugin-gcp-cdktf':
+        specifier: workspace:*
+        version: link:../../plugins/gcp-cdktf
     devDependencies:
       '@types/node':
         specifier: ^20.19.27

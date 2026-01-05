@@ -14,7 +14,10 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@stacksolo/core": "workspace:*",
+    "@stacksolo/blueprint": "workspace:*",
+    "@stacksolo/plugin-gcp-cdktf": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.27",
