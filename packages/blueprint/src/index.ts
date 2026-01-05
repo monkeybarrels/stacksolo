@@ -107,6 +107,25 @@ export {
   type NamingContext,
 } from './naming.js';
 
+// Merge utilities
+export {
+  mergeConfigs,
+  detectConflicts,
+  formatConflicts,
+  prefixResourceName,
+  prefixBucketName,
+  prefixRoutePath,
+  validateMergedConfig,
+  validateCrossProjectReferences,
+  type MergeMetadata,
+  type MergeOptions,
+  type MergeInput,
+  type MergeResult,
+  type Conflict,
+  type ConflictResult,
+  type MergeValidationResult,
+} from './merge/index.js';
+
 // =============================================================================
 // Convenience Functions
 // =============================================================================
@@ -115,7 +134,39 @@ import { parseConfig, validateConfig } from './parser.js';
 import { resolveConfig } from './resolver.js';
 import { resolveWithOrder } from './dependencies.js';
 import { generatePulumiProgram, generatePulumiYaml } from './generator.js';
-import type { ValidationResult } from './schema.js';
+import type { ValidationResult, ValidationError, StackSoloConfig } from './schema.js';
+
+/**
+ * Load and validate a config file
+ * Returns a result object with success, config, and errors
+ */
+export function loadConfig(configPath: string): {
+  success: boolean;
+  config?: StackSoloConfig;
+  errors?: ValidationError[];
+} {
+  try {
+    const config = parseConfig(configPath);
+    const validation = validateConfig(config);
+
+    if (!validation.valid) {
+      return {
+        success: false,
+        errors: validation.errors,
+      };
+    }
+
+    return {
+      success: true,
+      config,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      errors: [{ path: '', message: (error as Error).message }],
+    };
+  }
+}
 
 /**
  * Full pipeline: parse, validate, resolve, generate

@@ -1,5 +1,4 @@
 import { defineResource, type ResourceConfig } from '@stacksolo/core';
-import { generateLabelsCode, RESOURCE_TYPES } from '../utils/labels';
 
 function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
@@ -77,14 +76,12 @@ export const vpcNetwork = defineResource({
     }
 
     // Create a new network
+    // Note: ComputeNetwork does not support labels in CDKTF provider
     const autoCreate = vpcConfig.autoCreateSubnetworks ?? true;
-    const projectName = vpcConfig.projectName || '${var.project_name}';
-    const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.VPC_NETWORK);
 
     const code = `const ${varName}Network = new ComputeNetwork(this, '${config.name}', {
   name: '${config.name}',
   autoCreateSubnetworks: ${autoCreate},
-  ${labelsCode}
 });`;
 
     return {

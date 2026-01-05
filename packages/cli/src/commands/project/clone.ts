@@ -1,0 +1,424 @@
+/**
+ * stacksolo clone
+ *
+ * Bootstrap a new StackSolo project from an existing one.
+ * Copies shared infrastructure configuration (VPC, buckets, registry)
+ * with `existing: true` flags so new projects reuse resources.
+ */
+
+import { Command } from 'commander';
+import chalk from 'chalk';
+import inquirer from 'inquirer';
+import ora from 'ora';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import { loadConfig, type StackSoloConfig } from '@stacksolo/blueprint';
+import { getRegionsForProvider } from '../../regions';
+import {
+  createStacksoloDir,
+  createConfigFile,
+} from '../../templates';
+import { getRegistry } from '@stacksolo/registry';
+
+interface SharedResources {
+  vpc?: {
+    name: string;
+    subnets?: Array<{ name: string; ipCidrRange: string }>;
+  };
+  buckets?: Array<{ name: string; storageClass?: string }>;
+  registry?: {
+    name: string;
+    format?: string;
+  };
+}
+
+/**
+ * Extract shared resources from a source config.
+ * These will be marked with existing: true in the new project.
+ */
+function extractSharedResources(config: StackSoloConfig): SharedResources {
+  const shared: SharedResources = {};
+  const project = config.project;
+
+  // Extract VPC from first network (the main shared infrastructure)
+  if (project.networks && project.networks.length > 0) {
+    const network = project.networks[0];
+    shared.vpc = {
+      name: network.name,
+      subnets: network.subnets?.map(s => ({
+        name: s.name,
+        ipCidrRange: s.ipCidrRange,
+      })),
+    };
+  }
+
+  // Extract buckets (globally unique, so we reference by name)
+  if (project.buckets && project.buckets.length > 0) {
+    shared.buckets = project.buckets.map(b => ({
+      name: b.name,
+      storageClass: b.storageClass,
+    }));
+  }
+
+  // Extract artifact registry
+  if (project.artifactRegistry) {
+    shared.registry = {
+      name: project.artifactRegistry.name,
+      format: project.artifactRegistry.format,
+    };
+  }
+
+  return shared;
+}
+
+/**
+ * Generate a new config that references shared resources with existing: true
+ */
+function generateClonedConfig(
+  newProjectName: string,
+  sourceConfig: StackSoloConfig,
+  shared: SharedResources,
+  options: {
+    shareBuckets: boolean;
+    shareRegistry: boolean;
+  }
+): StackSoloConfig {
+  const source = sourceConfig.project;
+
+  const newConfig: StackSoloConfig = {
+    project: {
+      name: newProjectName,
+      region: source.region,
+      gcpProjectId: source.gcpProjectId,
+      backend: source.backend,
+      // Empty network with shared VPC
+      networks: [],
+    },
+  };
+
+  // Add shared VPC with existing: true
+  if (shared.vpc) {
+    newConfig.project.networks = [{
+      name: shared.vpc.name,
+      existing: true,
+      // Subnets are part of the existing VPC
+      subnets: shared.vpc.subnets,
+      // Empty arrays for user to add their own resources
+      functions: [],
+      containers: [],
+      uis: [],
+    }];
+  }
+
+  // Add shared buckets with existing: true
+  if (options.shareBuckets && shared.buckets && shared.buckets.length > 0) {
+    newConfig.project.buckets = shared.buckets.map(b => ({
+      ...b,
+      existing: true,
+    }));
+  }
+
+  // Add shared artifact registry with existing: true
+  if (options.shareRegistry && shared.registry) {
+    newConfig.project.artifactRegistry = {
+      ...shared.registry,
+      existing: true,
+    };
+  }
+
+  return newConfig;
+}
+
+export const cloneCommand = new Command('clone')
+  .description('Bootstrap a new project from an existing StackSolo project')
+  .argument('<source>', 'Path to source project directory or config file')
+  .option('-n, --name <name>', 'Name for the new project')
+  .option('-o, --output <dir>', 'Output directory (default: current directory)')
+  .option('--no-vpc', 'Do not share the VPC')
+  .option('--no-buckets', 'Do not share storage buckets')
+  .option('--no-registry', 'Do not share artifact registry')
+  .option('-y, --yes', 'Skip prompts and use defaults')
+  .action(async (source, options) => {
+    const cwd = process.cwd();
+    const outputDir = options.output ? path.resolve(cwd, options.output) : cwd;
+
+    console.log(chalk.cyan.bold('\n  StackSolo Clone\n'));
+    console.log(chalk.gray('  Bootstrap a new project from an existing one.\n'));
+    console.log(chalk.gray('─'.repeat(60)));
+
+    // =========================================
+    // Step 1: Load source project config
+    // =========================================
+    console.log(chalk.cyan.bold('\n  Step 1: Load Source Project\n'));
+
+    const sourceSpinner = ora('Loading source project...').start();
+
+    // Resolve source path
+    let sourcePath = path.resolve(cwd, source);
+    let configPath: string;
+
+    try {
+      const stat = await fs.stat(sourcePath);
+      if (stat.isDirectory()) {
+        // Look for config in .stacksolo directory
+        configPath = path.join(sourcePath, '.stacksolo', 'stacksolo.config.json');
+      } else {
+        configPath = sourcePath;
+      }
+    } catch {
+      sourceSpinner.fail(`Source not found: ${source}`);
+      return;
+    }
+
+    // Load and validate config
+    let sourceConfig: StackSoloConfig;
+    try {
+      const result = loadConfig(configPath);
+      if (!result.success || !result.config) {
+        sourceSpinner.fail('Invalid source config');
+        if (result.errors) {
+          for (const err of result.errors) {
+            console.log(chalk.red(`  - ${err.message}`));
+          }
+        }
+        return;
+      }
+      sourceConfig = result.config;
+    } catch (error) {
+      sourceSpinner.fail(`Failed to load config: ${configPath}`);
+      console.log(chalk.red(`  ${error}`));
+      return;
+    }
+
+    sourceSpinner.succeed(`Loaded: ${chalk.green(sourceConfig.project.name)}`);
+
+    // =========================================
+    // Step 2: Extract shared resources
+    // =========================================
+    console.log(chalk.cyan.bold('\n  Step 2: Identify Shared Resources\n'));
+
+    const shared = extractSharedResources(sourceConfig);
+
+    console.log('  Found shareable resources:');
+    if (shared.vpc) {
+      console.log(chalk.green(`  ✓ VPC: ${shared.vpc.name}`));
+      if (shared.vpc.subnets) {
+        for (const subnet of shared.vpc.subnets) {
+          console.log(chalk.gray(`      Subnet: ${subnet.name} (${subnet.ipCidrRange})`));
+        }
+      }
+    }
+    if (shared.buckets && shared.buckets.length > 0) {
+      for (const bucket of shared.buckets) {
+        console.log(chalk.green(`  ✓ Bucket: ${bucket.name}`));
+      }
+    }
+    if (shared.registry) {
+      console.log(chalk.green(`  ✓ Artifact Registry: ${shared.registry.name}`));
+    }
+
+    if (!shared.vpc && !shared.buckets?.length && !shared.registry) {
+      console.log(chalk.yellow('  No shareable resources found in source project.'));
+      console.log(chalk.gray('  Consider running stacksolo init instead.\n'));
+      return;
+    }
+
+    // =========================================
+    // Step 3: Configure new project
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(60)));
+    console.log(chalk.cyan.bold('\n  Step 3: Configure New Project\n'));
+
+    let projectName = options.name;
+    let shareBuckets = options.buckets !== false;
+    let shareRegistry = options.registry !== false;
+    let shareVpc = options.vpc !== false;
+
+    if (!options.yes) {
+      // Get project name
+      if (!projectName) {
+        const defaultName = path.basename(outputDir).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const { name } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'name',
+            message: 'New project name:',
+            default: defaultName,
+            validate: (input: string) => {
+              if (!input) return 'Project name is required';
+              if (!/^[a-z][a-z0-9-]*$/.test(input)) {
+                return 'Must start with letter, only lowercase, numbers, hyphens';
+              }
+              if (input === sourceConfig.project.name) {
+                return 'New project must have a different name';
+              }
+              return true;
+            },
+          },
+        ]);
+        projectName = name;
+      }
+
+      // Select which resources to share
+      const resourceChoices = [];
+      if (shared.vpc) {
+        resourceChoices.push({ name: `VPC: ${shared.vpc.name}`, value: 'vpc', checked: true });
+      }
+      if (shared.buckets && shared.buckets.length > 0) {
+        resourceChoices.push({
+          name: `Buckets: ${shared.buckets.map(b => b.name).join(', ')}`,
+          value: 'buckets',
+          checked: true,
+        });
+      }
+      if (shared.registry) {
+        resourceChoices.push({
+          name: `Artifact Registry: ${shared.registry.name}`,
+          value: 'registry',
+          checked: true,
+        });
+      }
+
+      if (resourceChoices.length > 1) {
+        const { selectedResources } = await inquirer.prompt([
+          {
+            type: 'checkbox',
+            name: 'selectedResources',
+            message: 'Which resources should the new project share?',
+            choices: resourceChoices,
+          },
+        ]);
+
+        shareVpc = selectedResources.includes('vpc');
+        shareBuckets = selectedResources.includes('buckets');
+        shareRegistry = selectedResources.includes('registry');
+      }
+    }
+
+    projectName = projectName || `${sourceConfig.project.name}-clone`;
+
+    if (!shareVpc) {
+      console.log(chalk.yellow('\n  Warning: Not sharing VPC. A new VPC will be created.'));
+      console.log(chalk.gray('  This counts against your VPC quota (default: 5 per project).\n'));
+    }
+
+    // =========================================
+    // Step 4: Generate new project config
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(60)));
+    console.log(chalk.cyan.bold('\n  Step 4: Generate Project Files\n'));
+
+    const generateSpinner = ora('Generating configuration...').start();
+
+    // Generate config with shared resources
+    const newConfig = generateClonedConfig(
+      projectName,
+      sourceConfig,
+      shareVpc ? shared : { ...shared, vpc: undefined },
+      { shareBuckets, shareRegistry }
+    );
+
+    // If not sharing VPC, create an empty network
+    if (!shareVpc) {
+      newConfig.project.networks = [{
+        name: 'main',
+        subnets: [{
+          name: 'private',
+          ipCidrRange: '10.0.1.0/24',
+        }],
+        functions: [],
+        containers: [],
+        uis: [],
+      }];
+    }
+
+    // Create output directory if needed
+    try {
+      await fs.mkdir(outputDir, { recursive: true });
+    } catch {
+      // Directory exists
+    }
+
+    // Create .stacksolo directory
+    await createStacksoloDir(outputDir, {
+      gcpProjectId: sourceConfig.project.gcpProjectId,
+      clonedFrom: sourceConfig.project.name,
+    });
+    generateSpinner.text = 'Created .stacksolo/';
+
+    // Write config file
+    await createConfigFile(outputDir, newConfig);
+    generateSpinner.succeed('Project files created');
+
+    // =========================================
+    // Step 5: Register in global registry
+    // =========================================
+    const registrySpinner = ora('Registering project...').start();
+    try {
+      const registry = getRegistry();
+      const newConfigPath = path.join(outputDir, '.stacksolo', 'stacksolo.config.json');
+
+      const existing = await registry.findProjectByName(projectName);
+      if (existing) {
+        await registry.updateProject(existing.id, {
+          gcpProjectId: sourceConfig.project.gcpProjectId,
+          region: sourceConfig.project.region,
+          configPath: newConfigPath,
+        });
+        registrySpinner.succeed('Updated project in registry');
+      } else {
+        await registry.registerProject({
+          name: projectName,
+          gcpProjectId: sourceConfig.project.gcpProjectId,
+          region: sourceConfig.project.region,
+          configPath: newConfigPath,
+        });
+        registrySpinner.succeed('Registered project in global registry');
+      }
+    } catch {
+      registrySpinner.warn('Could not register in global registry (non-blocking)');
+    }
+
+    // =========================================
+    // Summary
+    // =========================================
+    console.log(chalk.gray('\n─'.repeat(60)));
+    console.log(chalk.bold.green('\n  Done! New project created.\n'));
+
+    console.log(chalk.gray('  Project: ') + chalk.white(projectName));
+    console.log(chalk.gray('  Location: ') + chalk.white(outputDir));
+    console.log(chalk.gray('  GCP Project: ') + chalk.white(sourceConfig.project.gcpProjectId));
+    console.log(chalk.gray('  Region: ') + chalk.white(sourceConfig.project.region));
+
+    console.log(chalk.gray('\n  Shared resources (existing: true):'));
+    if (shareVpc && shared.vpc) {
+      console.log(chalk.green(`    ✓ VPC: ${shared.vpc.name}`));
+    }
+    if (shareBuckets && shared.buckets?.length) {
+      for (const b of shared.buckets) {
+        console.log(chalk.green(`    ✓ Bucket: ${b.name}`));
+      }
+    }
+    if (shareRegistry && shared.registry) {
+      console.log(chalk.green(`    ✓ Registry: ${shared.registry.name}`));
+    }
+
+    console.log(chalk.gray('\n  Next steps:\n'));
+    console.log(chalk.white('    1. Add your functions, containers, or UIs to the config'));
+    console.log(chalk.white('    2. Run: ') + chalk.cyan('stacksolo scaffold'));
+    console.log(chalk.white('    3. Write your code'));
+    console.log(chalk.white('    4. Run: ') + chalk.cyan('stacksolo deploy'));
+    console.log('');
+
+    // Show example of adding a function
+    console.log(chalk.gray('  Example - add a function to .stacksolo/stacksolo.config.json:'));
+    console.log(chalk.gray(''));
+    console.log(chalk.cyan('    "functions": ['));
+    console.log(chalk.cyan('      {'));
+    console.log(chalk.cyan('        "name": "api",'));
+    console.log(chalk.cyan('        "runtime": "nodejs20",'));
+    console.log(chalk.cyan('        "entryPoint": "handler"'));
+    console.log(chalk.cyan('      }'));
+    console.log(chalk.cyan('    ]'));
+    console.log('');
+  });

@@ -7,7 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import type { StackSoloConfig } from '@stacksolo/blueprint';
 import { resolveConfig } from '@stacksolo/blueprint';
@@ -15,6 +15,63 @@ import { registry } from '@stacksolo/core';
 import { loadPlugins } from './plugin-loader.service';
 
 const execAsync = promisify(exec);
+
+/**
+ * Execute a command with real-time output streaming
+ */
+async function execStreaming(
+  command: string,
+  options: { cwd?: string; onOutput?: (line: string) => void; timeout?: number } = {}
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const { cwd, onOutput, timeout = 300000 } = options;
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const child = spawn('sh', ['-c', command], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, timeout);
+
+    child.stdout?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      stdout += text;
+      if (onOutput) {
+        const lines = text.split('\n').filter((l) => l.trim());
+        lines.forEach((line) => onOutput(line));
+      }
+    });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      stderr += text;
+      if (onOutput) {
+        const lines = text.split('\n').filter((l) => l.trim());
+        lines.forEach((line) => onOutput(line));
+      }
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`Command timed out after ${timeout}ms`));
+      } else {
+        resolve({ stdout, stderr, exitCode: code ?? 0 });
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 /** Flag to track if plugins have been loaded */
 let pluginsLoaded = false;
@@ -28,8 +85,10 @@ export interface DeployResult {
 
 export interface DeployOptions {
   onLog?: (message: string) => void;
+  onVerbose?: (message: string) => void;
   preview?: boolean;
   destroy?: boolean;
+  verbose?: boolean;
 }
 
 /**
@@ -40,12 +99,19 @@ export async function deployConfig(
   _stateDir: string, // Not used - CDKTF manages its own state
   options: DeployOptions = {}
 ): Promise<DeployResult> {
-  const { onLog = console.log, preview = false, destroy = false } = options;
+  const { onLog = console.log, onVerbose, preview = false, destroy = false, verbose = false } = options;
   const logs: string[] = [];
 
   const log = (msg: string) => {
     logs.push(msg);
     onLog(msg);
+  };
+
+  // Verbose output handler for streaming command output
+  const verboseLog = (msg: string) => {
+    if (verbose && onVerbose) {
+      onVerbose(msg);
+    }
   };
 
   try {
@@ -271,11 +337,31 @@ export async function deployConfig(
 
         // Build Docker image with platform flag for Apple Silicon compatibility
         log(`Building Docker image: ${kernelImage}`);
-        await execAsync(`docker build --platform linux/amd64 -t "${kernelImage}" .`, { cwd: kernelSourceDir, timeout: 300000 });
+        if (verbose) {
+          const buildResult = await execStreaming(
+            `docker build --platform linux/amd64 -t "${kernelImage}" .`,
+            { cwd: kernelSourceDir, onOutput: verboseLog, timeout: 300000 }
+          );
+          if (buildResult.exitCode !== 0) {
+            throw new Error(buildResult.stderr || 'Docker build failed');
+          }
+        } else {
+          await execAsync(`docker build --platform linux/amd64 -t "${kernelImage}" .`, { cwd: kernelSourceDir, timeout: 300000 });
+        }
 
         // Push to GCR
         log(`Pushing Docker image: ${kernelImage}`);
-        await execAsync(`docker push "${kernelImage}"`, { timeout: 300000 });
+        if (verbose) {
+          const pushResult = await execStreaming(`docker push "${kernelImage}"`, {
+            onOutput: verboseLog,
+            timeout: 300000,
+          });
+          if (pushResult.exitCode !== 0) {
+            throw new Error(pushResult.stderr || 'Docker push failed');
+          }
+        } else {
+          await execAsync(`docker push "${kernelImage}"`, { timeout: 300000 });
+        }
 
         log(`GCP Kernel built and pushed successfully`);
       }
@@ -362,11 +448,26 @@ terraform {
 
     // Init
     log('Initializing Terraform...');
-    await execAsync('terraform init', { cwd: stackDir });
+    if (verbose) {
+      await execStreaming('terraform init', { cwd: stackDir, onOutput: verboseLog });
+    } else {
+      await execAsync('terraform init', { cwd: stackDir });
+    }
 
     if (destroy) {
       log('Destroying resources...');
-      await execAsync('terraform destroy -auto-approve', { cwd: stackDir });
+      if (verbose) {
+        const result = await execStreaming('terraform destroy -auto-approve', {
+          cwd: stackDir,
+          onOutput: verboseLog,
+          timeout: 600000,
+        });
+        if (result.exitCode !== 0) {
+          throw new Error(result.stderr || 'Terraform destroy failed');
+        }
+      } else {
+        await execAsync('terraform destroy -auto-approve', { cwd: stackDir });
+      }
 
       return {
         success: true,
@@ -377,8 +478,12 @@ terraform {
 
     if (preview) {
       log('Running terraform plan...');
-      const { stdout } = await execAsync('terraform plan', { cwd: stackDir });
-      log(stdout);
+      if (verbose) {
+        await execStreaming('terraform plan', { cwd: stackDir, onOutput: verboseLog });
+      } else {
+        const { stdout } = await execAsync('terraform plan', { cwd: stackDir });
+        log(stdout);
+      }
 
       return {
         success: true,
@@ -407,7 +512,18 @@ terraform {
     log('Applying Terraform...');
     let firstApplyFailed = false;
     try {
-      await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+      if (verbose) {
+        const result = await execStreaming('terraform apply -auto-approve', {
+          cwd: stackDir,
+          onOutput: verboseLog,
+          timeout: 600000,
+        });
+        if (result.exitCode !== 0) {
+          throw new Error(result.stderr || 'Terraform apply failed');
+        }
+      } else {
+        await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+      }
     } catch (applyError) {
       // First apply may fail if Cloud Run references container images that don't exist yet
       // This is expected for fresh deploys - we'll build containers and apply again
@@ -489,11 +605,32 @@ terraform {
 
         // Build Docker image
         log(`Building Docker image: ${image}`);
-        await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
+        if (verbose) {
+          const buildResult = await execStreaming(`docker build -t "${image}" .`, {
+            cwd: sourceDir,
+            onOutput: verboseLog,
+            timeout: 300000,
+          });
+          if (buildResult.exitCode !== 0) {
+            throw new Error(buildResult.stderr || 'Docker build failed');
+          }
+        } else {
+          await execAsync(`docker build -t "${image}" .`, { cwd: sourceDir, timeout: 300000 });
+        }
 
         // Push to Artifact Registry
         log(`Pushing Docker image: ${image}`);
-        await execAsync(`docker push "${image}"`, { timeout: 300000 });
+        if (verbose) {
+          const pushResult = await execStreaming(`docker push "${image}"`, {
+            onOutput: verboseLog,
+            timeout: 300000,
+          });
+          if (pushResult.exitCode !== 0) {
+            throw new Error(pushResult.stderr || 'Docker push failed');
+          }
+        } else {
+          await execAsync(`docker push "${image}"`, { timeout: 300000 });
+        }
 
         log(`Container ${containerName} built and pushed successfully`);
       }
@@ -501,7 +638,18 @@ terraform {
       // Apply Terraform again to update Cloud Run with the new images
       if (firstApplyFailed) {
         log('Re-applying Terraform with container images...');
-        await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+        if (verbose) {
+          const result = await execStreaming('terraform apply -auto-approve', {
+            cwd: stackDir,
+            onOutput: verboseLog,
+            timeout: 600000,
+          });
+          if (result.exitCode !== 0) {
+            throw new Error(result.stderr || 'Terraform re-apply failed');
+          }
+        } else {
+          await execAsync('terraform apply -auto-approve', { cwd: stackDir });
+        }
       }
     }
 

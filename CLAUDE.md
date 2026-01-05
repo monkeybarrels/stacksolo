@@ -273,6 +273,69 @@ These defaults must be consistent between scaffold generators and K8s manifest g
 - `plugins/gcp-cdktf/src/provider.ts` - GCP CDKTF provider definition
 - `plugins/gcp-cdktf/src/resources/` - GCP CDKTF resource type definitions
 
+## CLI Command Documentation Requirements
+
+**CRITICAL: When adding or modifying CLI commands, ALWAYS update documentation before completing the PR.**
+
+### 1. Required Documentation Updates
+
+When you add a new command or modify an existing one:
+
+| Location | What to Update |
+|----------|----------------|
+| `website/src/content/docs/reference/cli.md` | Add command to overview table, add full command section with options/examples |
+| `website/src/content/docs/getting-started/quickstart.md` | If relevant to getting started flow |
+| `website/src/content/docs/guides/*.md` | If command relates to a specific guide topic |
+| Root `README.md` | If it's a major user-facing command |
+
+### 2. CLI Reference Format
+
+Each command in `cli.md` should include:
+
+```markdown
+### `stacksolo <command>`
+
+Brief description of what the command does.
+
+\`\`\`bash
+stacksolo <command> [arguments] [options]
+\`\`\`
+
+**Arguments:** (if any)
+| Argument | Description |
+|----------|-------------|
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+
+**Examples:**
+\`\`\`bash
+# Example with description
+stacksolo command --option value
+\`\`\`
+
+**See also:** [Related Guide](/guides/related/)
+```
+
+### 3. Command Categories
+
+Commands are organized in the CLI reference:
+- **Project Commands** - `init`, `clone`, `scaffold`
+- **Infrastructure Commands** - `deploy`, `destroy`, `status`, `merge`, `inventory`, etc.
+- **Development Commands** - `dev`, `build`
+- **Configuration Commands** - `config`, `env`
+
+### 4. Self-Documentation Checklist
+
+Before completing any CLI command work:
+- [ ] Command added to overview table in `cli.md`
+- [ ] Full command section added with options and examples
+- [ ] Related guides updated if applicable
+- [ ] Quickstart updated if it's a core workflow command
+- [ ] Examples are copy-paste ready
+- [ ] Cross-references to related guides included
+
 ## Plugin Development & Documentation Requirements
 
 **CRITICAL: When creating or modifying plugins, ALWAYS complete these documentation steps before the PR:**

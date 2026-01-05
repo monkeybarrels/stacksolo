@@ -9,7 +9,7 @@
  */
 
 // Project commands
-export { initCommand, scaffoldCommand } from './project';
+export { initCommand, scaffoldCommand, cloneCommand } from './project';
 
 // Infrastructure commands
 export {
@@ -23,6 +23,8 @@ export {
   listCommand,
   eventsCommand,
   inventoryCommand,
+  doctorCommand,
+  mergeCommand,
 } from './infra';
 
 // Development commands

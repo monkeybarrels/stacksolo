@@ -103,6 +103,7 @@ export const deployCommand = new Command('deploy')
   .option('--skip-preflight', 'Skip pre-flight conflict detection')
   .option('--import-conflicts', 'Automatically import conflicting resources')
   .option('--delete-conflicts', 'Automatically delete conflicting resources')
+  .option('-v, --verbose', 'Show real-time Terraform and Docker output')
   .action(async (options) => {
     await runDeploy(options);
   });
@@ -118,6 +119,7 @@ interface DeployOptions {
   skipPreflight?: boolean;
   importConflicts?: boolean;
   deleteConflicts?: boolean;
+  verbose?: boolean;
 }
 
 interface RetryContext {
@@ -126,6 +128,31 @@ interface RetryContext {
   deletedResource?: string;
   deletedResources?: string[];
   refreshedState?: boolean;
+}
+
+/**
+ * Phase progress tracker for deploy operations
+ */
+class DeployProgress {
+  private currentStep = 0;
+  private totalSteps = 0;
+  private phases: string[] = [];
+
+  configure(phases: string[]) {
+    this.phases = phases;
+    this.totalSteps = phases.length;
+    this.currentStep = 0;
+  }
+
+  next(): string {
+    this.currentStep++;
+    const phase = this.phases[this.currentStep - 1] || 'Processing';
+    return chalk.cyan(`  [${this.currentStep}/${this.totalSteps}] ${phase}`);
+  }
+
+  stepLabel(): string {
+    return `[${this.currentStep}/${this.totalSteps}]`;
+  }
 }
 
 interface ConflictingResource {
@@ -410,6 +437,28 @@ async function runDeploy(
   const resolved = resolveConfig(config);
   const order = topologicalSort(resolved.resources);
 
+  // Calculate phases for progress tracking (only on first attempt)
+  const progress = new DeployProgress();
+  if (retryCount === 0) {
+    const phases: string[] = [];
+    const hasCloudFunctions = resolved.resources.some((r) => r.type === 'gcp-cdktf:cloud_function');
+    const hasContainers = resolved.resources.some((r) => r.type === 'gcp:cloud_run');
+    const hasGcpKernel = resolved.resources.some((r) => r.type === 'gcp-kernel:gcp_kernel');
+
+    if (!options.destroy && !options.skipPreflight && !options.force) {
+      phases.push('Pre-flight checks');
+    }
+    if (hasCloudFunctions && !options.destroy && !options.preview && !options.skipPreflight) {
+      phases.push('Cloud Functions setup');
+    }
+    if ((hasContainers || hasGcpKernel) && !options.preview && !options.destroy && !options.skipBuild) {
+      phases.push('Building containers');
+    }
+    phases.push(options.destroy ? 'Destroying infrastructure' : options.preview ? 'Previewing changes' : 'Deploying infrastructure');
+
+    progress.configure(phases);
+  }
+
   if (retryCount === 0) {
     console.log(chalk.cyan('\n  Resources:'), `${resolved.resources.length} to ${options.destroy ? 'destroy' : options.preview ? 'preview' : 'deploy'}`);
 
@@ -425,6 +474,7 @@ async function runDeploy(
 
   // Pre-flight conflict detection (only on first attempt, not destroy, not force)
   if (!options.destroy && !options.skipPreflight && !options.force && retryCount === 0) {
+    console.log(progress.next());
     if (sessionId) await logPhaseStart(sessionId, 'preflight', { project: config.project.name });
     const preflightSpinner = ora('Checking for resource conflicts...').start();
 
@@ -637,6 +687,7 @@ async function runDeploy(
   // Cloud Functions Gen2 preflight setup (only on first attempt, not destroy, not preview)
   const hasCloudFunctions = resolved.resources.some((r) => r.type === 'gcp-cdktf:cloud_function');
   if (hasCloudFunctions && !options.destroy && !options.preview && !options.skipPreflight && retryCount === 0) {
+    console.log(progress.next());
     const cfSpinner = ora('Setting up Cloud Functions prerequisites...').start();
 
     try {
@@ -687,7 +738,7 @@ async function runDeploy(
     const containers = resolved.resources.filter((r) => r.type === 'gcp:cloud_run');
 
     if (containers.length > 0) {
-      console.log(chalk.cyan('  Building container images...\n'));
+      console.log(progress.next());
 
       // Configure Docker auth for Artifact Registry
       const authSpinner = ora('Configuring Docker authentication...').start();
@@ -760,11 +811,22 @@ async function runDeploy(
   const action = options.destroy ? 'Destroying' : options.preview ? 'Previewing' : 'Deploying';
   const phase = options.destroy ? 'destroy' : options.preview ? 'preview' : 'apply';
   const projectName = config.project.name;
+
+  // Show progress step (only on first attempt)
+  if (retryCount === 0) {
+    console.log(progress.next());
+  }
+
   if (sessionId) await logPhaseStart(sessionId, phase, { project: projectName });
 
-  const spinner = ora(`${action} infrastructure...`).start();
+  // In verbose mode, we don't use a spinner - we show real-time output
+  const spinner = options.verbose ? null : ora(`${action} infrastructure...`).start();
   const startTime = Date.now();
   const logs: string[] = [];
+
+  if (options.verbose) {
+    console.log(chalk.cyan(`\n  ${action} infrastructure (verbose mode)...\n`));
+  }
 
   // Log terraform start
   if (sessionId) {
@@ -778,16 +840,28 @@ async function runDeploy(
   const result = await deployConfig(config, STATE_DIR, {
     preview: options.preview,
     destroy: options.destroy,
+    verbose: options.verbose,
     onLog: (msg) => {
       logs.push(msg);
-      // Update spinner with elapsed time
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      spinner.text = `${action} infrastructure... (${elapsed}s)`;
+      // Update spinner with elapsed time (only if not verbose)
+      if (spinner) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        spinner.text = `${action} infrastructure... (${elapsed}s)`;
+      }
+    },
+    onVerbose: (msg) => {
+      // Show real-time Terraform output in verbose mode
+      console.log(chalk.gray(`  ${msg}`));
     },
   });
 
   if (result.success) {
-    spinner.succeed(`${options.destroy ? 'Destroyed' : options.preview ? 'Preview complete' : 'Deployed'} successfully`);
+    const successMsg = `${options.destroy ? 'Destroyed' : options.preview ? 'Preview complete' : 'Deployed'} successfully`;
+    if (spinner) {
+      spinner.succeed(successMsg);
+    } else {
+      console.log(chalk.green(`\n  ✓ ${successMsg}`));
+    }
 
     // Log success
     const durationMs = Date.now() - startTime;
@@ -883,7 +957,12 @@ async function runDeploy(
       console.log(chalk.gray('    stacksolo scaffold   - Generate local dev environment\n'));
     }
   } else {
-    spinner.fail(`${action} failed`);
+    const failMsg = `${action} failed`;
+    if (spinner) {
+      spinner.fail(failMsg);
+    } else {
+      console.log(chalk.red(`\n  ✗ ${failMsg}`));
+    }
     console.log(chalk.red(`\n  ${result.error}\n`));
 
     // Log failure

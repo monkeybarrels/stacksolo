@@ -933,6 +933,7 @@ function resolveCdktfConfig(
         vpcConnector: connectorName,
         allowUnauthenticated: fn.allowUnauthenticated ?? true,
         projectId: projectInfo.gcpProjectId,
+        projectName: projectInfo.name,
       },
       dependsOn: [connectorId],
       network: network.name,

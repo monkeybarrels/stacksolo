@@ -186,6 +186,21 @@ stacksolo list
 stacksolo destroy
 ```
 
+## Adding Another Project
+
+If you want to add another app that shares the same VPC (to avoid GCP quota limits):
+
+```bash
+# Clone from your existing project
+mkdir my-second-app && cd my-second-app
+stacksolo clone ../my-app --name my-second-app
+
+# Add your functions/containers to the config, then deploy
+stacksolo deploy
+```
+
+The new project will reuse the VPC from `my-app` instead of creating a new one.
+
 ## Troubleshooting
 
 ### "Permission denied" errors
@@ -219,4 +234,5 @@ brew install terraform
 
 - [Configuration Guide](/guides/configuration/) - Learn all config options
 - [Local Development](/guides/local-development/) - Run locally with Kubernetes
+- [Resource Sharing](/guides/resource-sharing/) - Share VPCs, buckets, and registries
 - [CLI Reference](/reference/cli/) - All commands explained

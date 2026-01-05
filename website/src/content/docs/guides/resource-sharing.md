@@ -251,6 +251,78 @@ When you destroy a project, check for orphaned resources:
 stacksolo inventory --orphaned --project=YOUR_PROJECT_ID
 ```
 
+## Clone Command: Quick Bootstrap
+
+The `stacksolo clone` command provides the fastest way to create a new project that shares resources with an existing one.
+
+### Basic Usage
+
+```bash
+# Clone from an existing project
+stacksolo clone ./my-existing-project --name my-new-project
+
+# Clone with non-interactive mode
+stacksolo clone ./my-existing-project --name my-new-project -y
+
+# Clone to a specific directory
+stacksolo clone ./my-existing-project --name my-new-project --output ./new-project-dir
+```
+
+### What Gets Shared
+
+When you clone, the new project automatically gets `existing: true` for:
+
+- **VPC Network** - Reuses the source project's VPC
+- **Storage Buckets** - References the same buckets (if any)
+- **Artifact Registry** - Uses the same container registry (if any)
+
+### Selective Sharing
+
+You can choose which resources to share:
+
+```bash
+# Share VPC but create new buckets
+stacksolo clone ./source --name new-project --no-buckets
+
+# Share VPC and registry but not buckets
+stacksolo clone ./source --name new-project --no-buckets
+
+# Don't share VPC (creates a new one)
+stacksolo clone ./source --name new-project --no-vpc
+```
+
+### Generated Config
+
+After cloning, your new project config looks like:
+
+```json
+{
+  "project": {
+    "name": "my-new-project",
+    "region": "us-central1",
+    "gcpProjectId": "my-gcp-project",
+    "networks": [
+      {
+        "name": "source-project-main",
+        "existing": true,
+        "functions": [],
+        "containers": [],
+        "uis": []
+      }
+    ]
+  }
+}
+```
+
+The `functions`, `containers`, and `uis` arrays are empty, ready for you to add your resources.
+
+### Next Steps After Cloning
+
+1. Edit `.stacksolo/stacksolo.config.json` to add your functions/containers
+2. Run `stacksolo scaffold` to generate code templates
+3. Write your application code
+4. Run `stacksolo deploy`
+
 ## Common Scenarios
 
 ### Scenario 1: Multiple APIs, One VPC

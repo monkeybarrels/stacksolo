@@ -16,12 +16,15 @@ npm install -g @stacksolo/cli
 | Command | Description |
 |---------|-------------|
 | `stacksolo init` | Initialize a new project |
+| `stacksolo clone` | Bootstrap from an existing project |
+| `stacksolo scaffold` | Generate local dev files |
 | `stacksolo deploy` | Deploy infrastructure |
 | `stacksolo destroy` | Destroy all resources |
+| `stacksolo merge` | Merge multiple projects into one |
 | `stacksolo status` | Show deployment status |
 | `stacksolo events` | View deploy event logs |
+| `stacksolo inventory` | Scan and manage GCP resources |
 | `stacksolo dev` | Start local development |
-| `stacksolo scaffold` | Generate local dev files |
 | `stacksolo logs` | View deployment logs |
 | `stacksolo output` | Show resource outputs |
 
@@ -41,6 +44,57 @@ stacksolo init
 3. Enables required APIs
 4. Asks what type of app you're building
 5. Generates `.stacksolo/stacksolo.config.json`
+
+### `stacksolo clone`
+
+Bootstrap a new project from an existing StackSolo project. Automatically configures shared resources (VPC, buckets, registry) with `existing: true`.
+
+```bash
+stacksolo clone <source> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `source` | Path to source project directory or config file |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-n, --name <name>` | Name for the new project |
+| `-o, --output <dir>` | Output directory (default: current directory) |
+| `--no-vpc` | Do not share the VPC (creates a new one) |
+| `--no-buckets` | Do not share storage buckets |
+| `--no-registry` | Do not share artifact registry |
+| `-y, --yes` | Skip prompts and use defaults |
+
+**Examples:**
+
+```bash
+# Clone interactively
+stacksolo clone ./my-existing-project
+
+# Clone with specific name
+stacksolo clone ./my-existing-project --name my-new-api
+
+# Clone non-interactively to a specific directory
+stacksolo clone ./my-existing-project --name my-new-api --output ./new-project -y
+
+# Clone but create a new VPC
+stacksolo clone ./my-existing-project --name my-new-api --no-vpc
+```
+
+**What gets shared:**
+
+- **VPC Network** - Reuses the source project's VPC (avoids quota limits)
+- **Storage Buckets** - References existing buckets
+- **Artifact Registry** - Uses the same container registry
+
+The new project config will have empty `functions`, `containers`, and `uis` arrays ready for you to add your resources.
+
+**See also:** [Resource Sharing Guide](/guides/resource-sharing/)
 
 ### `stacksolo scaffold`
 
@@ -194,6 +248,90 @@ stacksolo events show --json
 | `gcloud` | gcloud CLI commands |
 | `file` | File system operations |
 | `gcs` | GCS uploads |
+
+### `stacksolo merge`
+
+Merge multiple StackSolo projects into a single deployable stack. Useful for CI pipelines or combining microservices.
+
+```bash
+stacksolo merge <projects...> --name <name> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `projects` | Paths to project directories or config files (1 or more) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | Name for the merged project (required) |
+| `-o, --output <dir>` | Output directory (default: `.stacksolo-merged/`) |
+| `--shared-vpc <name>` | Use a shared VPC for all projects |
+| `--dry-run` | Show what would be merged without writing files |
+
+**Examples:**
+
+```bash
+# Merge two projects
+stacksolo merge ./users-api ./orders-api --name platform
+
+# Merge with custom output directory
+stacksolo merge ./api ./web --name my-app --output ./deploy
+
+# Preview merge without writing files
+stacksolo merge ./services/* --name prod-stack --dry-run
+```
+
+**How it works:**
+
+1. Loads and validates all source project configs
+2. Detects conflicts (all projects must use the same GCP project ID)
+3. Prefixes all resource names with source project name (e.g., `api` → `users-api-api`)
+4. Merges networks into a single shared VPC
+5. Combines load balancer routes with path prefixes (e.g., `/users/*`, `/orders/*`)
+6. Writes merged config to output directory
+
+**See also:** [Resource Sharing Guide](/guides/resource-sharing/)
+
+### `stacksolo inventory`
+
+Scan and manage GCP resources across your projects. Helps track shared resources and find orphaned infrastructure.
+
+```bash
+stacksolo inventory [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--project <id>` | GCP project ID to scan |
+| `--json` | Output as JSON |
+| `--orphaned` | Show only orphaned resources |
+
+**Subcommands:**
+
+```bash
+# Scan for all StackSolo resources
+stacksolo inventory --project=my-gcp-project
+
+# Adopt an unmanaged resource
+stacksolo inventory adopt "VPC Network" default my-project-name
+
+# Mark a resource as shared with other projects
+stacksolo inventory share "VPC Network" my-vpc second-project third-project
+```
+
+**Resource categories:**
+
+- **Managed** - Resources with StackSolo labels linked to registered projects
+- **Orphaned** - StackSolo resources whose projects are no longer registered
+- **Unmanaged** - GCP resources without StackSolo labels
+
+**See also:** [Resource Sharing Guide](/guides/resource-sharing/)
 
 ## Development Commands
 

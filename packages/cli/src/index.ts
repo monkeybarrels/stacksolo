@@ -10,6 +10,7 @@ import {
   // Project commands
   initCommand,
   scaffoldCommand,
+  cloneCommand,
   // Infrastructure commands
   deployCommand,
   destroyCommand,
@@ -21,6 +22,8 @@ import {
   listCommand,
   eventsCommand,
   inventoryCommand,
+  doctorCommand,
+  mergeCommand,
   // Development commands
   buildCommand,
   devCommand,
@@ -43,6 +46,7 @@ program
 // Project commands
 program.addCommand(initCommand);
 program.addCommand(scaffoldCommand);
+program.addCommand(cloneCommand);
 
 // Infrastructure commands
 program.addCommand(deployCommand);
@@ -55,6 +59,8 @@ program.addCommand(infraCommand);
 program.addCommand(listCommand);
 program.addCommand(eventsCommand);
 program.addCommand(inventoryCommand);
+program.addCommand(doctorCommand);
+program.addCommand(mergeCommand);
 
 // Development commands
 program.addCommand(buildCommand);

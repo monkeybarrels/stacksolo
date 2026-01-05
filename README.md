@@ -23,13 +23,15 @@ StackSolo is an infrastructure automation tool for indie hackers and solo develo
 
 ## Documentation
 
+Visit [stacksolo.dev](https://stacksolo.dev) for full documentation.
+
 | Guide | Description |
 |-------|-------------|
-| [Quickstart](docs/quickstart.md) | Get started in 5 minutes |
-| [CLI Reference](docs/cli-reference.md) | All commands and options |
-| [Configuration](docs/configuration.md) | How to write stacksolo.config.json |
-| [Architecture](docs/architecture.md) | How StackSolo works internally |
-| [Plugin Development](docs/plugin-development.md) | Create your own plugins |
+| [Quickstart](https://stacksolo.dev/getting-started/quickstart/) | Get started in 5 minutes |
+| [CLI Reference](https://stacksolo.dev/reference/cli/) | All commands and options |
+| [Configuration](https://stacksolo.dev/guides/configuration/) | How to write stacksolo.config.json |
+| [Resource Sharing](https://stacksolo.dev/guides/resource-sharing/) | Share VPCs, buckets, and registries |
+| [Architecture](https://stacksolo.dev/architecture/overview/) | How StackSolo works internally |
 
 ---
 
@@ -57,6 +59,10 @@ stacksolo init
 
 # Deploy to GCP
 stacksolo deploy
+
+# Create another project sharing the same VPC
+mkdir ../my-second-app && cd ../my-second-app
+stacksolo clone ../my-app --name my-second-app
 ```
 
 ### Prerequisites
@@ -97,7 +103,7 @@ stacksolo deploy
 }
 ```
 
-See [Configuration Guide](docs/configuration.md) for all options.
+See [Configuration Guide](https://stacksolo.dev/guides/configuration/) for all options.
 
 ---
 
@@ -141,7 +147,7 @@ stacksolo dev --stop
 
 This spins up your functions, UIs, and emulators (Firebase, Pub/Sub) locally with the same routing as production.
 
-See [CLI Reference](docs/cli-reference.md#stacksolo-dev) for details.
+See [CLI Reference](https://stacksolo.dev/reference/cli/) for details.
 
 ---
 
@@ -167,7 +173,7 @@ export const myResource = defineResource({
 });
 ```
 
-See [Plugin Development Guide](docs/plugin-development.md) for full documentation.
+See [Plugin Development Guide](https://stacksolo.dev/architecture/plugin-development/) for full documentation.
 
 ---
 
@@ -232,5 +238,5 @@ MIT © [MonkeyBarrels LLC](https://monkeybarrels.com)
 ## Links
 
 - [Website](https://stacksolo.dev)
-- [Documentation](docs/README.md)
+- [Documentation](https://stacksolo.dev/getting-started/introduction/)
 - [MonkeyBarrels](https://monkeybarrels.com)

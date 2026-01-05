@@ -32,19 +32,20 @@ export function generateLabels(projectName: string, resourceType: string): Stack
 /**
  * Generate CDKTF code for labels block
  *
- * @param projectName - The StackSolo project name (can be a variable reference like ${var.project_name})
+ * @param projectName - The StackSolo project name
  * @param resourceType - The type of resource
  * @returns String of CDKTF code for the labels property
  */
 export function generateLabelsCode(projectName: string, resourceType: string): string {
-  // Handle variable references vs literal strings
-  const projectValue = projectName.startsWith('${')
-    ? projectName.slice(2, -1)  // Extract variable reference
-    : `'${sanitizeLabelValue(projectName)}'`;
+  // Always use sanitized literal string values for labels
+  // Strip any variable reference syntax like ${var.project_name}
+  const cleanProjectName = projectName.startsWith('${')
+    ? projectName.replace(/^\$\{|\}$/g, '').replace(/^var\./, '')
+    : projectName;
 
   return `labels: {
     stacksolo: 'true',
-    'stacksolo-project': ${projectValue},
+    'stacksolo-project': '${sanitizeLabelValue(cleanProjectName)}',
     'stacksolo-resource': '${sanitizeLabelValue(resourceType)}',
   },`;
 }
