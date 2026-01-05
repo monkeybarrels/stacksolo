@@ -2,7 +2,7 @@
  * Kysely database schema types for the StackSolo registry
  */
 
-import type { ColumnType } from 'kysely';
+import type { ColumnType, Generated } from 'kysely';
 
 /**
  * Project table - tracks all StackSolo projects on the machine
@@ -55,10 +55,46 @@ export interface DeploymentTable {
 }
 
 /**
+ * Session table - tracks deploy sessions (each CLI invocation)
+ */
+export interface SessionTable {
+  id: string;
+  started_at: ColumnType<string, string, string>;
+  finished_at: ColumnType<string | null, string | null, string | null>;
+  command: string;
+  args: string | null;
+  config_hash: string | null;
+  project_name: string | null;
+  gcp_project_id: string | null;
+  exit_code: ColumnType<number | null, number | null, number | null>;
+}
+
+/**
+ * Event table - high resolution event stream for deploy operations
+ */
+export interface EventTable {
+  id: Generated<number>;
+  session_id: string;
+  timestamp: ColumnType<string, string, string>;
+  seq: number;
+  project: string | null;
+  category: string;
+  event_type: string;
+  resource_type: string | null;
+  resource_name: string | null;
+  terraform_address: string | null;
+  data: string;
+  parent_event_id: number | null;
+  correlation_id: string | null;
+}
+
+/**
  * Complete database schema
  */
 export interface RegistryDatabase {
   projects: ProjectTable;
   resources: ResourceTable;
   deployments: DeploymentTable;
+  sessions: SessionTable;
+  events: EventTable;
 }

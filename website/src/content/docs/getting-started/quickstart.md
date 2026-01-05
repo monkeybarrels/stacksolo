@@ -176,6 +176,12 @@ stacksolo status
 # View logs
 stacksolo logs
 
+# View deploy event history
+stacksolo events
+
+# List registered projects
+stacksolo list
+
 # Destroy all resources
 stacksolo destroy
 ```

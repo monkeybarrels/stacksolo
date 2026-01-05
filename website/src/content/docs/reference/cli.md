@@ -19,6 +19,7 @@ npm install -g @stacksolo/cli
 | `stacksolo deploy` | Deploy infrastructure |
 | `stacksolo destroy` | Destroy all resources |
 | `stacksolo status` | Show deployment status |
+| `stacksolo events` | View deploy event logs |
 | `stacksolo dev` | Start local development |
 | `stacksolo scaffold` | Generate local dev files |
 | `stacksolo logs` | View deployment logs |
@@ -114,6 +115,85 @@ stacksolo logs [options]
 |--------|-------------|
 | `--follow` | Stream logs in real-time |
 | `--since <duration>` | Show logs since (e.g., `1h`, `30m`) |
+
+### `stacksolo events`
+
+View high-resolution event logs for deploy operations. Events are stored in `~/.stacksolo/registry.db` and provide full observability of every operation during deployment.
+
+```bash
+# View latest session events
+stacksolo events
+
+# List all sessions
+stacksolo events list [options]
+
+# View specific session
+stacksolo events show [session-id] [options]
+```
+
+#### `stacksolo events` (default)
+
+Shows events from the most recent deploy session in an ASCII table.
+
+```
++--------------+-----------------+------------+----------------------+-------------------------------------+
+| TIME         | PROJECT         | CATEGORY   | EVENT                | DETAILS                             |
++--------------+-----------------+------------+----------------------+-------------------------------------+
+| 19:55:54.294 | my-app          | internal   | session_start        | deploy                              |
+| 19:55:54.297 | my-app          | internal   | phase_start          | phase=preflight                     |
+| 19:56:24.356 | my-app          | internal   | phase_end            | phase=preflight                     |
+| 19:56:24.358 | my-app          | internal   | phase_start          | phase=apply                         |
+| 19:56:24.359 | my-app          | terraform  | apply_start          |                                     |
+| 19:57:14.519 | my-app          | terraform  | apply_end            | exit=0                              |
+| 19:57:14.521 | my-app          | internal   | phase_end            | phase=apply                         |
+| 19:57:14.521 | my-app          | internal   | session_end          | exit=0                              |
++--------------+-----------------+------------+----------------------+-------------------------------------+
+```
+
+#### `stacksolo events list`
+
+List recent deploy sessions.
+
+| Option | Description |
+|--------|-------------|
+| `-n, --limit <number>` | Number of sessions to show (default: 10) |
+| `--json` | Output as JSON |
+
+#### `stacksolo events show`
+
+Show events for a specific session.
+
+```bash
+# View by session ID (first 8 chars work)
+stacksolo events show abc12345
+
+# Filter by category
+stacksolo events show --category terraform
+
+# Filter by resource
+stacksolo events show --resource my-bucket
+
+# JSON output
+stacksolo events show --json
+```
+
+| Option | Description |
+|--------|-------------|
+| `-c, --category <category>` | Filter by category: `internal`, `terraform`, `docker`, `gcloud`, `file`, `gcs` |
+| `-r, --resource <name>` | Filter by resource name |
+| `-n, --limit <number>` | Maximum events to show |
+| `--json` | Output as JSON |
+
+#### Event Categories
+
+| Category | Description |
+|----------|-------------|
+| `internal` | Session lifecycle, phase transitions, conflicts, user prompts |
+| `terraform` | Terraform init, plan, apply operations and resource changes |
+| `docker` | Docker build and push operations |
+| `gcloud` | gcloud CLI commands |
+| `file` | File system operations |
+| `gcs` | GCS uploads |
 
 ## Development Commands
 

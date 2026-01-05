@@ -14,7 +14,19 @@ import { homedir } from 'os';
 import { spawn, exec } from 'child_process';
 import { promisify } from 'util';
 import { parseConfig, resolveConfig, topologicalSort } from '@stacksolo/blueprint';
-import { getRegistry } from '@stacksolo/registry';
+import {
+  getRegistry,
+  initRegistry,
+  startSession,
+  endSession,
+  logPhaseStart,
+  logPhaseEnd,
+  logConflictDetected,
+  logUserPrompt,
+  logUserResponse,
+  logTerraformEvent,
+  logEvent,
+} from '@stacksolo/registry';
 import { deployConfig } from '../../services/deploy.service';
 import { createCommandLogger, logFullError, getLogPath } from '../../logger';
 import {
@@ -329,11 +341,26 @@ function sortResourcesForDeletion(resources: ConflictingResource[]): Conflicting
   });
 }
 
-async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: RetryContext = {}): Promise<void> {
+async function runDeploy(
+  options: DeployOptions,
+  retryCount = 0,
+  retryContext: RetryContext = {},
+  sessionId?: string
+): Promise<void> {
   const MAX_RETRIES = 3;
   const log = createCommandLogger('deploy');
 
   log.info('Starting deploy', { options, retryCount, retryContext });
+
+  // Initialize event logging on first attempt
+  if (retryCount === 0) {
+    await initRegistry();
+    const command = options.destroy ? 'destroy' : options.preview ? 'preview' : 'deploy';
+    sessionId = await startSession({
+      command,
+      args: JSON.stringify(options),
+    });
+  }
 
   if (retryCount === 0) {
     console.log(chalk.bold('\n  StackSolo Deploy\n'));
@@ -348,11 +375,26 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
   try {
     config = parseConfig(configPath);
     log.info('Config loaded', { configPath, project: config.project });
+
+    // Update session with project info
+    if (sessionId) {
+      await logEvent({
+        sessionId,
+        category: 'internal',
+        eventType: 'session_start',
+        data: {
+          projectName: config.project.name,
+          gcpProjectId: config.project.gcpProjectId,
+          region: config.project.region,
+        },
+      });
+    }
   } catch (error) {
     logFullError('config-parse', error, { configPath });
     console.log(chalk.red(`  Error: Could not read ${STACKSOLO_DIR}/${CONFIG_FILENAME}\n`));
     console.log(chalk.gray(`  ${error}`));
     console.log(chalk.gray(`\n  Run 'stacksolo init' to create a project first.\n`));
+    if (sessionId) await endSession(sessionId, 1);
     return;
   }
 
@@ -382,6 +424,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
 
   // Pre-flight conflict detection (only on first attempt, not destroy, not force)
   if (!options.destroy && !options.skipPreflight && !options.force && retryCount === 0) {
+    if (sessionId) await logPhaseStart(sessionId, 'preflight', { project: config.project.name });
     const preflightSpinner = ora('Checking for resource conflicts...').start();
 
     try {
@@ -398,6 +441,18 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
 
       if (preflightResult.hasConflicts) {
         preflightSpinner.warn(`Found ${preflightResult.conflicts.length} resource conflict(s)`);
+
+        // Log conflicts
+        if (sessionId) {
+          await logConflictDetected(
+            sessionId,
+            preflightResult.conflicts.map((c: { resourceType: string; resourceName: string; address?: string }) => ({
+              type: c.resourceType,
+              name: c.resourceName,
+              address: c.address,
+            }))
+          );
+        }
 
         // Handle auto-import or auto-delete options
         if (options.importConflicts) {
@@ -526,6 +581,8 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
       preflightSpinner.warn('Could not complete pre-flight check (continuing anyway)');
       console.log(chalk.gray(`    ${error}\n`));
     }
+
+    if (sessionId) await logPhaseEnd(sessionId, 'preflight', { project: config.project.name });
   }
 
   // GCP Kernel preflight checks (only on first attempt, not destroy, not preview)
@@ -671,9 +728,22 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
 
   // Deploy
   const action = options.destroy ? 'Destroying' : options.preview ? 'Previewing' : 'Deploying';
+  const phase = options.destroy ? 'destroy' : options.preview ? 'preview' : 'apply';
+  const projectName = config.project.name;
+  if (sessionId) await logPhaseStart(sessionId, phase, { project: projectName });
+
   const spinner = ora(`${action} infrastructure...`).start();
   const startTime = Date.now();
   const logs: string[] = [];
+
+  // Log terraform start
+  if (sessionId) {
+    await logTerraformEvent(sessionId, 'apply_start', {
+      preview: options.preview,
+      destroy: options.destroy,
+      resourceCount: resolved.resources.length,
+    }, { project: projectName });
+  }
 
   const result = await deployConfig(config, STATE_DIR, {
     preview: options.preview,
@@ -688,6 +758,18 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
 
   if (result.success) {
     spinner.succeed(`${options.destroy ? 'Destroyed' : options.preview ? 'Preview complete' : 'Deployed'} successfully`);
+
+    // Log success
+    const durationMs = Date.now() - startTime;
+    if (sessionId) {
+      await logTerraformEvent(sessionId, 'apply_end', {
+        exitCode: 0,
+        durationMs,
+        resourceCount: resolved.resources.length,
+      }, { project: projectName });
+      await logPhaseEnd(sessionId, phase, { project: projectName });
+      await endSession(sessionId, 0);
+    }
 
     if (!options.preview && !options.destroy) {
       // Register/update in registry
@@ -774,6 +856,17 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
     spinner.fail(`${action} failed`);
     console.log(chalk.red(`\n  ${result.error}\n`));
 
+    // Log failure
+    const durationMs = Date.now() - startTime;
+    if (sessionId) {
+      await logTerraformEvent(sessionId, 'apply_end', {
+        exitCode: 1,
+        durationMs,
+        error: result.error?.slice(0, 500), // Truncate long errors
+      }, { project: projectName });
+      await logPhaseEnd(sessionId, phase, { project: projectName });
+    }
+
     // Log the full error for debugging
     logFullError('deploy', result.error, {
       action,
@@ -793,7 +886,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
         if (success) {
           console.log(chalk.green('\n  Authentication successful!'));
           if (retryCount < MAX_RETRIES) {
-            return runDeploy(options, retryCount + 1, retryContext);
+            return runDeploy(options, retryCount + 1, retryContext, sessionId);
           }
         }
       }
@@ -816,7 +909,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
           await sleep(30000);
 
           if (retryCount < MAX_RETRIES) {
-            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, retryContext);
+            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, retryContext, sessionId);
           }
         } catch (error) {
           spinner.fail(`Failed to enable ${apiName}`);
@@ -841,7 +934,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
         console.log(chalk.gray('  Waiting 60 seconds for IAM changes to take effect...\n'));
         await sleep(60000);
         if (retryCount < MAX_RETRIES) {
-          return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedBuildPermissions: true });
+          return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedBuildPermissions: true }, sessionId);
         }
         console.log(chalk.yellow('  Still failing after waiting. Please try again in a minute.\n'));
         return;
@@ -852,7 +945,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
         console.log(chalk.gray('  Waiting 60 seconds for IAM changes to propagate...\n'));
         await sleep(60000);
         if (retryCount < MAX_RETRIES) {
-          return runDeploy({ ...options, skipBuild: true }, retryCount + 1, retryContext);
+          return runDeploy({ ...options, skipBuild: true }, retryCount + 1, retryContext, sessionId);
         }
         console.log(chalk.yellow('  Still failing after waiting. Please try again in a minute.\n'));
         return;
@@ -867,7 +960,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
           await sleep(45000);
           console.log(chalk.cyan('  Continuing deploy...\n'));
           if (retryCount < MAX_RETRIES) {
-            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedBuildPermissions: true });
+            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedBuildPermissions: true }, sessionId);
           }
         }
       } else {
@@ -900,7 +993,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
           await sleep(30000);
           console.log(chalk.cyan('  Continuing deploy...\n'));
           if (retryCount < MAX_RETRIES) {
-            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedGcfArtifactsPermissions: true });
+            return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, grantedGcfArtifactsPermissions: true }, sessionId);
           }
         }
       } else {
@@ -982,7 +1075,7 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
             await sleep(waitTime);
             console.log(chalk.cyan('  Continuing deploy...\n'));
             if (retryCount < MAX_RETRIES) {
-              return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, deletedResources });
+              return runDeploy({ ...options, skipBuild: true }, retryCount + 1, { ...retryContext, deletedResources }, sessionId);
             }
           }
         } else {
@@ -1002,6 +1095,9 @@ async function runDeploy(options: DeployOptions, retryCount = 0, retryContext: R
 
     // Always show where to find the full debug log
     console.log(chalk.gray(`  Full debug log: ${getLogPath()}\n`));
+
+    // End session with failure if we didn't already (via retry)
+    if (sessionId) await endSession(sessionId, 1);
   }
 }
 

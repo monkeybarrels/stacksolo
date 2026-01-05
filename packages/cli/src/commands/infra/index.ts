@@ -11,3 +11,4 @@ export { logsCommand } from './logs';
 export { resetCommand } from './reset';
 export { infraCommand } from './infra';
 export { listCommand } from './list';
+export { eventsCommand } from './events';

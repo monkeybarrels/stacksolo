@@ -21,6 +21,7 @@ export {
   resetCommand,
   infraCommand,
   listCommand,
+  eventsCommand,
 } from './infra';
 
 // Development commands

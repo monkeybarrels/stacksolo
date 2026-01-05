@@ -149,6 +149,37 @@ stacksolo output
 stacksolo logs --since 1h
 ```
 
+### View Deploy Events
+
+StackSolo logs every operation during deployment with millisecond precision. Use `stacksolo events` to view the event timeline:
+
+```bash
+# View latest deploy session
+stacksolo events
+
+# List all sessions
+stacksolo events list
+
+# Filter by category
+stacksolo events show --category terraform
+```
+
+Example output:
+```
++--------------+-----------------+------------+----------------------+---------------------+
+| TIME         | PROJECT         | CATEGORY   | EVENT                | DETAILS             |
++--------------+-----------------+------------+----------------------+---------------------+
+| 19:55:54.294 | my-app          | internal   | session_start        | deploy              |
+| 19:55:54.297 | my-app          | internal   | phase_start          | phase=preflight     |
+| 19:56:24.356 | my-app          | internal   | phase_end            | phase=preflight     |
+| 19:56:24.358 | my-app          | internal   | phase_start          | phase=apply         |
+| 19:56:24.359 | my-app          | terraform  | apply_start          |                     |
+| 19:57:14.519 | my-app          | terraform  | apply_end            | exit=0              |
++--------------+-----------------+------------+----------------------+---------------------+
+```
+
+Events are stored in `~/.stacksolo/registry.db` and persisted across sessions.
+
 ## Rollback
 
 StackSolo doesn't have built-in rollback, but you can:

@@ -130,6 +130,85 @@ export async function initRegistry(): Promise<void> {
     .on('projects')
     .column('gcp_project_id')
     .execute();
+
+  // Create sessions table for event logging
+  await db.schema
+    .createTable('sessions')
+    .ifNotExists()
+    .addColumn('id', 'text', (col) => col.primaryKey())
+    .addColumn('started_at', 'text', (col) => col.notNull())
+    .addColumn('finished_at', 'text')
+    .addColumn('command', 'text', (col) => col.notNull())
+    .addColumn('args', 'text')
+    .addColumn('config_hash', 'text')
+    .addColumn('project_name', 'text')
+    .addColumn('gcp_project_id', 'text')
+    .addColumn('exit_code', 'integer')
+    .execute();
+
+  // Create events table for high resolution event stream
+  await db.schema
+    .createTable('events')
+    .ifNotExists()
+    .addColumn('id', 'integer', (col) => col.primaryKey().autoIncrement())
+    .addColumn('session_id', 'text', (col) =>
+      col.notNull().references('sessions.id').onDelete('cascade')
+    )
+    .addColumn('timestamp', 'text', (col) => col.notNull())
+    .addColumn('seq', 'integer', (col) => col.notNull())
+    .addColumn('project', 'text')
+    .addColumn('category', 'text', (col) => col.notNull())
+    .addColumn('event_type', 'text', (col) => col.notNull())
+    .addColumn('resource_type', 'text')
+    .addColumn('resource_name', 'text')
+    .addColumn('terraform_address', 'text')
+    .addColumn('data', 'text', (col) => col.notNull())
+    .addColumn('parent_event_id', 'integer')
+    .addColumn('correlation_id', 'text')
+    .execute();
+
+  // Create indexes for event queries
+  await db.schema
+    .createIndex('idx_events_session')
+    .ifNotExists()
+    .on('events')
+    .columns(['session_id', 'seq'])
+    .execute();
+
+  await db.schema
+    .createIndex('idx_events_timestamp')
+    .ifNotExists()
+    .on('events')
+    .column('timestamp')
+    .execute();
+
+  await db.schema
+    .createIndex('idx_events_resource')
+    .ifNotExists()
+    .on('events')
+    .column('resource_name')
+    .execute();
+
+  await db.schema
+    .createIndex('idx_events_correlation')
+    .ifNotExists()
+    .on('events')
+    .column('correlation_id')
+    .execute();
+
+  await db.schema
+    .createIndex('idx_events_type')
+    .ifNotExists()
+    .on('events')
+    .columns(['category', 'event_type'])
+    .execute();
+
+  await db.schema
+    .createIndex('idx_events_project')
+    .ifNotExists()
+    .on('events')
+    .column('project')
+    .execute();
 }
 
 /**
