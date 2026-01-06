@@ -618,6 +618,24 @@ With this ordering:
 - Subsequent deploys are faster (registry exists, single apply)
 # === END USER INSTRUCTIONS ===
 
+## Pinned Topics (Future Work)
+
+Items to revisit once TypeScript experience is polished:
+
+### Multi-Language Function Support
+Currently scaffolding only generates TypeScript. The config/deployment layer already accepts other runtimes (`python311`, `go121`, etc.) but users must write their own source code.
+
+**Future expansion order:**
+1. Python scaffolding (second-most popular serverless language)
+2. Go scaffolding
+3. Java, Ruby, .NET (lower priority)
+
+**Why pinned:** Focus on making TypeScript scaffolding, templates, and developer experience exceptional before spreading to other languages. Half-baked multi-language support is worse than great single-language support.
+
+### Other Pinned Items
+- AWS provider plugin (after GCP is rock solid)
+- Azure provider plugin
+- Multi-cloud deployments
 
 # main-overview
 
