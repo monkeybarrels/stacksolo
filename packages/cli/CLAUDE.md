@@ -136,6 +136,24 @@ Before running `stacksolo dev`:
 - **"Provided code location '/app' is not a loadable module"**: TypeScript not compiled. Ensure `npm run dev` uses tsup to build before starting functions-framework.
 - **ESM directory import errors**: Change `'./dir'` to `'./dir/index'` in imports.
 - **nginx invalid directive**: Use valid nginx directives (`keepalive_timeout`, `proxy_connect_timeout`, `proxy_read_timeout`).
+- **Firestore ECONNREFUSED**: Firebase emulator binds to 127.0.0.1 by default. Use a ConfigMap with `firebase.json` to set `"host": "0.0.0.0"` for each emulator.
+
+### Emulator Configuration
+Firebase emulators must bind to `0.0.0.0` to be accessible from other pods. This is done via a ConfigMap mounting `firebase.json`:
+
+```json
+{
+  "emulators": {
+    "firestore": { "host": "0.0.0.0", "port": 8080 },
+    "auth": { "host": "0.0.0.0", "port": 9099 },
+    "ui": { "enabled": true, "host": "0.0.0.0", "port": 4000 }
+  }
+}
+```
+
+The `emulators.ts` generator creates this ConfigMap and mounts it at `/home/node/firebase.json` with `workingDir: /home/node`.
+
+**Key insight:** The `--host` CLI flag doesn't work with all Firebase versions. Use `firebase.json` for reliable cross-pod connectivity.
 
 ## Common Tasks
 

@@ -6,6 +6,7 @@
 import type {
   K8sDeployment,
   K8sService,
+  K8sConfigMap,
   GeneratedManifest,
 } from './types';
 import { generateYamlDocument, combineYamlDocuments } from './yaml';
@@ -17,6 +18,8 @@ export interface EmulatorOptions {
 
 /**
  * Generate Firebase emulator manifests (Firestore + Auth)
+ * Uses a ConfigMap with firebase.json to configure the emulators to listen on 0.0.0.0
+ * so they are accessible from other pods in the cluster.
  */
 export function generateFirebaseEmulator(options: EmulatorOptions): GeneratedManifest {
   const namespace = sanitizeNamespaceName(options.projectName);
@@ -26,6 +29,36 @@ export function generateFirebaseEmulator(options: EmulatorOptions): GeneratedMan
     'app.kubernetes.io/component': 'emulator',
     'app.kubernetes.io/managed-by': 'stacksolo',
     'stacksolo.dev/project': options.projectName,
+  };
+
+  // ConfigMap with firebase.json to configure emulators to listen on all interfaces
+  const configMap: K8sConfigMap = {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'firebase-config',
+      namespace,
+      labels,
+    },
+    data: {
+      'firebase.json': JSON.stringify({
+        emulators: {
+          firestore: {
+            host: '0.0.0.0',
+            port: 8080,
+          },
+          auth: {
+            host: '0.0.0.0',
+            port: 9099,
+          },
+          ui: {
+            enabled: true,
+            host: '0.0.0.0',
+            port: 4000,
+          },
+        },
+      }, null, 2),
+    },
   };
 
   const deployment: K8sDeployment = {
@@ -78,6 +111,14 @@ export function generateFirebaseEmulator(options: EmulatorOptions): GeneratedMan
                   name: 'ui',
                 },
               ],
+              volumeMounts: [
+                {
+                  name: 'firebase-config',
+                  mountPath: '/home/node/firebase.json',
+                  subPath: 'firebase.json',
+                },
+              ],
+              workingDir: '/home/node',
               resources: {
                 limits: {
                   memory: '1Gi',
@@ -85,6 +126,14 @@ export function generateFirebaseEmulator(options: EmulatorOptions): GeneratedMan
                 requests: {
                   memory: '512Mi',
                 },
+              },
+            },
+          ],
+          volumes: [
+            {
+              name: 'firebase-config',
+              configMap: {
+                name: 'firebase-config',
               },
             },
           ],
@@ -126,16 +175,20 @@ export function generateFirebaseEmulator(options: EmulatorOptions): GeneratedMan
     },
   };
 
-  const deploymentYaml = generateYamlDocument(
-    deployment as unknown as Record<string, unknown>,
+  const configMapYaml = generateYamlDocument(
+    configMap as unknown as Record<string, unknown>,
     `Firebase Emulator (Firestore + Auth)\nPorts:\n  - Firestore: 8080\n  - Auth: 9099\n  - UI: 4000`
+  );
+
+  const deploymentYaml = generateYamlDocument(
+    deployment as unknown as Record<string, unknown>
   );
 
   const serviceYaml = generateYamlDocument(
     service as unknown as Record<string, unknown>
   );
 
-  const content = combineYamlDocuments([deploymentYaml, serviceYaml]);
+  const content = combineYamlDocuments([configMapYaml, deploymentYaml, serviceYaml]);
 
   return {
     filename: 'firebase-emulator.yaml',

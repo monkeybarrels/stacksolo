@@ -20,6 +20,9 @@ import {
   commonWorkflows,
   resources,
   getResourcesOverview,
+  firebaseAuthOverview,
+  kernelAuthReference,
+  firebaseEmulatorConfig,
 } from './knowledge/index';
 
 // Register the GCP CDKTF plugin to populate the registry
@@ -245,6 +248,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: 'stacksolo_setup',
         description:
           'Get installation and setup instructions for StackSolo CLI and plugins. Includes prerequisites, installation steps, and configuration.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'stacksolo_firebase_auth',
+        description:
+          'Get documentation for Firebase Authentication with StackSolo. Includes client-side auth, server-side middleware, and emulator configuration.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            topic: {
+              type: 'string',
+              enum: ['overview', 'kernel', 'emulators', 'all'],
+              description: 'Specific topic: overview (getting started), kernel (auth middleware), emulators (local dev), or all',
+            },
+          },
+        },
+      },
+      {
+        name: 'stacksolo_templates',
+        description:
+          'List available app templates that can be used with "stacksolo init --template <name>". Templates include full source code for common app patterns.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -1175,6 +1202,75 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{ type: 'text', text: output }],
         };
+      }
+
+      case 'stacksolo_firebase_auth': {
+        const { topic = 'all' } = args as { topic?: string };
+        let output = '';
+
+        if (topic === 'overview' || topic === 'all') {
+          output += firebaseAuthOverview + '\n\n';
+        }
+        if (topic === 'kernel' || topic === 'all') {
+          output += kernelAuthReference + '\n\n';
+        }
+        if (topic === 'emulators' || topic === 'all') {
+          output += firebaseEmulatorConfig + '\n\n';
+        }
+
+        return {
+          content: [{ type: 'text', text: output.trim() }],
+        };
+      }
+
+      case 'stacksolo_templates': {
+        try {
+          const templatesManifest = (await fetchFromGitHub('templates.json')) as {
+            version: string;
+            templates: Array<{
+              id: string;
+              name: string;
+              description: string;
+              tags: string[];
+              difficulty: string;
+              path: string;
+            }>;
+          };
+
+          let output = '# Available App Templates\n\n';
+          output += '*Use with: `stacksolo init --template <id>`*\n\n';
+
+          if (templatesManifest.templates.length === 0) {
+            output += 'No templates available yet.\n';
+          } else {
+            output += '| Template | Description | Difficulty |\n';
+            output += '|----------|-------------|------------|\n';
+            for (const template of templatesManifest.templates) {
+              output += `| **${template.name}** (\`${template.id}\`) | ${template.description} | ${template.difficulty} |\n`;
+            }
+            output += '\n';
+            output += '## Quick Start\n\n';
+            output += '```bash\n';
+            output += '# Create a new project from template\n';
+            output += 'stacksolo init --template firebase-app\n\n';
+            output += '# List available templates\n';
+            output += 'stacksolo init --list-templates\n';
+            output += '```\n';
+          }
+
+          return {
+            content: [{ type: 'text', text: output }],
+          };
+        } catch (error) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: '# Templates\n\nNo templates repository configured yet. Use built-in project types:\n\n- `function-api` - Serverless API\n- `container-api` - Container API\n- `ui-api` - UI + API\n- `ui-only` - Static UI\n',
+              },
+            ],
+          };
+        }
       }
 
       default:

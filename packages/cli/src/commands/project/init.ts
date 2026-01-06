@@ -41,6 +41,14 @@ import {
   type UIFramework,
 } from '../../templates';
 import { getRegistry } from '@stacksolo/registry';
+import {
+  listTemplates,
+  getTemplateMetadata,
+  initFromTemplate,
+  isRemoteTemplate,
+  type TemplateInfo,
+  type TemplateVariables,
+} from '../../services/template.service';
 
 const BANNER = `
   ███████╗████████╗ █████╗  ██████╗██╗  ██╗███████╗ ██████╗ ██╗      ██████╗
@@ -115,17 +123,340 @@ const UI_FRAMEWORKS: Array<{
   },
 ];
 
+/**
+ * Handle remote template initialization
+ */
+async function handleRemoteTemplate(
+  cwd: string,
+  options: {
+    template: string;
+    name?: string;
+    projectId?: string;
+    region?: string;
+    yes?: boolean;
+    skipOrgPolicy?: boolean;
+    skipApis?: boolean;
+  }
+): Promise<void> {
+  // Print banner
+  console.log(chalk.cyan(BANNER));
+  console.log(chalk.bold(`  Initializing from template: ${options.template}\n`));
+  console.log(chalk.gray('─'.repeat(75)));
+
+  // Fetch template metadata
+  const spinner = ora('Fetching template info...').start();
+  const metadata = await getTemplateMetadata(options.template);
+
+  if (!metadata) {
+    spinner.fail(`Template not found: ${options.template}`);
+    console.log(chalk.yellow('\n  Run ') + chalk.white('stacksolo init --list-templates') + chalk.yellow(' to see available templates.\n'));
+    return;
+  }
+
+  spinner.succeed(`Found template: ${metadata.name}`);
+
+  // =========================================
+  // Step 1: Check gcloud CLI
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 1: GCP Authentication\n'));
+
+  const gcloudSpinner = ora('Checking gcloud CLI...').start();
+
+  if (!(await isGcloudInstalled())) {
+    gcloudSpinner.fail('gcloud CLI not found');
+    console.log(chalk.red('\n  gcloud CLI is not installed.\n'));
+    console.log(chalk.gray('  Install it from: https://cloud.google.com/sdk/docs/install\n'));
+    return;
+  }
+
+  const authInfo = await checkGcloudAuth();
+  if (!authInfo) {
+    gcloudSpinner.fail('Not authenticated to GCP');
+    console.log(chalk.red('\n  gcloud CLI is not authenticated.\n'));
+    console.log(chalk.gray('  Run these commands:'));
+    console.log(chalk.white('    gcloud auth login'));
+    console.log(chalk.white('    gcloud auth application-default login\n'));
+    return;
+  }
+
+  gcloudSpinner.succeed(`Authenticated as ${chalk.green(authInfo.account)}`);
+
+  // =========================================
+  // Step 2: Select GCP Project
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 2: Select GCP Project\n'));
+
+  let projectId = options.projectId;
+
+  if (!projectId && !options.yes) {
+    const projectsSpinner = ora('Loading accessible projects...').start();
+    const projects = await listProjects();
+    const currentProject = await getCurrentProject();
+    projectsSpinner.stop();
+
+    const projectChoices = projects.map((p) => ({
+      name: `${p.name} (${p.projectId})`,
+      value: p.projectId,
+    }));
+
+    const { selectedProject } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedProject',
+        message: 'Select a GCP project:',
+        choices: [
+          ...projectChoices,
+          new inquirer.Separator(),
+          { name: 'Enter manually', value: '__manual__' },
+        ],
+        default: currentProject || projects[0]?.projectId,
+        pageSize: 15,
+      },
+    ]);
+
+    if (selectedProject === '__manual__') {
+      const { manualId } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'manualId',
+          message: 'Enter GCP Project ID:',
+          validate: (input: string) => input.length > 0 || 'Required',
+        },
+      ]);
+      projectId = manualId;
+    } else {
+      projectId = selectedProject;
+    }
+  }
+
+  projectId = projectId || authInfo.project;
+
+  if (!projectId) {
+    console.log(chalk.red('\n  Project ID is required. Use --project-id or run interactively.\n'));
+    return;
+  }
+
+  console.log(chalk.gray(`  Using project: ${chalk.white(projectId)}`));
+
+  // =========================================
+  // Step 3: Select Framework Variant
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 3: Select Framework\n'));
+
+  let selectedVariant = metadata.variants[0];
+
+  if (metadata.variants.length > 1 && !options.yes) {
+    const { variant } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'variant',
+        message: 'Which framework?',
+        choices: metadata.variants.map((v) => ({
+          name: `${v.name}\n      ${chalk.gray(v.description)}`,
+          value: v.id,
+          short: v.name,
+        })),
+        default: metadata.variants[0].id,
+      },
+    ]);
+
+    selectedVariant = metadata.variants.find((v) => v.id === variant) || metadata.variants[0];
+  }
+
+  console.log(chalk.gray(`  Using: ${chalk.white(selectedVariant.name)}`));
+
+  // =========================================
+  // Step 4: Project Details
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 4: Project Details\n'));
+
+  // Get project name
+  let projectName = options.name;
+  if (!projectName && !options.yes) {
+    const defaultName = path.basename(cwd).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const { name } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'name',
+        message: 'Project name:',
+        default: defaultName,
+        validate: (input: string) => {
+          if (!input) return 'Project name is required';
+          if (!/^[a-z][a-z0-9-]*$/.test(input)) {
+            return 'Must start with letter, only lowercase, numbers, hyphens';
+          }
+          return true;
+        },
+      },
+    ]);
+    projectName = name;
+  }
+  projectName = projectName || path.basename(cwd).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+  // Get region
+  let region = options.region;
+  if (!region && !options.yes) {
+    const regions = getRegionsForProvider('gcp');
+    const { selectedRegion } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedRegion',
+        message: 'Region:',
+        choices: regions.map((r) => ({ name: r.name, value: r.value })),
+        default: 'us-central1',
+      },
+    ]);
+    region = selectedRegion;
+  }
+  region = region || 'us-central1';
+
+  // =========================================
+  // Step 5: Apply Template
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 5: Creating project files...\n'));
+
+  const variables: TemplateVariables = {
+    projectName,
+    gcpProjectId: projectId,
+    region,
+    uiFramework: selectedVariant.id,
+  };
+
+  const applySpinner = ora('Downloading template...').start();
+
+  try {
+    const result = await initFromTemplate(
+      cwd,
+      options.template,
+      selectedVariant.id,
+      variables,
+      (message) => {
+        applySpinner.text = message;
+      }
+    );
+
+    applySpinner.succeed('Template applied successfully');
+
+    console.log(chalk.green('\n  Created files:'));
+    console.log(chalk.green('  ✓ .stacksolo/stacksolo.config.json'));
+
+    // Group files by directory for cleaner output
+    const dirs = new Set<string>();
+    for (const file of result.filesCreated) {
+      const dir = path.dirname(file).split('/')[0];
+      dirs.add(dir);
+    }
+
+    for (const dir of dirs) {
+      const count = result.filesCreated.filter((f) => f.startsWith(dir)).length;
+      console.log(chalk.green(`  ✓ ${dir}/ (${count} files)`));
+    }
+
+    // Register project
+    const registrySpinner = ora('Registering project...').start();
+    try {
+      const registry = getRegistry();
+      const configPath = path.join(cwd, '.stacksolo', 'stacksolo.config.json');
+
+      const existing = await registry.findProjectByName(projectName);
+      if (existing) {
+        await registry.updateProject(existing.id, {
+          gcpProjectId: projectId,
+          region,
+          configPath,
+        });
+        registrySpinner.succeed('Updated project in registry');
+      } else {
+        await registry.registerProject({
+          name: projectName,
+          gcpProjectId: projectId,
+          region,
+          configPath,
+        });
+        registrySpinner.succeed('Registered project in global registry');
+      }
+    } catch {
+      registrySpinner.warn('Could not register in global registry (non-blocking)');
+    }
+
+    // Done
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.bold.green('\n  Done! Your Firebase app is ready.\n'));
+
+    console.log(chalk.gray('  Next steps:\n'));
+    console.log(chalk.white('    1. cd into the project and install dependencies:'));
+    console.log(chalk.cyan('       npm install'));
+    console.log(chalk.white('    2. Start local development:'));
+    console.log(chalk.cyan('       stacksolo dev'));
+    console.log(chalk.white('    3. Deploy to GCP:'));
+    console.log(chalk.cyan('       stacksolo deploy'));
+    console.log('');
+  } catch (error) {
+    applySpinner.fail('Failed to apply template');
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(chalk.red(`\n  ${message}\n`));
+  }
+}
+
 export const initCommand = new Command('init')
   .description('Initialize a new StackSolo project')
   .option('-n, --name <name>', 'Project name')
   .option('--project-id <id>', 'GCP project ID')
   .option('-r, --region <region>', 'Region')
-  .option('-t, --template <template>', 'Project template (function-api, container-api, function-cron, static-api)')
+  .option('-t, --template <template>', 'Project template (function-api, container-api, firebase-app, etc.)')
   .option('-y, --yes', 'Skip prompts and use defaults')
   .option('--skip-org-policy', 'Skip org policy check and fix')
   .option('--skip-apis', 'Skip enabling GCP APIs')
+  .option('--list-templates', 'List available remote templates')
   .action(async (options) => {
     const cwd = process.cwd();
+
+    // =========================================
+    // Handle --list-templates
+    // =========================================
+    if (options.listTemplates) {
+      const spinner = ora('Fetching available templates...').start();
+      try {
+        const templates = await listTemplates();
+        spinner.stop();
+
+        if (templates.length === 0) {
+          console.log(chalk.yellow('\n  No remote templates available yet.\n'));
+          console.log(chalk.gray('  Use built-in templates: function-api, container-api, ui-api, ui-only\n'));
+          return;
+        }
+
+        console.log(chalk.bold('\n  Available Templates\n'));
+        console.log(chalk.gray('─'.repeat(75)));
+
+        for (const template of templates) {
+          console.log('');
+          console.log(chalk.cyan(`  ${template.name}`) + chalk.gray(` (${template.id})`));
+          console.log(chalk.white(`    ${template.description}`));
+          console.log(chalk.gray(`    Difficulty: ${template.difficulty} | Tags: ${template.tags.join(', ')}`));
+        }
+
+        console.log(chalk.gray('\n─'.repeat(75)));
+        console.log(chalk.gray('\n  Usage: ') + chalk.white('stacksolo init --template <template-id>\n'));
+      } catch (error) {
+        spinner.fail('Failed to fetch templates');
+        const message = error instanceof Error ? error.message : String(error);
+        console.log(chalk.red(`\n  ${message}\n`));
+      }
+      return;
+    }
+
+    // =========================================
+    // Handle remote templates (firebase-app, etc.)
+    // =========================================
+    if (options.template && isRemoteTemplate(options.template)) {
+      return await handleRemoteTemplate(cwd, options);
+    }
 
     // Print banner
     console.log(chalk.cyan(BANNER));
