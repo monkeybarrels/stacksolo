@@ -7,3 +7,11 @@ export {
   kernelAuthReference,
   firebaseEmulatorConfig,
 } from './firebase-auth';
+export {
+  templatesOverview,
+  firebaseAppTemplate,
+  firebasePostgresTemplate,
+  apiStarterTemplate,
+  staticSiteTemplate,
+  getTemplateGuide,
+} from './templates';

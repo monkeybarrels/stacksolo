@@ -134,6 +134,8 @@ Output: Complete config JSON with Cloud Run, Cloud SQL, and Redis configured wit
 
 ## Development
 
+### Setup
+
 ```bash
 # Install dependencies
 pnpm install
@@ -143,6 +145,103 @@ pnpm --filter @stacksolo/mcp-knowledge build
 
 # Test locally
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist/index.js
+```
+
+### Project Structure
+
+```
+src/
+├── index.ts              # Server entry point
+├── knowledge/            # Static knowledge content (markdown strings)
+│   ├── overview.ts       # StackSolo overview
+│   ├── config.ts         # Config schema & examples
+│   ├── resources.ts      # Resource definitions
+│   ├── cli.ts            # CLI reference
+│   ├── firebase.ts       # Firebase auth docs
+│   └── templates.ts      # Template guides
+└── tools/                # MCP tool implementations
+    ├── index.ts          # Tool registry (barrel export)
+    ├── types.ts          # Shared types
+    ├── github.ts         # GitHub fetch utilities
+    └── *.ts              # Individual tool files
+```
+
+### Adding a New Tool
+
+1. **Create the tool file** at `src/tools/my-tool.ts`:
+
+```typescript
+import type { Tool } from './types';
+
+export const myTool: Tool = {
+  definition: {
+    name: 'stacksolo_my_tool',
+    description: 'What this tool does',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        param: { type: 'string', description: 'Optional parameter' },
+      },
+    },
+  },
+  handler: async (args) => {
+    const { param } = args as { param?: string };
+    return {
+      content: [{ type: 'text', text: '# Output\n\nContent here...' }],
+    };
+  },
+};
+```
+
+2. **Register in the barrel export** at `src/tools/index.ts`:
+
+```typescript
+import { myTool } from './my-tool';
+
+export { myTool };
+
+export const allTools: Tool[] = [
+  // ... existing tools
+  myTool,
+];
+```
+
+3. **Build and test**:
+
+```bash
+pnpm --filter @stacksolo/mcp-knowledge build
+
+# Test the tool
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stacksolo_my_tool"}}' | node dist/index.js
+```
+
+### Tool Conventions
+
+| Convention | Example |
+|------------|---------|
+| Tool naming | `stacksolo_<feature>` |
+| Output format | Markdown text |
+| Parameters | Optional with defaults when possible |
+
+### Adding Knowledge Content
+
+Static knowledge lives in `src/knowledge/`. To add new content:
+
+1. Add to existing file or create new file
+2. Export from `src/knowledge/index.ts`
+3. Import in relevant tool handler
+
+### Testing
+
+```bash
+# List all tools
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist/index.js
+
+# Call a specific tool
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stacksolo_overview"}}' | node dist/index.js
+
+# Call with parameters
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stacksolo_resources","arguments":{"resourceType":"cloud-sql"}}}' | node dist/index.js
 ```
 
 ## License
