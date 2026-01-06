@@ -241,6 +241,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['id'],
         },
       },
+      {
+        name: 'stacksolo_setup',
+        description:
+          'Get installation and setup instructions for StackSolo CLI and plugins. Includes prerequisites, installation steps, and configuration.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -816,6 +825,256 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ],
           };
         }
+      }
+
+      case 'stacksolo_setup': {
+        let output = '# StackSolo Setup Guide\n\n';
+
+        output += '## Prerequisites\n\n';
+        output += 'Before installing StackSolo, ensure you have:\n\n';
+        output += '1. **Node.js 18+** - [Download](https://nodejs.org/)\n';
+        output += '2. **Google Cloud SDK (gcloud)** - [Install Guide](https://cloud.google.com/sdk/docs/install)\n';
+        output += '3. **Terraform CLI** - [Install Guide](https://developer.hashicorp.com/terraform/downloads)\n';
+        output += '4. **A GCP Project** with billing enabled\n\n';
+
+        output += '## Step 1: Authenticate with GCP\n\n';
+        output += '```bash\n';
+        output += '# Login to Google Cloud\n';
+        output += 'gcloud auth login\n\n';
+        output += '# Set your default project\n';
+        output += 'gcloud config set project YOUR_PROJECT_ID\n\n';
+        output += '# Enable application default credentials (for Terraform)\n';
+        output += 'gcloud auth application-default login\n';
+        output += '```\n\n';
+
+        output += '## Step 2: Install StackSolo CLI\n\n';
+        output += '```bash\n';
+        output += '# Install globally\n';
+        output += 'npm install -g @stacksolo/cli\n\n';
+        output += '# Or use npx (no install needed)\n';
+        output += 'npx @stacksolo/cli --help\n';
+        output += '```\n\n';
+
+        output += '## Step 3: Initialize a Project\n\n';
+        output += '```bash\n';
+        output += '# Create a new StackSolo project\n';
+        output += 'stacksolo init\n\n';
+        output += '# Or initialize in an existing directory\n';
+        output += 'cd my-project\n';
+        output += 'stacksolo init\n';
+        output += '```\n\n';
+        output += 'This creates a `.stacksolo/stacksolo.config.json` file.\n\n';
+
+        output += '## Step 4: Configure Your Infrastructure\n\n';
+        output += 'Edit `.stacksolo/stacksolo.config.json` to define your infrastructure:\n\n';
+        output += '```json\n';
+        output += '{\n';
+        output += '  "project": {\n';
+        output += '    "name": "my-app",\n';
+        output += '    "gcpProjectId": "YOUR_GCP_PROJECT_ID",\n';
+        output += '    "region": "us-central1",\n';
+        output += '    "networks": [\n';
+        output += '      {\n';
+        output += '        "name": "main",\n';
+        output += '        "containers": [\n';
+        output += '          {\n';
+        output += '            "name": "api",\n';
+        output += '            "port": 8080,\n';
+        output += '            "allowUnauthenticated": true\n';
+        output += '          }\n';
+        output += '        ]\n';
+        output += '      }\n';
+        output += '    ]\n';
+        output += '  }\n';
+        output += '}\n';
+        output += '```\n\n';
+
+        output += '## Step 5: Generate Scaffolding\n\n';
+        output += '```bash\n';
+        output += '# Generate boilerplate code for your resources\n';
+        output += 'stacksolo scaffold\n';
+        output += '```\n\n';
+        output += 'This creates starter code for containers, functions, and UIs.\n\n';
+
+        output += '## Step 6: Deploy\n\n';
+        output += '```bash\n';
+        output += '# Deploy your infrastructure\n';
+        output += 'stacksolo deploy\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '## Available Plugins\n\n';
+        output += 'StackSolo uses plugins to support different cloud providers and output formats.\n\n';
+
+        // Get plugins from registry
+        const providers = registry.getAllProviders();
+
+        output += '### Currently Installed Plugins\n\n';
+
+        if (providers.length === 0) {
+          output += 'No plugins currently registered.\n\n';
+        } else {
+          for (const provider of providers) {
+            output += `#### ${provider.name} (\`${provider.id}\`)\n\n`;
+            output += `- **Authentication:** ${provider.auth.type}\n`;
+            output += `- **Resources:** ${provider.resources.length} available\n`;
+            output += `- **Auth Instructions:** ${provider.auth.instructions}\n\n`;
+
+            output += '**Available Resources:**\n';
+            for (const resource of provider.resources) {
+              output += `- \`${resource.id}\` - ${resource.name}\n`;
+            }
+            output += '\n';
+          }
+        }
+
+        output += '### Available Plugins on npm\n\n';
+        output += 'Select the plugins you want to install based on your deployment target:\n\n';
+
+        output += '---\n\n';
+
+        output += '#### 1. `@stacksolo/plugin-gcp-cdktf` - Google Cloud Platform\n\n';
+        output += '**Description:** Deploy to GCP using CDKTF (Terraform CDK)\n\n';
+        output += '**npm:** https://www.npmjs.com/package/@stacksolo/plugin-gcp-cdktf\n\n';
+        output += '**GitHub:** https://github.com/monkeybarrels/stacksolo/tree/main/plugins/gcp-cdktf\n\n';
+        output += '**Supported Resources:**\n';
+        output += '- Cloud Run (containers)\n';
+        output += '- Cloud Functions (serverless)\n';
+        output += '- Cloud SQL (PostgreSQL/MySQL)\n';
+        output += '- Memorystore Redis\n';
+        output += '- Cloud Storage\n';
+        output += '- Load Balancer with SSL\n';
+        output += '- VPC Networks\n';
+        output += '- Artifact Registry\n\n';
+
+        output += '**Installation:**\n';
+        output += '```bash\n';
+        output += 'npm install @stacksolo/plugin-gcp-cdktf\n';
+        output += '```\n\n';
+
+        output += '**Prerequisites:**\n';
+        output += '```bash\n';
+        output += '# 1. Install Google Cloud SDK\n';
+        output += '# https://cloud.google.com/sdk/docs/install\n\n';
+        output += '# 2. Install Terraform\n';
+        output += '# https://developer.hashicorp.com/terraform/downloads\n\n';
+        output += '# 3. Authenticate with GCP\n';
+        output += 'gcloud auth login\n';
+        output += 'gcloud auth application-default login\n';
+        output += 'gcloud config set project YOUR_PROJECT_ID\n\n';
+        output += '# 4. Enable required APIs\n';
+        output += 'gcloud services enable \\\n';
+        output += '  cloudfunctions.googleapis.com \\\n';
+        output += '  run.googleapis.com \\\n';
+        output += '  sqladmin.googleapis.com \\\n';
+        output += '  redis.googleapis.com \\\n';
+        output += '  storage.googleapis.com \\\n';
+        output += '  compute.googleapis.com \\\n';
+        output += '  vpcaccess.googleapis.com \\\n';
+        output += '  artifactregistry.googleapis.com \\\n';
+        output += '  cloudbuild.googleapis.com\n';
+        output += '```\n\n';
+
+        output += '**Example Config:**\n';
+        output += '```json\n';
+        output += '{\n';
+        output += '  "project": {\n';
+        output += '    "name": "my-app",\n';
+        output += '    "gcpProjectId": "YOUR_GCP_PROJECT_ID",\n';
+        output += '    "region": "us-central1",\n';
+        output += '    "backend": "cdktf",\n';
+        output += '    "networks": [{\n';
+        output += '      "name": "main",\n';
+        output += '      "containers": [{ "name": "api", "port": 8080 }]\n';
+        output += '    }]\n';
+        output += '  }\n';
+        output += '}\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '#### 2. `@stacksolo/plugin-kernel` - Kubernetes\n\n';
+        output += '**Description:** Deploy to any Kubernetes cluster (GKE, EKS, AKS, local)\n\n';
+        output += '**npm:** https://www.npmjs.com/package/@stacksolo/plugin-kernel\n\n';
+        output += '**GitHub:** https://github.com/monkeybarrels/stacksolo/tree/main/plugins/kernel\n\n';
+        output += '**Supported Resources:**\n';
+        output += '- Deployments\n';
+        output += '- Services\n';
+        output += '- Ingress\n';
+        output += '- ConfigMaps\n';
+        output += '- Secrets\n';
+        output += '- PersistentVolumeClaims\n\n';
+
+        output += '**Installation:**\n';
+        output += '```bash\n';
+        output += 'npm install @stacksolo/plugin-kernel\n';
+        output += '```\n\n';
+
+        output += '**Prerequisites:**\n';
+        output += '```bash\n';
+        output += '# 1. Install kubectl\n';
+        output += '# https://kubernetes.io/docs/tasks/tools/\n\n';
+        output += '# 2. Configure kubectl to your cluster\n';
+        output += '# For GKE:\n';
+        output += 'gcloud container clusters get-credentials CLUSTER_NAME --zone ZONE\n\n';
+        output += '# For local (Docker Desktop, minikube, kind):\n';
+        output += 'kubectl config use-context docker-desktop\n';
+        output += '```\n\n';
+
+        output += '**Example Config:**\n';
+        output += '```json\n';
+        output += '{\n';
+        output += '  "project": {\n';
+        output += '    "name": "my-app",\n';
+        output += '    "backend": "k8s",\n';
+        output += '    "networks": [{\n';
+        output += '      "name": "main",\n';
+        output += '      "containers": [{ "name": "api", "port": 8080 }]\n';
+        output += '    }]\n';
+        output += '  }\n';
+        output += '}\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '### Plugin Locations\n\n';
+        output += 'Plugins are automatically discovered from:\n\n';
+        output += '| Location | Description |\n';
+        output += '|----------|-------------|\n';
+        output += '| `node_modules/@stacksolo/plugin-*` | npm packages (recommended) |\n';
+        output += '| `node_modules/stacksolo-plugin-*` | Community npm packages |\n';
+        output += '| `./stacksolo-plugins/` | Local project plugins |\n';
+        output += '| `~/.stacksolo/plugins/` | Global user plugins |\n\n';
+
+        output += '### Quick Install Commands\n\n';
+        output += '```bash\n';
+        output += '# Install GCP plugin only\n';
+        output += 'npm install @stacksolo/plugin-gcp-cdktf\n\n';
+        output += '# Install Kubernetes plugin only\n';
+        output += 'npm install @stacksolo/plugin-kernel\n\n';
+        output += '# Install both plugins\n';
+        output += 'npm install @stacksolo/plugin-gcp-cdktf @stacksolo/plugin-kernel\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '## Troubleshooting\n\n';
+        output += '**"Permission denied" errors (GCP):**\n';
+        output += '- Ensure your account has Owner or Editor role on the GCP project\n';
+        output += '- Re-run `gcloud auth application-default login`\n\n';
+        output += '**"API not enabled" errors (GCP):**\n';
+        output += '- Enable the required API using `gcloud services enable API_NAME`\n\n';
+        output += '**Terraform state issues (GCP):**\n';
+        output += '- State is stored in `.stacksolo/terraform/`\n';
+        output += '- Run `stacksolo destroy` before deleting the project to clean up resources\n\n';
+        output += '**kubectl connection issues (K8s):**\n';
+        output += '- Verify context: `kubectl config current-context`\n';
+        output += '- Test connection: `kubectl get nodes`\n';
+
+        return {
+          content: [{ type: 'text', text: output }],
+        };
       }
 
       default:
