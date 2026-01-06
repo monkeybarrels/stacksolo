@@ -25,6 +25,64 @@ import {
 // Register the GCP CDKTF plugin to populate the registry
 registry.registerPlugin(gcpCdktfPlugin);
 
+// GitHub architectures repository configuration
+const ARCHITECTURES_REPO = 'monkeybarrels/stacksolo-architectures';
+const ARCHITECTURES_BRANCH = 'main';
+const GITHUB_RAW_BASE = `https://raw.githubusercontent.com/${ARCHITECTURES_REPO}/${ARCHITECTURES_BRANCH}`;
+
+// Simple in-memory cache for GitHub fetches (15 minute TTL)
+const cache = new Map<string, { data: unknown; timestamp: number }>();
+const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+async function fetchFromGitHub(path: string): Promise<unknown> {
+  const url = `${GITHUB_RAW_BASE}/${path}`;
+  const cacheKey = url;
+
+  // Check cache
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  let data: unknown;
+
+  if (path.endsWith('.json') || contentType.includes('application/json')) {
+    data = await response.json();
+  } else {
+    data = await response.text();
+  }
+
+  // Cache the result
+  cache.set(cacheKey, { data, timestamp: Date.now() });
+
+  return data;
+}
+
+interface ArchitectureManifest {
+  version: string;
+  architectures: Array<{
+    id: string;
+    name: string;
+    description: string;
+    tags: string[];
+    difficulty: 'beginner' | 'intermediate' | 'advanced';
+    path: string;
+    community?: boolean;
+  }>;
+}
+
+interface ArchitectureDetail {
+  config: Record<string, unknown>;
+  readme: string;
+  variables?: Record<string, { description: string; default?: string; required?: boolean }>;
+}
+
 // Create the MCP server
 const server = new Server(
   {
@@ -143,6 +201,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ['config'],
+        },
+      },
+      {
+        name: 'stacksolo_architectures',
+        description:
+          'List available tested architecture templates from the community repository. These are pre-built, tested configurations for common use cases.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            tag: {
+              type: 'string',
+              description: 'Optional: filter by tag (e.g., "database", "frontend", "api")',
+            },
+            difficulty: {
+              type: 'string',
+              enum: ['beginner', 'intermediate', 'advanced'],
+              description: 'Optional: filter by difficulty level',
+            },
+            community: {
+              type: 'boolean',
+              description: 'Optional: if true, only show community-contributed architectures',
+            },
+          },
+        },
+      },
+      {
+        name: 'stacksolo_architecture_detail',
+        description:
+          'Get detailed information about a specific architecture template, including the full config, README, and customizable variables.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'The architecture ID (e.g., "nextjs-postgres", "api-redis-cache")',
+            },
+          },
+          required: ['id'],
         },
       },
     ],
@@ -569,6 +665,153 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               {
                 type: 'text',
                 text: `# Validation Result: ERROR\n\nFailed to parse config: ${message}`,
+              },
+            ],
+          };
+        }
+      }
+
+      case 'stacksolo_architectures': {
+        const { tag, difficulty, community } = args as {
+          tag?: string;
+          difficulty?: 'beginner' | 'intermediate' | 'advanced';
+          community?: boolean;
+        };
+
+        try {
+          const manifest = (await fetchFromGitHub('index.json')) as ArchitectureManifest;
+
+          let architectures = manifest.architectures;
+
+          // Apply filters
+          if (tag) {
+            architectures = architectures.filter((a) =>
+              a.tags.some((t) => t.toLowerCase().includes(tag.toLowerCase()))
+            );
+          }
+          if (difficulty) {
+            architectures = architectures.filter((a) => a.difficulty === difficulty);
+          }
+          if (community !== undefined) {
+            architectures = architectures.filter((a) => (a.community || false) === community);
+          }
+
+          let output = '# Available Architecture Templates\n\n';
+          output += `*From [stacksolo-architectures](https://github.com/${ARCHITECTURES_REPO})*\n\n`;
+
+          if (architectures.length === 0) {
+            output += 'No architectures found matching your filters.\n';
+          } else {
+            output += '| Name | Description | Difficulty | Tags |\n';
+            output += '|------|-------------|------------|------|\n';
+            for (const arch of architectures) {
+              const communityBadge = arch.community ? ' 🌟' : '';
+              output += `| **${arch.name}**${communityBadge} | ${arch.description} | ${arch.difficulty} | ${arch.tags.join(', ')} |\n`;
+            }
+            output += '\n';
+            output += '🌟 = Community contributed\n\n';
+            output += '## Usage\n\n';
+            output += 'To get the full config for an architecture, use `stacksolo_architecture_detail` with the architecture ID.\n\n';
+            output += '### Available IDs:\n';
+            for (const arch of architectures) {
+              output += `- \`${arch.id}\` - ${arch.name}\n`;
+            }
+          }
+
+          return {
+            content: [{ type: 'text', text: output }],
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `# Error Fetching Architectures\n\nFailed to fetch architecture list: ${message}\n\nThe architecture repository may not be set up yet or may be temporarily unavailable.`,
+              },
+            ],
+          };
+        }
+      }
+
+      case 'stacksolo_architecture_detail': {
+        const { id } = args as { id: string };
+
+        try {
+          // First get the manifest to find the architecture path
+          const manifest = (await fetchFromGitHub('index.json')) as ArchitectureManifest;
+          const architecture = manifest.architectures.find((a) => a.id === id);
+
+          if (!architecture) {
+            const availableIds = manifest.architectures.map((a) => a.id).join(', ');
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `# Architecture Not Found\n\nNo architecture found with ID "${id}".\n\nAvailable architectures: ${availableIds}`,
+                },
+              ],
+            };
+          }
+
+          // Fetch the architecture details
+          const [config, readme, variables] = await Promise.all([
+            fetchFromGitHub(`${architecture.path}/config.json`).catch(() => null),
+            fetchFromGitHub(`${architecture.path}/README.md`).catch(() => null),
+            fetchFromGitHub(`${architecture.path}/variables.json`).catch(() => null),
+          ]);
+
+          let output = `# ${architecture.name}\n\n`;
+          output += `**Difficulty:** ${architecture.difficulty}\n`;
+          output += `**Tags:** ${architecture.tags.join(', ')}\n`;
+          if (architecture.community) {
+            output += `**Source:** Community contributed 🌟\n`;
+          }
+          output += '\n';
+
+          if (readme) {
+            output += '## Description\n\n';
+            output += readme as string;
+            output += '\n\n';
+          } else {
+            output += `${architecture.description}\n\n`;
+          }
+
+          if (variables) {
+            const vars = variables as Record<string, { description: string; default?: string; required?: boolean }>;
+            output += '## Customizable Variables\n\n';
+            output += 'These values should be customized for your project:\n\n';
+            for (const [key, info] of Object.entries(vars)) {
+              const required = info.required ? ' (required)' : '';
+              const defaultVal = info.default ? ` [default: ${info.default}]` : '';
+              output += `- **${key}**${required}: ${info.description}${defaultVal}\n`;
+            }
+            output += '\n';
+          }
+
+          if (config) {
+            output += '## Configuration\n\n';
+            output += '```json\n';
+            output += JSON.stringify(config, null, 2);
+            output += '\n```\n\n';
+          }
+
+          output += '## Next Steps\n\n';
+          output += '1. Copy the configuration above to `.stacksolo/stacksolo.config.json`\n';
+          output += '2. Update the customizable variables for your project\n';
+          output += '3. Run `stacksolo scaffold` to generate boilerplate\n';
+          output += '4. Run `stacksolo deploy` when ready\n';
+
+          return {
+            content: [{ type: 'text', text: output }],
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `# Error Fetching Architecture\n\nFailed to fetch architecture details: ${message}`,
               },
             ],
           };
