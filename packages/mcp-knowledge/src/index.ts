@@ -1038,6 +1038,102 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         output += '---\n\n';
 
+        output += '#### 3. `@stacksolo/plugin-web-admin` - Web Admin Dashboard\n\n';
+        output += '**Description:** Web-based admin UI for StackSolo - dashboard, deploy controls, local dev management, and config editor\n\n';
+        output += '**npm:** https://www.npmjs.com/package/@stacksolo/plugin-web-admin\n\n';
+        output += '**GitHub:** https://github.com/monkeybarrels/stacksolo/tree/main/plugins/web-admin\n\n';
+        output += '**Features:**\n';
+        output += '- Visual dashboard for your infrastructure\n';
+        output += '- Deploy and rollback controls\n';
+        output += '- Local development management\n';
+        output += '- Config editor with validation\n';
+        output += '- Resource logs viewer\n\n';
+
+        output += '**Installation:**\n';
+        output += '```bash\n';
+        output += 'npm install @stacksolo/plugin-web-admin\n';
+        output += '```\n\n';
+
+        output += '**Usage:**\n';
+        output += '```bash\n';
+        output += '# Start the web admin UI\n';
+        output += 'stacksolo admin\n\n';
+        output += '# Opens browser to http://localhost:3000\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '#### 4. `@stacksolo/plugin-gcp-kernel` - GCP Native Kernel\n\n';
+        output += '**Description:** GCP-native kernel plugin using Cloud Run + Pub/Sub for event-driven architecture\n\n';
+        output += '**npm:** https://www.npmjs.com/package/@stacksolo/plugin-gcp-kernel\n\n';
+        output += '**GitHub:** https://github.com/monkeybarrels/stacksolo/tree/main/plugins/gcp-kernel\n\n';
+        output += '**Features:**\n';
+        output += '- Cloud Run for containerized services\n';
+        output += '- Pub/Sub for event-driven communication\n';
+        output += '- Native GCP integration without Kubernetes\n\n';
+
+        output += '**Installation:**\n';
+        output += '```bash\n';
+        output += 'npm install @stacksolo/plugin-gcp-kernel\n';
+        output += '```\n\n';
+
+        output += '**Prerequisites:**\n';
+        output += '```bash\n';
+        output += '# Same as gcp-cdktf plugin\n';
+        output += 'gcloud auth login\n';
+        output += 'gcloud auth application-default login\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '#### 5. `@stacksolo/plugin-helm` - Helm Chart Generator\n\n';
+        output += '**Description:** Generates Helm charts from StackSolo Kubernetes manifests\n\n';
+        output += '**npm:** https://www.npmjs.com/package/@stacksolo/plugin-helm\n\n';
+        output += '**GitHub:** https://github.com/monkeybarrels/stacksolo/tree/main/plugins/helm\n\n';
+        output += '**Features:**\n';
+        output += '- Converts K8s manifests to Helm charts\n';
+        output += '- Generates values.yaml with customizable parameters\n';
+        output += '- Creates Chart.yaml with metadata\n\n';
+
+        output += '**Installation:**\n';
+        output += '```bash\n';
+        output += 'npm install @stacksolo/plugin-helm\n';
+        output += '```\n\n';
+
+        output += '**Prerequisites:**\n';
+        output += '```bash\n';
+        output += '# Install Helm CLI\n';
+        output += '# https://helm.sh/docs/intro/install/\n';
+        output += 'brew install helm  # macOS\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
+        output += '#### 6. `@stacksolo/plugin-zero-trust` - Zero Trust Security\n\n';
+        output += '**Description:** Identity-Aware Proxy (IAP) for secure access without VPNs - BeyondCorp security model\n\n';
+        output += '**npm:** https://www.npmjs.com/package/@stacksolo/plugin-zero-trust\n\n';
+        output += '**GitHub:** https://github.com/monkeybarrels/stacksolo/tree/main/plugins/zero-trust\n\n';
+        output += '**Features:**\n';
+        output += '- Identity-Aware Proxy (IAP) configuration\n';
+        output += '- Google OAuth integration\n';
+        output += '- Access policies and permissions\n';
+        output += '- No VPN required for secure access\n\n';
+
+        output += '**Installation:**\n';
+        output += '```bash\n';
+        output += 'npm install @stacksolo/plugin-zero-trust\n';
+        output += '```\n\n';
+
+        output += '**Prerequisites:**\n';
+        output += '```bash\n';
+        output += '# Enable IAP API\n';
+        output += 'gcloud services enable iap.googleapis.com\n\n';
+        output += '# Configure OAuth consent screen in GCP Console\n';
+        output += '# https://console.cloud.google.com/apis/credentials/consent\n';
+        output += '```\n\n';
+
+        output += '---\n\n';
+
         output += '### Plugin Locations\n\n';
         output += 'Plugins are automatically discovered from:\n\n';
         output += '| Location | Description |\n';
@@ -1049,12 +1145,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         output += '### Quick Install Commands\n\n';
         output += '```bash\n';
-        output += '# Install GCP plugin only\n';
-        output += 'npm install @stacksolo/plugin-gcp-cdktf\n\n';
-        output += '# Install Kubernetes plugin only\n';
-        output += 'npm install @stacksolo/plugin-kernel\n\n';
-        output += '# Install both plugins\n';
-        output += 'npm install @stacksolo/plugin-gcp-cdktf @stacksolo/plugin-kernel\n';
+        output += '# Core deployment plugins (pick one based on your target)\n';
+        output += 'npm install @stacksolo/plugin-gcp-cdktf      # GCP via Terraform\n';
+        output += 'npm install @stacksolo/plugin-kernel         # Kubernetes\n';
+        output += 'npm install @stacksolo/plugin-gcp-kernel     # GCP native (Cloud Run + Pub/Sub)\n\n';
+        output += '# Add-on plugins\n';
+        output += 'npm install @stacksolo/plugin-web-admin      # Web dashboard\n';
+        output += 'npm install @stacksolo/plugin-helm           # Helm chart generation\n';
+        output += 'npm install @stacksolo/plugin-zero-trust     # IAP security\n\n';
+        output += '# Install all plugins\n';
+        output += 'npm install @stacksolo/plugin-gcp-cdktf @stacksolo/plugin-kernel @stacksolo/plugin-web-admin @stacksolo/plugin-helm @stacksolo/plugin-zero-trust\n';
         output += '```\n\n';
 
         output += '---\n\n';
