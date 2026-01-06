@@ -157,19 +157,36 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
 
     // Generate gateway from load balancer routes
     if (network.loadBalancer?.routes) {
-      const routes = network.loadBalancer.routes.map((r) => ({
+      // Filter routes to only include backends that exist as services
+      const validRoutes = network.loadBalancer.routes.filter((r) => {
+        const backendExists = servicePortMap[r.backend] !== undefined;
+        if (!backendExists) {
+          warnings.push(
+            `Gateway route "${r.path}" references backend "${r.backend}" which does not exist. ` +
+              `Available backends: ${Object.keys(servicePortMap).join(', ') || 'none'}. ` +
+              `Skipping this route.`
+          );
+        }
+        return backendExists;
+      });
+
+      const routes = validRoutes.map((r) => ({
         path: r.path,
         backend: r.backend,
       }));
 
-      manifests.push(
-        generateGateway({
-          projectName,
-          routes,
-          servicePortMap,
-        })
-      );
-      services.push('gateway');
+      if (routes.length > 0) {
+        manifests.push(
+          generateGateway({
+            projectName,
+            routes,
+            servicePortMap,
+          })
+        );
+        services.push('gateway');
+      } else {
+        warnings.push('No valid gateway routes found. Gateway will not be created.');
+      }
     }
   }
 
