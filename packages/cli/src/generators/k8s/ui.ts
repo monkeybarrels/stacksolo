@@ -31,7 +31,7 @@ export interface UIManifestOptions {
 export function generateUIManifests(options: UIManifestOptions): GeneratedManifest {
   const namespace = sanitizeNamespaceName(options.projectName);
   const uiName = sanitizeName(options.ui.name);
-  const frameworkConfig = getFrameworkConfig(options.ui.framework);
+  const frameworkConfig = getFrameworkConfig(options.ui.framework, options.port);
 
   const labels = {
     'app.kubernetes.io/name': uiName,

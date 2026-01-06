@@ -754,13 +754,41 @@ async function stopEnvironment(): Promise<void> {
 
   const config = await loadConfig();
   const namespace = sanitizeNamespaceName(config.project.name);
+  const projectName = config.project.name;
 
-  const spinner = ora(`Deleting namespace ${namespace}...`).start();
+  // 1. Delete namespace
+  const nsSpinner = ora(`Deleting namespace ${namespace}...`).start();
   try {
     execSync(`kubectl delete namespace ${namespace}`, { stdio: 'pipe' });
-    spinner.succeed('Environment stopped');
+    nsSpinner.succeed('Namespace deleted');
   } catch {
-    spinner.warn('Namespace may not exist or already deleted');
+    nsSpinner.warn('Namespace may not exist or already deleted');
+  }
+
+  // 2. Clean up Docker images for this project to prevent stale images on next dev start
+  const imgSpinner = ora('Cleaning up Docker images...').start();
+  try {
+    // Find and remove images tagged with this project's namespace
+    const images = execSync(
+      `docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "^(${namespace}-|${projectName}-)" || true`,
+      { encoding: 'utf-8' }
+    ).trim();
+
+    if (images) {
+      const imageList = images.split('\n').filter(Boolean);
+      for (const image of imageList) {
+        try {
+          execSync(`docker rmi ${image}`, { stdio: 'pipe' });
+        } catch {
+          // Image might be in use or already removed
+        }
+      }
+      imgSpinner.succeed(`Cleaned up ${imageList.length} Docker image(s)`);
+    } else {
+      imgSpinner.info('No project images to clean up');
+    }
+  } catch {
+    imgSpinner.info('No project images to clean up');
   }
 
   console.log('');

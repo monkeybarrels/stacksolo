@@ -59,31 +59,45 @@ function getPythonVersion(runtime: string): string {
 
 /**
  * Get dev server command for a UI framework
+ * Port parameter is required to ensure the dev server listens on the expected port
  */
-export function getFrameworkConfig(framework: UIFramework): FrameworkConfig {
+export function getFrameworkConfig(framework: UIFramework, port: number = 3000): FrameworkConfig {
   switch (framework) {
     case 'vue':
-    case 'nuxt':
+      // Vite (Vue default) uses --port
       return {
-        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0'],
+        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', String(port)],
+      };
+
+    case 'nuxt':
+      // Nuxt uses --port
+      return {
+        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', String(port)],
       };
 
     case 'react':
-    case 'next':
+      // Create React App uses PORT env var, Vite uses --port
       return {
-        command: ['npm', 'run', 'dev', '--', '--hostname', '0.0.0.0'],
+        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', String(port)],
+      };
+
+    case 'next':
+      // Next.js uses -p or --port
+      return {
+        command: ['npm', 'run', 'dev', '--', '--hostname', '0.0.0.0', '-p', String(port)],
       };
 
     case 'svelte':
     case 'sveltekit':
+      // SvelteKit/Vite uses --port
       return {
-        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0'],
+        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', String(port)],
       };
 
     default:
-      // Generic fallback
+      // Generic fallback - assume Vite-style args
       return {
-        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0'],
+        command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', String(port)],
       };
   }
 }
