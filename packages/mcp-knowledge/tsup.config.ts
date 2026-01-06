@@ -9,4 +9,6 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
+  // Bundle workspace dependencies so they're included in the package
+  noExternal: ['@stacksolo/core', '@stacksolo/blueprint', '@stacksolo/plugin-gcp-cdktf'],
 });
