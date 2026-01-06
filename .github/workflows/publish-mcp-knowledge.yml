@@ -1,0 +1,58 @@
+name: Publish MCP Knowledge Package
+
+on:
+  push:
+    paths:
+      - 'packages/mcp-knowledge/**'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build dependencies
+        run: |
+          pnpm --filter @stacksolo/core build
+          pnpm --filter @stacksolo/blueprint build
+          pnpm --filter @stacksolo/plugin-gcp-cdktf build
+
+      - name: Build mcp-knowledge
+        run: pnpm --filter @stacksolo/mcp-knowledge build
+
+      - name: Check if version changed
+        id: version-check
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./packages/mcp-knowledge/package.json').version")
+          NPM_VERSION=$(npm view @stacksolo/mcp-knowledge version 2>/dev/null || echo "0.0.0")
+          if [ "$PACKAGE_VERSION" != "$NPM_VERSION" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Version changed: $NPM_VERSION -> $PACKAGE_VERSION"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Version unchanged: $PACKAGE_VERSION"
+          fi
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.changed == 'true'
+        run: pnpm --filter @stacksolo/mcp-knowledge publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
