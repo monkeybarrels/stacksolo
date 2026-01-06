@@ -8,8 +8,8 @@ export const GET: RequestHandler = async ({ url }) => {
   const encoder = new TextEncoder();
   const projectPath = process.env.STACKSOLO_PROJECT_PATH || process.cwd();
 
-  // Read config to get namespace
-  let namespace = 'solo-project';
+  // Read config to get namespace (fallback to 'default' if config can't be read)
+  let namespace = 'default';
   try {
     const configPath = path.join(projectPath, '.stacksolo', 'stacksolo.config.json');
     const configContent = await fs.readFile(configPath, 'utf-8');
