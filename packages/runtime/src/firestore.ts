@@ -7,28 +7,32 @@ import { env } from './env';
 // Use any for the instance type since firebase-admin is optional
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let firestoreInstance: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let adminModule: any = null;
 
 /**
  * Get Firestore instance
  * Automatically connects to emulator when FIRESTORE_EMULATOR_HOST is set
  * @returns firebase-admin Firestore instance
  */
-export function firestore(): ReturnType<typeof import('firebase-admin').firestore> {
+export async function firestore(): Promise<ReturnType<typeof import('firebase-admin').firestore>> {
   if (firestoreInstance) {
     return firestoreInstance;
   }
 
-  // Dynamic import to make firebase-admin optional
-  const admin = require('firebase-admin');
+  // Dynamic import to make firebase-admin optional (ESM-compatible)
+  if (!adminModule) {
+    adminModule = await import('firebase-admin').then(m => m.default || m);
+  }
 
   // Initialize app if not already done
-  if (admin.apps.length === 0) {
-    admin.initializeApp({
+  if (adminModule.apps.length === 0) {
+    adminModule.initializeApp({
       projectId: env.gcpProjectId || 'demo-stacksolo',
     });
   }
 
-  firestoreInstance = admin.firestore();
+  firestoreInstance = adminModule.firestore();
 
   // Log emulator connection in dev
   if (env.isLocal && env.firestoreEmulatorHost) {
