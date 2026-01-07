@@ -8,7 +8,11 @@ Complete reference for all StackSolo CLI commands.
 ## Installation
 
 ```bash
-npm install -g @stacksolo/cli
+# Use directly with npx (recommended)
+npx stacksolo <command>
+
+# Or install globally
+npm install -g stacksolo
 ```
 
 ## Command Overview
@@ -47,52 +51,64 @@ stacksolo init
 
 ### `stacksolo clone`
 
-Bootstrap a new project from an existing StackSolo project. Automatically configures shared resources (VPC, buckets, registry) with `existing: true`.
+Clone a remote stack or bootstrap from an existing local project. Stacks are complete, deployable applications with full source code.
 
 ```bash
-stacksolo clone <source> [options]
+stacksolo clone [source] [destination] [options]
 ```
 
 **Arguments:**
 
 | Argument | Description |
 |----------|-------------|
-| `source` | Path to source project directory or config file |
+| `source` | Stack ID (e.g., `rag-platform`) or path to local project |
+| `destination` | Directory name for the new project |
 
 **Options:**
 
 | Option | Description |
 |--------|-------------|
+| `--list` | List available remote stacks |
 | `-n, --name <name>` | Name for the new project |
 | `-o, --output <dir>` | Output directory (default: current directory) |
-| `--no-vpc` | Do not share the VPC (creates a new one) |
-| `--no-buckets` | Do not share storage buckets |
-| `--no-registry` | Do not share artifact registry |
+| `--no-vpc` | Do not share the VPC (local clone only) |
+| `--no-buckets` | Do not share storage buckets (local clone only) |
+| `--no-registry` | Do not share artifact registry (local clone only) |
 | `-y, --yes` | Skip prompts and use defaults |
 
 **Examples:**
 
 ```bash
-# Clone interactively
-stacksolo clone ./my-existing-project
+# List available stacks
+stacksolo clone --list
 
-# Clone with specific name
+# Clone a remote stack
+stacksolo clone rag-platform my-chatbot
+
+# Clone with defaults (no prompts)
+stacksolo clone rag-platform my-chatbot -y
+
+# Clone a local project
 stacksolo clone ./my-existing-project --name my-new-api
 
-# Clone non-interactively to a specific directory
-stacksolo clone ./my-existing-project --name my-new-api --output ./new-project -y
-
-# Clone but create a new VPC
+# Clone but create a new VPC (local clone only)
 stacksolo clone ./my-existing-project --name my-new-api --no-vpc
 ```
 
-**What gets shared:**
+**Remote Stacks:**
 
+Remote stacks are hosted in the [stacksolo-architectures](https://github.com/monkeybarrels/stacksolo-architectures) repository. They include:
+- Full source code (services, apps)
+- Infrastructure configuration
+- Documentation and setup guides
+- Variable substitution for customization
+
+**Local Project Cloning:**
+
+When cloning a local project, shared resources (VPC, buckets, registry) are automatically configured with `existing: true`:
 - **VPC Network** - Reuses the source project's VPC (avoids quota limits)
 - **Storage Buckets** - References existing buckets
 - **Artifact Registry** - Uses the same container registry
-
-The new project config will have empty `functions`, `containers`, and `uis` arrays ready for you to add your resources.
 
 **See also:** [Resource Sharing Guide](/guides/resource-sharing/)
 

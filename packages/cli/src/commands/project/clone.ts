@@ -12,19 +12,25 @@ import inquirer from 'inquirer';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { spawn } from 'child_process';
 import { loadConfig, type StackSoloConfig } from '@stacksolo/blueprint';
-import { getRegionsForProvider } from '../../regions';
 import {
   createStacksoloDir,
   createConfigFile,
 } from '../../templates';
 import { getRegistry } from '@stacksolo/registry';
+import {
+  fetchJson,
+  downloadDirectory,
+  substituteVariablesInDirectory,
+  parseRepo,
+} from '../../services/github.service';
 
-// GitHub repository for stacks
-const STACKS_REPO = 'https://github.com/monkeybarrels/stacksolo-architectures.git';
-const STACKS_RAW_URL = 'https://raw.githubusercontent.com/monkeybarrels/stacksolo-architectures/main/stacks';
+// GitHub repository configuration
+const REPO = parseRepo('monkeybarrels/stacksolo-architectures', 'main');
 
+/**
+ * Stack metadata from stack.json
+ */
 interface StackMetadata {
   id: string;
   name: string;
@@ -40,14 +46,44 @@ interface StackMetadata {
 }
 
 /**
- * Check if the source is a known remote stack by fetching its stack.json
+ * Stacks index structure
+ */
+interface StacksIndex {
+  version: string;
+  stacks: Array<{
+    id: string;
+    name: string;
+    description: string;
+    tags: string[];
+    difficulty: string;
+    path: string;
+  }>;
+}
+
+/**
+ * Fetch the stacks index from the repository
+ */
+async function fetchStacksIndex(): Promise<StacksIndex> {
+  return fetchJson<StacksIndex>('stacks.json', REPO);
+}
+
+/**
+ * Check if the source is a known remote stack by looking up in the index
+ * then fetching its stack.json for full metadata
  */
 async function fetchStackMetadata(stackId: string): Promise<StackMetadata | null> {
   try {
-    const url = `${STACKS_RAW_URL}/${stackId}/stack.json`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return await response.json() as StackMetadata;
+    // First check if it's in the index
+    const index = await fetchStacksIndex();
+    const stackInfo = index.stacks.find(s => s.id === stackId);
+
+    if (!stackInfo) {
+      return null;
+    }
+
+    // Fetch the full metadata from stack.json
+    const metadata = await fetchJson<StackMetadata>(`${stackInfo.path}/stack.json`, REPO);
+    return metadata;
   } catch {
     return null;
   }
@@ -55,108 +91,32 @@ async function fetchStackMetadata(stackId: string): Promise<StackMetadata | null
 
 /**
  * Download and extract a stack from the GitHub repository
- * Downloads as tarball to avoid any git history
+ * Uses the unified GitHub service for tarball download
  */
 async function cloneRemoteStack(
   stackId: string,
   outputDir: string,
   spinner: ReturnType<typeof ora>
 ): Promise<boolean> {
-  const tempDir = path.join(outputDir, '.stacksolo-temp');
-  const tarballUrl = `https://github.com/monkeybarrels/stacksolo-architectures/archive/refs/heads/main.tar.gz`;
-
   try {
-    // Clean up any existing temp directory
-    await fs.rm(tempDir, { recursive: true, force: true });
-    await fs.mkdir(tempDir, { recursive: true });
+    // Get the stack path from the index
+    const index = await fetchStacksIndex();
+    const stackInfo = index.stacks.find(s => s.id === stackId);
 
-    // Download tarball
-    spinner.text = 'Downloading stack...';
-    const tarballPath = path.join(tempDir, 'repo.tar.gz');
-
-    const response = await fetch(tarballUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to download: ${response.status}`);
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.writeFile(tarballPath, buffer);
-
-    // Extract tarball
-    spinner.text = 'Extracting files...';
-    await runCommand('tar', ['-xzf', tarballPath, '-C', tempDir], tempDir);
-
-    // Find the extracted directory (it's named stacksolo-architectures-main)
-    const extractedDir = path.join(tempDir, 'stacksolo-architectures-main', 'stacks', stackId);
-
-    // Check if the stack exists
-    try {
-      await fs.access(extractedDir);
-    } catch {
+    if (!stackInfo) {
       spinner.fail(`Stack "${stackId}" not found in repository`);
-      await fs.rm(tempDir, { recursive: true, force: true });
       return false;
     }
 
-    // Copy files (excluding node_modules, dist, etc.)
-    spinner.text = 'Copying stack files...';
-    await copyStackFiles(extractedDir, outputDir);
-
-    // Clean up temp directory
-    await fs.rm(tempDir, { recursive: true, force: true });
+    // Use the unified download service
+    await downloadDirectory(stackInfo.path, outputDir, REPO, {
+      onProgress: (msg) => { spinner.text = msg; },
+    });
 
     return true;
   } catch (error) {
-    // Clean up on error
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
-}
-
-/**
- * Run a command and return a promise
- */
-function runCommand(cmd: string, args: string[], cwd: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { cwd, stdio: 'pipe' });
-    let stderr = '';
-    proc.stderr?.on('data', (data) => { stderr += data.toString(); });
-    proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${cmd} failed: ${stderr}`));
-    });
-    proc.on('error', reject);
-  });
-}
-
-/**
- * Copy stack files, excluding node_modules, .git, dist, etc.
- */
-async function copyStackFiles(srcDir: string, destDir: string): Promise<void> {
-  const excludePatterns = ['node_modules', '.git', 'dist', '.DS_Store'];
-
-  async function copyDir(src: string, dest: string): Promise<void> {
-    await fs.mkdir(dest, { recursive: true });
-    const entries = await fs.readdir(src, { withFileTypes: true });
-
-    for (const entry of entries) {
-      // Skip excluded patterns
-      if (excludePatterns.some(p => entry.name === p || entry.name.startsWith(p + '/'))) {
-        continue;
-      }
-
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-
-      if (entry.isDirectory()) {
-        await copyDir(srcPath, destPath);
-      } else {
-        await fs.copyFile(srcPath, destPath);
-      }
-    }
-  }
-
-  await copyDir(srcDir, destDir);
 }
 
 /**
@@ -434,19 +394,27 @@ export const cloneCommand = new Command('clone')
       console.log(chalk.gray('  Fetching from stacksolo-architectures...\n'));
 
       const spinner = ora('Loading stacks...').start();
-      // For now, we have a known list - in the future this could be fetched
-      const knownStacks = ['rag-platform'];
-      for (const stackId of knownStacks) {
-        const metadata = await fetchStackMetadata(stackId);
-        if (metadata) {
-          spinner.stop();
-          console.log(chalk.green(`  ${metadata.id}`));
-          console.log(chalk.gray(`    ${metadata.description}`));
-          console.log(chalk.gray(`    Tags: ${metadata.tags.join(', ')}`));
-          console.log('');
+
+      try {
+        // Fetch from the stacks index
+        const index = await fetchStacksIndex();
+        spinner.stop();
+
+        if (index.stacks.length === 0) {
+          console.log(chalk.yellow('  No stacks available yet.\n'));
+        } else {
+          for (const stack of index.stacks) {
+            console.log(chalk.green(`  ${stack.id}`));
+            console.log(chalk.gray(`    ${stack.description}`));
+            console.log(chalk.gray(`    Tags: ${stack.tags.join(', ')}`));
+            console.log('');
+          }
         }
+      } catch (error) {
+        spinner.fail('Failed to fetch stacks');
+        console.log(chalk.red(`  ${error instanceof Error ? error.message : error}\n`));
       }
-      spinner.stop();
+
       console.log(chalk.gray('  Usage: stacksolo clone <stack-id> <project-name>\n'));
       return;
     }

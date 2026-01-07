@@ -174,3 +174,132 @@ The deploy flow is in `commands/infra/deploy.ts`:
 2. Generate CDKTF code via plugin
 3. Run Terraform via child process
 4. Update registry with results
+
+## Remote Content (Templates, Stacks, Architectures)
+
+The CLI fetches templates, stacks, and architectures from the `stacksolo-architectures` GitHub repository.
+
+### Content Types
+
+| Type | Description | Index File | Detail File | CLI Command |
+|------|-------------|------------|-------------|-------------|
+| **Templates** | Scaffolded starter code (React, Vue, Express) | `templates.json` | `{path}/template.json` | `stacksolo init --template <id>` |
+| **Stacks** | Complete deployable applications | `stacks.json` | `{path}/stack.json` | `stacksolo clone <id>` |
+| **Architectures** | Config-only patterns | `index.json` | `{path}/config.json` | Copy config manually |
+
+### Unified GitHub Service
+
+All remote fetching uses `services/github.service.ts`:
+
+```typescript
+import { fetchJson, downloadDirectory, parseRepo } from './services/github.service';
+
+const REPO = parseRepo('monkeybarrels/stacksolo-architectures', 'main');
+
+// Fetch a JSON file
+const index = await fetchJson<StacksIndex>('stacks.json', REPO);
+
+// Download a directory (tarball extraction)
+await downloadDirectory('stacks/rag-platform', outputDir, REPO, {
+  onProgress: (msg) => console.log(msg),
+});
+```
+
+**Key features:**
+- Single tarball download for directories (efficient, no API rate limits)
+- 15-minute in-memory cache
+- Variable substitution (`{{variableName}}` pattern)
+
+### Adding a New Content Type
+
+To add a new content type (e.g., "plugins"):
+
+1. **Create index file** in `stacksolo-architectures` repo:
+   ```json
+   // plugins.json
+   {
+     "version": "1",
+     "plugins": [
+       {
+         "id": "my-plugin",
+         "name": "My Plugin",
+         "description": "...",
+         "tags": ["auth"],
+         "difficulty": "beginner",
+         "path": "plugins/my-plugin"
+       }
+     ]
+   }
+   ```
+
+2. **Create detail file** for each item:
+   ```json
+   // plugins/my-plugin/plugin.json
+   {
+     "id": "my-plugin",
+     "name": "My Plugin",
+     "version": "1.0.0",
+     "variables": { ... }
+   }
+   ```
+
+3. **Add CLI support** in `packages/cli/`:
+   - Create command in `commands/project/` or extend existing command
+   - Use `fetchJson()` for index, `downloadDirectory()` for full download
+   - Follow the pattern in `clone.ts` for stacks
+
+4. **Add MCP support** in `packages/mcp-knowledge/`:
+   - Create knowledge file in `knowledge/`
+   - Create tool in `tools/`
+   - Export from `tools/index.ts`
+
+### Index File Structure
+
+All index files follow this pattern:
+
+```typescript
+interface ContentIndex {
+  version: string;
+  items: Array<{
+    id: string;           // Unique identifier (used in CLI)
+    name: string;         // Display name
+    description: string;  // Short description
+    tags: string[];       // Searchable tags
+    difficulty: string;   // beginner | intermediate | advanced
+    path: string;         // Path in repo (e.g., "stacks/rag-platform")
+  }>;
+}
+```
+
+### Variable Substitution
+
+Templates and stacks support `{{variableName}}` placeholders:
+
+```typescript
+import { substituteVariables, substituteVariablesInDirectory } from './services/github.service';
+
+// Single string
+const processed = substituteVariables(content, { projectName: 'my-app' });
+
+// All files in a directory
+await substituteVariablesInDirectory(outputDir, { projectName: 'my-app' });
+```
+
+### Testing Remote Content
+
+```bash
+# List available stacks
+stacksolo clone --list
+
+# Clone a stack
+stacksolo clone rag-platform my-project
+
+# Init with template
+stacksolo init --template firebase-app
+```
+
+### Caching Behavior
+
+- Index files are cached for 15 minutes
+- Tarball downloads are not cached (downloaded fresh each time)
+- To force refresh, wait 15 minutes or restart the CLI

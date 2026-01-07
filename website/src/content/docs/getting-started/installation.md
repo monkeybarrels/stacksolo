@@ -14,7 +14,11 @@ StackSolo requires:
 ## Install the CLI
 
 ```bash
-npm install -g @stacksolo/cli
+# Use directly with npx (no install required)
+npx stacksolo --help
+
+# Or install globally
+npm install -g stacksolo
 ```
 
 Verify installation:

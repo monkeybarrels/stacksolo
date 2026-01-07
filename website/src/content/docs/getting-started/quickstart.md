@@ -37,13 +37,11 @@ brew install terraform
 ## Step 1: Install StackSolo
 
 ```bash
-npm install -g @stacksolo/cli
-```
+# Use directly with npx (recommended)
+npx stacksolo --version
 
-Verify the installation:
-
-```bash
-stacksolo --version
+# Or install globally
+npm install -g stacksolo
 ```
 
 ## Step 2: Login to Google Cloud
@@ -185,6 +183,23 @@ stacksolo list
 # Destroy all resources
 stacksolo destroy
 ```
+
+## Starting from a Stack
+
+Want to start with a complete, working application? Clone a pre-built stack:
+
+```bash
+# List available stacks
+stacksolo clone --list
+
+# Clone a stack (e.g., RAG Platform - AI chatbot with admin dashboard)
+stacksolo clone rag-platform my-chatbot
+cd my-chatbot
+npm install
+stacksolo deploy
+```
+
+Stacks include full source code, infrastructure config, and documentation.
 
 ## Adding Another Project
 

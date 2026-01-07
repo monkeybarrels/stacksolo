@@ -67,9 +67,9 @@ my-stack/
 \`\`\`
 `;
 
-// GitHub raw content URLs
-const STACKS_BASE_URL =
-  'https://raw.githubusercontent.com/monkeybarrels/stacksolo-architectures/main/stacks';
+// GitHub repository configuration
+const GITHUB_RAW_BASE =
+  'https://raw.githubusercontent.com/monkeybarrels/stacksolo-architectures/main';
 
 export interface StackMetadata {
   id: string;
@@ -88,14 +88,59 @@ export interface StackMetadata {
   >;
 }
 
-// Known stacks - we fetch details from GitHub
-export const knownStacks = ['rag-platform'];
+/**
+ * Stacks index structure from stacks.json
+ */
+interface StacksIndex {
+  version: string;
+  stacks: Array<{
+    id: string;
+    name: string;
+    description: string;
+    tags: string[];
+    difficulty: string;
+    path: string;
+  }>;
+}
 
+// Simple cache for index file
+let cachedIndex: { data: StacksIndex; timestamp: number } | null = null;
+const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Fetch the stacks index from stacks.json
+ */
+async function getStacksIndex(): Promise<StacksIndex> {
+  if (cachedIndex && Date.now() - cachedIndex.timestamp < CACHE_TTL) {
+    return cachedIndex.data;
+  }
+
+  const url = `${GITHUB_RAW_BASE}/stacks.json`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch stacks index: ${response.status}`);
+  }
+
+  const data = (await response.json()) as StacksIndex;
+  cachedIndex = { data, timestamp: Date.now() };
+  return data;
+}
+
+/**
+ * Fetch full stack metadata from stack.json
+ */
 export async function fetchStackMetadata(
   stackId: string
 ): Promise<StackMetadata | null> {
   try {
-    const url = `${STACKS_BASE_URL}/${stackId}/stack.json`;
+    const index = await getStacksIndex();
+    const stackInfo = index.stacks.find((s) => s.id === stackId);
+
+    if (!stackInfo) {
+      return null;
+    }
+
+    const url = `${GITHUB_RAW_BASE}/${stackInfo.path}/stack.json`;
     const response = await fetch(url);
     if (!response.ok) return null;
     return (await response.json()) as StackMetadata;
@@ -104,9 +149,19 @@ export async function fetchStackMetadata(
   }
 }
 
+/**
+ * Fetch stack README.md
+ */
 export async function fetchStackReadme(stackId: string): Promise<string | null> {
   try {
-    const url = `${STACKS_BASE_URL}/${stackId}/README.md`;
+    const index = await getStacksIndex();
+    const stackInfo = index.stacks.find((s) => s.id === stackId);
+
+    if (!stackInfo) {
+      return null;
+    }
+
+    const url = `${GITHUB_RAW_BASE}/${stackInfo.path}/README.md`;
     const response = await fetch(url);
     if (!response.ok) return null;
     return await response.text();
@@ -115,15 +170,19 @@ export async function fetchStackReadme(stackId: string): Promise<string | null> 
   }
 }
 
+/**
+ * Fetch all stacks from the index (with basic info)
+ * For full metadata, call fetchStackMetadata for each stack
+ */
 export async function fetchStacksIndex(): Promise<StackMetadata[]> {
-  const stacks: StackMetadata[] = [];
+  const index = await getStacksIndex();
 
-  for (const stackId of knownStacks) {
-    const metadata = await fetchStackMetadata(stackId);
-    if (metadata) {
-      stacks.push(metadata);
-    }
-  }
+  // Fetch full metadata for each stack in parallel
+  const metadataPromises = index.stacks.map((stack) =>
+    fetchStackMetadata(stack.id)
+  );
+  const results = await Promise.all(metadataPromises);
 
-  return stacks;
+  // Filter out nulls
+  return results.filter((m): m is StackMetadata => m !== null);
 }

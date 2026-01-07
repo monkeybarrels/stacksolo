@@ -3,20 +3,24 @@
  *
  * Fetches and applies templates from the stacksolo-architectures repository.
  * Templates are full project scaffolds with source code (React/Vue apps with auth, etc.)
+ *
+ * Uses the unified GitHub service for all remote operations.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import {
+  fetchRaw,
+  fetchJson,
+  downloadDirectory,
+  substituteVariables,
+  substituteVariablesInDirectory,
+  parseRepo,
+  type RepoConfig,
+} from './github.service';
 
 // GitHub repository configuration
-const TEMPLATES_REPO = 'monkeybarrels/stacksolo-architectures';
-const TEMPLATES_BRANCH = 'main';
-const GITHUB_RAW_BASE = `https://raw.githubusercontent.com/${TEMPLATES_REPO}/${TEMPLATES_BRANCH}`;
-const GITHUB_API_BASE = `https://api.github.com/repos/${TEMPLATES_REPO}/contents`;
-
-// Simple in-memory cache (15 minute TTL)
-const cache = new Map<string, { data: unknown; timestamp: number }>();
-const CACHE_TTL = 15 * 60 * 1000;
+const REPO = parseRepo('monkeybarrels/stacksolo-architectures', 'main');
 
 /**
  * Template manifest structure (templates.json)
@@ -65,127 +69,11 @@ export interface TemplateVariant {
 }
 
 /**
- * GitHub API file entry
- */
-interface GitHubFileEntry {
-  name: string;
-  path: string;
-  type: 'file' | 'dir';
-  download_url: string | null;
-}
-
-/**
- * Fetch raw content from GitHub
- */
-async function fetchRaw(urlPath: string): Promise<string> {
-  const url = `${GITHUB_RAW_BASE}/${urlPath}`;
-  const cacheKey = `raw:${url}`;
-
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data as string;
-  }
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
-  }
-
-  const data = await response.text();
-  cache.set(cacheKey, { data, timestamp: Date.now() });
-  return data;
-}
-
-/**
- * Fetch JSON from GitHub
- */
-async function fetchJson<T>(urlPath: string): Promise<T> {
-  const content = await fetchRaw(urlPath);
-  return JSON.parse(content) as T;
-}
-
-/**
- * Fetch directory listing from GitHub API
- */
-async function fetchDirListing(dirPath: string): Promise<GitHubFileEntry[]> {
-  const url = `${GITHUB_API_BASE}/${dirPath}?ref=${TEMPLATES_BRANCH}`;
-  const cacheKey = `api:${url}`;
-
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data as GitHubFileEntry[];
-  }
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'stacksolo-cli',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch directory listing: ${response.status} ${response.statusText}`);
-  }
-
-  const data = (await response.json()) as GitHubFileEntry[];
-  cache.set(cacheKey, { data, timestamp: Date.now() });
-  return data;
-}
-
-/**
- * Recursively fetch all files from a directory
- */
-async function fetchFilesRecursive(
-  dirPath: string,
-  basePath: string = ''
-): Promise<Map<string, string>> {
-  const files = new Map<string, string>();
-  const entries = await fetchDirListing(dirPath);
-
-  for (const entry of entries) {
-    const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
-
-    if (entry.type === 'dir') {
-      const subFiles = await fetchFilesRecursive(entry.path, relativePath);
-      for (const [subPath, content] of subFiles) {
-        files.set(subPath, content);
-      }
-    } else if (entry.type === 'file' && entry.download_url) {
-      const content = await fetchFileContent(entry.download_url);
-      files.set(relativePath, content);
-    }
-  }
-
-  return files;
-}
-
-/**
- * Fetch file content from download URL
- */
-async function fetchFileContent(downloadUrl: string): Promise<string> {
-  const cacheKey = `file:${downloadUrl}`;
-
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data as string;
-  }
-
-  const response = await fetch(downloadUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch file: ${response.status}`);
-  }
-
-  const data = await response.text();
-  cache.set(cacheKey, { data, timestamp: Date.now() });
-  return data;
-}
-
-/**
  * List all available templates
  */
 export async function listTemplates(): Promise<TemplateInfo[]> {
   try {
-    const manifest = await fetchJson<TemplateManifest>('templates.json');
+    const manifest = await fetchJson<TemplateManifest>('templates.json', REPO);
     return manifest.templates;
   } catch (error) {
     // If templates.json doesn't exist yet, return empty array
@@ -208,7 +96,7 @@ export async function getTemplateMetadata(templateId: string): Promise<TemplateM
   }
 
   try {
-    return await fetchJson<TemplateMetadata>(`${template.path}/template.json`);
+    return await fetchJson<TemplateMetadata>(`${template.path}/template.json`, REPO);
   } catch {
     return null;
   }
@@ -226,38 +114,10 @@ export async function getTemplateConfig(templateId: string): Promise<Record<stri
   }
 
   try {
-    return await fetchJson<Record<string, unknown>>(`${template.path}/config.json`);
+    return await fetchJson<Record<string, unknown>>(`${template.path}/config.json`, REPO);
   } catch {
     return null;
   }
-}
-
-/**
- * Fetch all files for a template variant
- */
-export async function fetchTemplateFiles(
-  templateId: string,
-  variantId: string
-): Promise<Map<string, string>> {
-  const templates = await listTemplates();
-  const template = templates.find((t) => t.id === templateId);
-
-  if (!template) {
-    throw new Error(`Template not found: ${templateId}`);
-  }
-
-  const metadata = await getTemplateMetadata(templateId);
-  if (!metadata) {
-    throw new Error(`Template metadata not found: ${templateId}`);
-  }
-
-  const variant = metadata.variants.find((v) => v.id === variantId);
-  if (!variant) {
-    throw new Error(`Variant not found: ${variantId}`);
-  }
-
-  const filesPath = `${template.path}/${variant.filesDir}`;
-  return await fetchFilesRecursive(filesPath);
 }
 
 /**
@@ -268,48 +128,6 @@ export interface TemplateVariables {
   gcpProjectId: string;
   region: string;
   [key: string]: string | boolean;
-}
-
-/**
- * Substitute variables in content
- * Pattern: {{variableName}}
- */
-function substituteVariables(content: string, variables: TemplateVariables): string {
-  let result = content;
-
-  for (const [key, value] of Object.entries(variables)) {
-    const pattern = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
-    result = result.replace(pattern, String(value));
-  }
-
-  return result;
-}
-
-/**
- * Apply template to target directory
- */
-export async function applyTemplate(
-  targetDir: string,
-  files: Map<string, string>,
-  variables: TemplateVariables
-): Promise<string[]> {
-  const createdFiles: string[] = [];
-
-  for (const [relativePath, content] of files) {
-    const targetPath = path.join(targetDir, relativePath);
-    const dir = path.dirname(targetPath);
-
-    // Create directory if needed
-    await fs.mkdir(dir, { recursive: true });
-
-    // Substitute variables and write file
-    const processedContent = substituteVariables(content, variables);
-    await fs.writeFile(targetPath, processedContent, 'utf-8');
-
-    createdFiles.push(relativePath);
-  }
-
-  return createdFiles;
 }
 
 /**
@@ -357,6 +175,7 @@ export function isRemoteTemplate(templateId: string): boolean {
 
 /**
  * Full template application workflow
+ * Uses tarball download for efficiency
  */
 export async function initFromTemplate(
   targetDir: string,
@@ -369,20 +188,69 @@ export async function initFromTemplate(
 
   log(`Fetching template: ${templateId}...`);
 
-  // Fetch template files
-  const files = await fetchTemplateFiles(templateId, variantId);
-  log(`Downloaded ${files.size} files`);
+  // Get template info
+  const templates = await listTemplates();
+  const template = templates.find((t) => t.id === templateId);
+
+  if (!template) {
+    throw new Error(`Template not found: ${templateId}`);
+  }
+
+  const metadata = await getTemplateMetadata(templateId);
+  if (!metadata) {
+    throw new Error(`Template metadata not found: ${templateId}`);
+  }
+
+  const variant = metadata.variants.find((v) => v.id === variantId);
+  if (!variant) {
+    throw new Error(`Variant not found: ${variantId}`);
+  }
+
+  // Download the variant files directory using tarball
+  const filesPath = `${template.path}/${variant.filesDir}`;
+  log('Downloading template files...');
+
+  await downloadDirectory(filesPath, targetDir, REPO, {
+    onProgress: log,
+  });
+
+  // Apply variable substitutions to all downloaded files
+  log('Applying variable substitutions...');
+  await substituteVariablesInDirectory(targetDir, variables);
 
   // Apply template config
   log('Creating configuration...');
   await applyTemplateConfig(targetDir, templateId, variables);
 
-  // Apply template files
-  log('Writing template files...');
-  const createdFiles = await applyTemplate(targetDir, files, variables);
+  // Get list of created files
+  const createdFiles = await listFilesRecursive(targetDir);
 
   return {
     configCreated: true,
     filesCreated: createdFiles,
   };
 }
+
+/**
+ * List all files in a directory recursively
+ */
+async function listFilesRecursive(dir: string, basePath: string = ''): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
+
+    if (entry.isDirectory()) {
+      const subFiles = await listFilesRecursive(path.join(dir, entry.name), relativePath);
+      files.push(...subFiles);
+    } else {
+      files.push(relativePath);
+    }
+  }
+
+  return files;
+}
+
+// Re-export for convenience
+export { substituteVariables } from './github.service';

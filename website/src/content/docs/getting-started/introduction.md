@@ -48,6 +48,20 @@ StackSolo helps you deploy common patterns on Google Cloud:
 | **Microservices** | Multiple Cloud Run containers |
 | **Event-Driven** | Functions + Pub/Sub topics |
 
+## Start From a Stack
+
+Don't want to start from scratch? Clone a pre-built stack:
+
+```bash
+# List available stacks
+npx stacksolo clone --list
+
+# Clone a complete application
+npx stacksolo clone rag-platform my-chatbot
+```
+
+Stacks are complete, deployable applications with full source code, infrastructure config, and documentation.
+
 ## How It Works
 
 ```
