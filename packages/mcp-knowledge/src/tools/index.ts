@@ -17,6 +17,7 @@ import { architecturesTool, architectureDetailTool } from './architectures';
 import { setupTool } from './setup';
 import { firebaseAuthTool } from './firebase-auth';
 import { templatesTool, templateGuideTool } from './templates';
+import { stacksTool, stackDetailTool } from './stacks';
 
 import type { Tool } from './types';
 
@@ -36,6 +37,8 @@ export {
   firebaseAuthTool,
   templatesTool,
   templateGuideTool,
+  stacksTool,
+  stackDetailTool,
 };
 
 // All tools registry for easy iteration
@@ -54,6 +57,8 @@ export const allTools: Tool[] = [
   firebaseAuthTool,
   templatesTool,
   templateGuideTool,
+  stacksTool,
+  stackDetailTool,
 ];
 
 // Tool lookup map for handler dispatch
