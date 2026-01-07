@@ -1,9 +1,9 @@
 /**
  * stacksolo clone
  *
- * Bootstrap a new StackSolo project from an existing one.
- * Copies shared infrastructure configuration (VPC, buckets, registry)
- * with `existing: true` flags so new projects reuse resources.
+ * Bootstrap a new StackSolo project from:
+ * 1. A remote stack (e.g., `stacksolo clone rag-platform my-project`)
+ * 2. An existing local project (e.g., `stacksolo clone ../other-project`)
  */
 
 import { Command } from 'commander';
@@ -12,6 +12,7 @@ import inquirer from 'inquirer';
 import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { spawn } from 'child_process';
 import { loadConfig, type StackSoloConfig } from '@stacksolo/blueprint';
 import { getRegionsForProvider } from '../../regions';
 import {
@@ -19,6 +20,290 @@ import {
   createConfigFile,
 } from '../../templates';
 import { getRegistry } from '@stacksolo/registry';
+
+// GitHub repository for stacks
+const STACKS_REPO = 'https://github.com/monkeybarrels/stacksolo-architectures.git';
+const STACKS_RAW_URL = 'https://raw.githubusercontent.com/monkeybarrels/stacksolo-architectures/main/stacks';
+
+interface StackMetadata {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  difficulty: string;
+  variables: Record<string, {
+    description: string;
+    required?: boolean;
+    default?: string;
+  }>;
+}
+
+/**
+ * Check if the source is a known remote stack by fetching its stack.json
+ */
+async function fetchStackMetadata(stackId: string): Promise<StackMetadata | null> {
+  try {
+    const url = `${STACKS_RAW_URL}/${stackId}/stack.json`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await response.json() as StackMetadata;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Download and extract a stack from the GitHub repository
+ * Downloads as tarball to avoid any git history
+ */
+async function cloneRemoteStack(
+  stackId: string,
+  outputDir: string,
+  spinner: ReturnType<typeof ora>
+): Promise<boolean> {
+  const tempDir = path.join(outputDir, '.stacksolo-temp');
+  const tarballUrl = `https://github.com/monkeybarrels/stacksolo-architectures/archive/refs/heads/main.tar.gz`;
+
+  try {
+    // Clean up any existing temp directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.mkdir(tempDir, { recursive: true });
+
+    // Download tarball
+    spinner.text = 'Downloading stack...';
+    const tarballPath = path.join(tempDir, 'repo.tar.gz');
+
+    const response = await fetch(tarballUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to download: ${response.status}`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.writeFile(tarballPath, buffer);
+
+    // Extract tarball
+    spinner.text = 'Extracting files...';
+    await runCommand('tar', ['-xzf', tarballPath, '-C', tempDir], tempDir);
+
+    // Find the extracted directory (it's named stacksolo-architectures-main)
+    const extractedDir = path.join(tempDir, 'stacksolo-architectures-main', 'stacks', stackId);
+
+    // Check if the stack exists
+    try {
+      await fs.access(extractedDir);
+    } catch {
+      spinner.fail(`Stack "${stackId}" not found in repository`);
+      await fs.rm(tempDir, { recursive: true, force: true });
+      return false;
+    }
+
+    // Copy files (excluding node_modules, dist, etc.)
+    spinner.text = 'Copying stack files...';
+    await copyStackFiles(extractedDir, outputDir);
+
+    // Clean up temp directory
+    await fs.rm(tempDir, { recursive: true, force: true });
+
+    return true;
+  } catch (error) {
+    // Clean up on error
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * Run a command and return a promise
+ */
+function runCommand(cmd: string, args: string[], cwd: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args, { cwd, stdio: 'pipe' });
+    let stderr = '';
+    proc.stderr?.on('data', (data) => { stderr += data.toString(); });
+    proc.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} failed: ${stderr}`));
+    });
+    proc.on('error', reject);
+  });
+}
+
+/**
+ * Copy stack files, excluding node_modules, .git, dist, etc.
+ */
+async function copyStackFiles(srcDir: string, destDir: string): Promise<void> {
+  const excludePatterns = ['node_modules', '.git', 'dist', '.DS_Store'];
+
+  async function copyDir(src: string, dest: string): Promise<void> {
+    await fs.mkdir(dest, { recursive: true });
+    const entries = await fs.readdir(src, { withFileTypes: true });
+
+    for (const entry of entries) {
+      // Skip excluded patterns
+      if (excludePatterns.some(p => entry.name === p || entry.name.startsWith(p + '/'))) {
+        continue;
+      }
+
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+
+      if (entry.isDirectory()) {
+        await copyDir(srcPath, destPath);
+      } else {
+        await fs.copyFile(srcPath, destPath);
+      }
+    }
+  }
+
+  await copyDir(srcDir, destDir);
+}
+
+/**
+ * Clone a remote stack to the local filesystem
+ */
+async function cloneStack(
+  stackId: string,
+  destination: string | undefined,
+  metadata: StackMetadata,
+  options: { name?: string; yes?: boolean },
+  cwd: string
+): Promise<void> {
+  console.log(chalk.cyan.bold('\n  StackSolo Stack Clone\n'));
+  console.log(chalk.gray(`  ${metadata.description}\n`));
+  console.log(chalk.gray('─'.repeat(60)));
+
+  // Determine output directory
+  let projectName = destination || options.name;
+
+  if (!projectName && !options.yes) {
+    const { name } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'name',
+        message: 'Project directory name:',
+        default: stackId,
+        validate: (input: string) => {
+          if (!input) return 'Directory name is required';
+          if (!/^[a-z][a-z0-9-]*$/.test(input)) {
+            return 'Must start with letter, only lowercase, numbers, hyphens';
+          }
+          return true;
+        },
+      },
+    ]);
+    projectName = name;
+  }
+
+  projectName = projectName || stackId;
+  const outputDir = path.join(cwd, projectName);
+
+  // Check if directory exists
+  try {
+    await fs.access(outputDir);
+    console.log(chalk.red(`\n  Error: Directory "${projectName}" already exists.\n`));
+    return;
+  } catch {
+    // Directory doesn't exist, good to proceed
+  }
+
+  // Collect variable values
+  console.log(chalk.cyan.bold('\n  Configuration\n'));
+
+  const variables: Record<string, string> = {};
+  const varEntries = Object.entries(metadata.variables || {});
+
+  if (varEntries.length > 0 && !options.yes) {
+    for (const [key, spec] of varEntries) {
+      let defaultValue = spec.default || '';
+
+      // Smart defaults
+      if (key === 'projectName') defaultValue = projectName;
+
+      const { value } = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'value',
+          message: `${spec.description}:`,
+          default: defaultValue,
+          validate: (input: string) => {
+            if (spec.required && !input) return `${key} is required`;
+            return true;
+          },
+        },
+      ]);
+      variables[key] = value;
+    }
+  } else {
+    // Use defaults
+    for (const [key, spec] of varEntries) {
+      if (key === 'projectName') {
+        variables[key] = projectName;
+      } else if (spec.default) {
+        variables[key] = spec.default;
+      }
+    }
+  }
+
+  // Clone the stack
+  console.log(chalk.cyan.bold('\n  Cloning Stack\n'));
+  const cloneSpinner = ora('Cloning stack...').start();
+
+  try {
+    await fs.mkdir(outputDir, { recursive: true });
+    const success = await cloneRemoteStack(stackId, outputDir, cloneSpinner);
+
+    if (!success) {
+      await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
+      return;
+    }
+
+    cloneSpinner.succeed('Stack cloned successfully');
+
+    // Apply variable substitutions to config
+    const configPath = path.join(outputDir, 'infrastructure', 'config.json');
+    try {
+      let configContent = await fs.readFile(configPath, 'utf-8');
+
+      // Replace {{variable}} placeholders
+      for (const [key, value] of Object.entries(variables)) {
+        const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+        configContent = configContent.replace(placeholder, value);
+      }
+
+      await fs.writeFile(configPath, configContent);
+
+      // Also copy to .stacksolo/stacksolo.config.json for CLI compatibility
+      const stacksoloDir = path.join(outputDir, '.stacksolo');
+      await fs.mkdir(stacksoloDir, { recursive: true });
+      await fs.writeFile(path.join(stacksoloDir, 'stacksolo.config.json'), configContent);
+
+      console.log(chalk.green('  ✓ Configuration applied'));
+    } catch {
+      console.log(chalk.yellow('  ⚠ Could not apply configuration (apply manually)'));
+    }
+
+    // Summary
+    console.log(chalk.gray('\n─'.repeat(60)));
+    console.log(chalk.bold.green('\n  Done! Stack cloned successfully.\n'));
+    console.log(chalk.gray('  Location: ') + chalk.white(outputDir));
+    console.log(chalk.gray('  Stack: ') + chalk.white(`${metadata.name} v${metadata.version}`));
+
+    console.log(chalk.gray('\n  Next steps:\n'));
+    console.log(chalk.white(`    cd ${projectName}`));
+    console.log(chalk.white('    npm install'));
+    console.log(chalk.white('    npm run dev'));
+    console.log('');
+    console.log(chalk.gray('  To deploy:'));
+    console.log(chalk.cyan('    stacksolo deploy'));
+    console.log('');
+
+  } catch (error) {
+    cloneSpinner.fail('Failed to clone stack');
+    console.log(chalk.red(`\n  ${error instanceof Error ? error.message : error}\n`));
+    await fs.rm(outputDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 interface SharedResources {
   vpc?: {
@@ -130,16 +415,60 @@ function generateClonedConfig(
 }
 
 export const cloneCommand = new Command('clone')
-  .description('Bootstrap a new project from an existing StackSolo project')
-  .argument('<source>', 'Path to source project directory or config file')
+  .description('Clone a stack or project (e.g., stacksolo clone rag-platform my-app)')
+  .argument('[source]', 'Stack ID (e.g., rag-platform) or path to local project')
+  .argument('[destination]', 'Directory name for new project')
   .option('-n, --name <name>', 'Name for the new project')
   .option('-o, --output <dir>', 'Output directory (default: current directory)')
-  .option('--no-vpc', 'Do not share the VPC')
-  .option('--no-buckets', 'Do not share storage buckets')
-  .option('--no-registry', 'Do not share artifact registry')
+  .option('--no-vpc', 'Do not share the VPC (local clone only)')
+  .option('--no-buckets', 'Do not share storage buckets (local clone only)')
+  .option('--no-registry', 'Do not share artifact registry (local clone only)')
   .option('-y, --yes', 'Skip prompts and use defaults')
-  .action(async (source, options) => {
+  .option('--list', 'List available stacks')
+  .action(async (source, destination, options) => {
     const cwd = process.cwd();
+
+    // Handle --list flag or no source provided
+    if (options.list || !source) {
+      console.log(chalk.cyan.bold('\n  Available Stacks\n'));
+      console.log(chalk.gray('  Fetching from stacksolo-architectures...\n'));
+
+      const spinner = ora('Loading stacks...').start();
+      // For now, we have a known list - in the future this could be fetched
+      const knownStacks = ['rag-platform'];
+      for (const stackId of knownStacks) {
+        const metadata = await fetchStackMetadata(stackId);
+        if (metadata) {
+          spinner.stop();
+          console.log(chalk.green(`  ${metadata.id}`));
+          console.log(chalk.gray(`    ${metadata.description}`));
+          console.log(chalk.gray(`    Tags: ${metadata.tags.join(', ')}`));
+          console.log('');
+        }
+      }
+      spinner.stop();
+      console.log(chalk.gray('  Usage: stacksolo clone <stack-id> <project-name>\n'));
+      return;
+    }
+
+    // =========================================
+    // Check if source is a remote stack
+    // =========================================
+    const stackSpinner = ora('Checking for remote stack...').start();
+    const stackMetadata = await fetchStackMetadata(source);
+
+    if (stackMetadata) {
+      // This is a remote stack - clone it
+      stackSpinner.succeed(`Found stack: ${chalk.green(stackMetadata.name)}`);
+      await cloneStack(source, destination, stackMetadata, options, cwd);
+      return;
+    }
+
+    stackSpinner.text = 'Not a remote stack, checking local path...';
+
+    // =========================================
+    // Fall back to local project clone
+    // =========================================
     const outputDir = options.output ? path.resolve(cwd, options.output) : cwd;
 
     console.log(chalk.cyan.bold('\n  StackSolo Clone\n'));
@@ -152,6 +481,7 @@ export const cloneCommand = new Command('clone')
     console.log(chalk.cyan.bold('\n  Step 1: Load Source Project\n'));
 
     const sourceSpinner = ora('Loading source project...').start();
+    stackSpinner.stop();
 
     // Resolve source path
     let sourcePath = path.resolve(cwd, source);
@@ -167,6 +497,7 @@ export const cloneCommand = new Command('clone')
       }
     } catch {
       sourceSpinner.fail(`Source not found: ${source}`);
+      console.log(chalk.gray('\n  Hint: Use --list to see available remote stacks\n'));
       return;
     }
 
