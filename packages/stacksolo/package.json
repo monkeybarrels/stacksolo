@@ -1,6 +1,6 @@
 {
   "name": "stacksolo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deploy GCP infrastructure from the command line - the solo developer's cloud toolkit",
   "repository": {
     "type": "git",
