@@ -6,6 +6,7 @@
  */
 
 import { Command } from 'commander';
+import { createRequire } from 'module';
 import {
   // Project commands
   initCommand,
@@ -36,12 +37,16 @@ import {
   unregisterCommand,
 } from './commands';
 
+// Read version from package.json at runtime
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json');
+
 const program = new Command();
 
 program
   .name('stacksolo')
   .description('Deploy cloud infrastructure for your applications')
-  .version('0.1.0');
+  .version(pkg.version);
 
 // Project commands
 program.addCommand(initCommand);
