@@ -82,6 +82,12 @@ importers:
 
   packages/cli:
     dependencies:
+      '@stacksolo/core':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@stacksolo/plugin-gcp-cdktf':
+        specifier: ^0.1.0
+        version: 0.1.0(@stacksolo/core@0.1.0)
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
@@ -104,12 +110,6 @@ importers:
       '@stacksolo/blueprint':
         specifier: workspace:*
         version: link:../blueprint
-      '@stacksolo/core':
-        specifier: workspace:*
-        version: link:../core
-      '@stacksolo/plugin-gcp-cdktf':
-        specifier: workspace:*
-        version: link:../../plugins/gcp-cdktf
       '@stacksolo/registry':
         specifier: workspace:*
         version: link:../registry
@@ -1239,6 +1239,11 @@ packages:
 
   '@stacksolo/core@0.1.0':
     resolution: {integrity: sha512-YMOT6Sk+jq3lylCXagGgPL+H/9zO4L0RhIv9LOlym6878HYlv+MyX0tGOG5KVNp7sKs4LK62I3BeQrjEC4fIOQ==}
+
+  '@stacksolo/plugin-gcp-cdktf@0.1.0':
+    resolution: {integrity: sha512-BBUjpx4MrHwNVxoBdD+ua09RrVxAvMmBmVTszHlo4Ao1mhvEiT4SNeC1YKp3GtiKPxC4vjtVtkM/GYKNebuYeQ==}
+    peerDependencies:
+      '@stacksolo/core': ^0.1.0
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -4816,6 +4821,13 @@ snapshots:
       - '@types/node'
 
   '@stacksolo/core@0.1.0': {}
+
+  '@stacksolo/plugin-gcp-cdktf@0.1.0(@stacksolo/core@0.1.0)':
+    dependencies:
+      '@cdktf/provider-google': 14.36.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)
+      '@stacksolo/core': 0.1.0
+      cdktf: 0.20.12(constructs@10.4.4)
+      constructs: 10.4.4
 
   '@standard-schema/spec@1.1.0': {}
 
