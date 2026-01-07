@@ -284,6 +284,12 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  packages/stacksolo:
+    dependencies:
+      '@stacksolo/cli':
+        specifier: ^0.1.0
+        version: 0.1.0(@types/node@20.19.27)
+
   plugins/gcp-cdktf:
     dependencies:
       '@cdktf/provider-google':
@@ -1225,6 +1231,11 @@ packages:
   '@sindresorhus/is@4.6.0':
     resolution: {integrity: sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw==}
     engines: {node: '>=10'}
+
+  '@stacksolo/cli@0.1.0':
+    resolution: {integrity: sha512-lAmPnJZiqsKmoGc+phfXcf44MsQSf5p04GNTXhC4VBKD9laYBMca8X9rYO3XzjjUO8rc6fWWSQBQlPgfLxp0Zw==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@stacksolo/core@0.1.0':
     resolution: {integrity: sha512-YMOT6Sk+jq3lylCXagGgPL+H/9zO4L0RhIv9LOlym6878HYlv+MyX0tGOG5KVNp7sKs4LK62I3BeQrjEC4fIOQ==}
@@ -4792,6 +4803,17 @@ snapshots:
   '@sinclair/typebox@0.27.8': {}
 
   '@sindresorhus/is@4.6.0': {}
+
+  '@stacksolo/cli@0.1.0(@types/node@20.19.27)':
+    dependencies:
+      better-sqlite3: 11.10.0
+      chalk: 5.6.2
+      commander: 12.1.0
+      inquirer: 9.3.8(@types/node@20.19.27)
+      kysely: 0.27.6
+      ora: 8.2.0
+    transitivePeerDependencies:
+      - '@types/node'
 
   '@stacksolo/core@0.1.0': {}
 
