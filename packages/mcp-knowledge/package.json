@@ -1,6 +1,6 @@
 {
   "name": "@stacksolo/mcp-knowledge",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "MCP server providing StackSolo knowledge to AI assistants - helps Claude/Cursor understand and use StackSolo",
   "type": "module",
   "main": "dist/index.js",
