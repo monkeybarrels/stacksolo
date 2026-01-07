@@ -244,7 +244,7 @@ describe('generateFunctionManifests', () => {
     expect(result.content).toContain('kind: Service');
     // Image with colon is quoted
     expect(result.content).toContain('image: "node:20-slim"');
-    expect(result.content).toContain('npm install');
+    expect(result.content).toContain('node_modules');
     expect(result.content).toContain('@google-cloud/functions-framework');
     expect(result.content).toContain('--target=handler');
   });

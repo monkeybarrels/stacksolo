@@ -68,7 +68,7 @@ export function generateUIManifests(options: UIManifestOptions): GeneratedManife
             {
               name: uiName,
               image: 'node:20-slim',
-              command: ['sh', '-c', `npm install && ${frameworkConfig.command.join(' ')}`],
+              command: ['sh', '-c', `[ -d node_modules ] || npm install; ${frameworkConfig.command.join(' ')}`],
               ports: [
                 {
                   containerPort: options.port,
