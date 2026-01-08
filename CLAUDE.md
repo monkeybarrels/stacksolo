@@ -260,10 +260,34 @@ Functions, kernels, and UIs all use tsup for building:
 
 When `sourceDir` is not specified in config:
 - Functions: `functions/<name>/`
-- UIs: `ui/<name>/`
+- UIs: `apps/<name>/` (or `ui/<name>/`)
 - Containers: `containers/<name>/`
 
 These defaults must be consistent between scaffold generators and K8s manifest generators.
+
+### Local Development Requirements (CRITICAL)
+
+**All services MUST have an `npm run dev` script** for `stacksolo dev --local` to work.
+
+The `stacksolo dev --local` command runs services locally without Docker/K8s by spawning `npm run dev` for each service defined in the config. This is a hard requirement.
+
+**Required dev scripts by service type:**
+
+| Service Type | Required `dev` Script Pattern |
+|--------------|------------------------------|
+| Function | `tsup src/index.ts --watch --onSuccess 'functions-framework --source=dist --target=handler'` |
+| UI (React/Vue) | `vite` (Vite respects `--port` flag passed by CLI) |
+| UI (SvelteKit) | `vite dev` |
+| Container | `tsx watch src/index.ts` or similar |
+
+**Port injection:**
+- The CLI passes `PORT` env var to functions and containers
+- For UIs, the CLI passes `--port` flag via `npm run dev -- --port <port>`
+
+**When creating new templates or services:**
+1. Always include a `dev` script in package.json
+2. Ensure the dev script starts a server that listens on the `PORT` env var (functions/containers) or accepts `--port` flag (UIs)
+3. Test with `stacksolo dev --local` before committing
 
 ## Key Files to Know
 

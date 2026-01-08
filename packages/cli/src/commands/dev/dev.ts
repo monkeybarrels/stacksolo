@@ -15,6 +15,7 @@ import type { StackSoloConfig } from '@stacksolo/blueprint';
 import { generateK8sManifests, writeK8sManifests } from '../../generators/k8s';
 import { sanitizeNamespaceName } from '../../generators/k8s/namespace';
 import { loadPlugins, getPluginService, getServiceSourcePath } from '../../services/plugin-loader.service';
+import { startLocalEnvironment } from '../../services/local-dev.service';
 
 // =============================================================================
 // Kernel Configuration Helper
@@ -71,7 +72,8 @@ const K8S_OUTPUT_DIR = '.stacksolo/k8s';
 const CONFIG_FILE = '.stacksolo/stacksolo.config.json';
 
 export const devCommand = new Command('dev')
-  .description('Start local Kubernetes development environment')
+  .description('Start local development environment')
+  .option('--local', 'Run services locally without Docker/K8s')
   .option('--stop', 'Stop and tear down the environment')
   .option('--status', 'Show status of running pods with health')
   .option('--health', 'Check health of all services')
@@ -85,6 +87,14 @@ export const devCommand = new Command('dev')
   .option('--no-emulators', 'Skip Firebase/Pub/Sub emulators')
   .action(async (options) => {
     try {
+      // Handle --local mode (no Docker/K8s)
+      if (options.local) {
+        await startLocalEnvironment({
+          includeEmulators: options.emulators !== false,
+        });
+        return;
+      }
+
       // Handle subcommands
       if (options.stop) {
         await stopEnvironment();

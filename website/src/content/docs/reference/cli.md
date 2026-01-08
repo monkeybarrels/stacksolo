@@ -368,7 +368,7 @@ stacksolo inventory share "VPC Network" my-vpc second-project third-project
 
 ### `stacksolo dev`
 
-Start a local Kubernetes development environment.
+Start a local development environment.
 
 ```bash
 stacksolo dev [options]
@@ -376,10 +376,56 @@ stacksolo dev [options]
 
 | Option | Description |
 |--------|-------------|
+| `--local` | Run services locally without Docker/K8s |
 | `--stop` | Tear down local environment |
 | `--status` | Show running pods |
 | `--logs [service]` | Tail logs |
 | `--rebuild` | Force regenerate K8s manifests |
+| `--no-emulators` | Skip Firebase/Pub/Sub emulators |
+
+#### Local Mode (`--local`)
+
+Run services directly on your machine without Docker or Kubernetes.
+
+```bash
+stacksolo dev --local
+stacksolo dev --local --no-emulators
+```
+
+**How it works:**
+1. Reads config from `.stacksolo/stacksolo.config.json`
+2. Finds all services (functions, UIs, containers)
+3. Runs `npm run dev` for each service in parallel
+4. Streams logs with colored prefixes per service
+5. Ctrl+C gracefully stops all processes
+
+**Port allocation:**
+
+| Service Type | Ports |
+|--------------|-------|
+| Functions | 8081, 8082, 8083... |
+| UIs | 3000, 3001, 3002... |
+| Containers | 9000, 9001, 9002... |
+
+**Requirements:**
+
+All services **must** have an `npm run dev` script in their package.json:
+
+| Service Type | Required `dev` Script |
+|--------------|----------------------|
+| Function | `tsup src/index.ts --watch --onSuccess 'functions-framework ...'` |
+| UI (React/Vue) | `vite` |
+| Container | `tsx watch src/index.ts` |
+
+The CLI injects `PORT` env var for functions/containers, and passes `--port` flag for UIs.
+
+#### Kubernetes Mode (default)
+
+Start a local Kubernetes environment via OrbStack or Docker Desktop.
+
+```bash
+stacksolo dev
+```
 
 **Prerequisites:** OrbStack or any local Kubernetes cluster.
 
@@ -472,8 +518,13 @@ stacksolo init
 ### Daily development
 
 ```bash
+# Local mode (no Docker/K8s - fastest)
+stacksolo dev --local
+# Make changes, see live reload...
+# Ctrl+C to stop
+
+# Or Kubernetes mode
 stacksolo dev
-# Make changes...
 stacksolo dev --logs api
 stacksolo dev --stop
 ```
