@@ -171,9 +171,10 @@ function streamWithPrefix(
  */
 function spawnService(
   service: LocalService,
-  manager: LocalProcessManager
+  manager: LocalProcessManager,
+  firebaseProjectId?: string
 ): ChildProcess | null {
-  const env = {
+  const env: Record<string, string> = {
     ...process.env,
     PORT: String(service.port),
     NODE_ENV: 'development',
@@ -182,6 +183,11 @@ function spawnService(
     FIREBASE_AUTH_EMULATOR_HOST: 'localhost:9099',
     PUBSUB_EMULATOR_HOST: 'localhost:8085',
   };
+
+  // Set Firebase project ID if configured (for token validation)
+  if (firebaseProjectId) {
+    env.FIREBASE_PROJECT_ID = firebaseProjectId;
+  }
 
   // For UIs, we need to pass port via CLI args since Vite doesn't use PORT env
   const args = service.type === 'ui'
@@ -385,11 +391,15 @@ export async function startLocalEnvironment(options: {
     }
   }
 
+  // Get Firebase project ID from config (for token validation)
+  const firebaseProjectId = config.project.gcpKernel?.firebaseProjectId
+    || config.project.gcpProjectId;
+
   // Start all services
   const spinner = ora('Starting services...').start();
 
   for (const service of validServices) {
-    const proc = spawnService(service, manager);
+    const proc = spawnService(service, manager, firebaseProjectId);
     if (proc) {
       manager.processes.set(service.name, proc);
     }
