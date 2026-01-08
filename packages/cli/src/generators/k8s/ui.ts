@@ -68,7 +68,20 @@ export function generateUIManifests(options: UIManifestOptions): GeneratedManife
             {
               name: uiName,
               image: 'node:20-slim',
-              command: ['sh', '-c', `[ -d node_modules ] || npm install; ${frameworkConfig.command.join(' ')}`],
+              // Copy source (excluding node_modules) to working directory, then install fresh Linux deps
+              command: [
+                'sh',
+                '-c',
+                [
+                  // Copy source files to /app, excluding node_modules
+                  'cp -r /source/* /app/ 2>/dev/null || true',
+                  'cd /app',
+                  // Always install fresh for Linux platform
+                  'npm install',
+                  // Run the dev server
+                  frameworkConfig.command.join(' '),
+                ].join(' && '),
+              ],
               ports: [
                 {
                   containerPort: options.port,
@@ -83,16 +96,21 @@ export function generateUIManifests(options: UIManifestOptions): GeneratedManife
               volumeMounts: [
                 {
                   name: 'source',
+                  mountPath: '/source',
+                  readOnly: true,
+                },
+                {
+                  name: 'workdir',
                   mountPath: '/app',
                 },
               ],
               workingDir: '/app',
               resources: {
                 limits: {
-                  memory: '512Mi',
+                  memory: '1Gi',
                 },
                 requests: {
-                  memory: '256Mi',
+                  memory: '512Mi',
                 },
               },
             },
@@ -104,6 +122,10 @@ export function generateUIManifests(options: UIManifestOptions): GeneratedManife
                 path: options.sourceDir,
                 type: 'DirectoryOrCreate',
               },
+            },
+            {
+              name: 'workdir',
+              emptyDir: {},
             },
           ],
         },

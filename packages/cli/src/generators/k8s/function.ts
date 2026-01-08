@@ -37,21 +37,39 @@ export function generateFunctionManifests(options: FunctionManifestOptions): Gen
   const runtimeConfig = getRuntimeConfig(options.function.runtime, options.function.entryPoint);
   const isPython = isPythonRuntime(options.function.runtime);
 
-  // Build install + run command based on runtime
-  // For Node.js: use npm run dev for TypeScript support (uses tsx or ts-node)
-  // For Python: install deps and run functions-framework directly
-  // Skip install if node_modules exists (supports npm workspaces with hoisted deps)
-  const installCmd = isPython
-    ? 'pip install -r requirements.txt 2>/dev/null || true && pip install functions-framework'
-    : '[ -d node_modules ] || npm install';
-
+  // Build command that copies source and installs fresh Linux deps
+  // This avoids platform-specific native module issues (macOS node_modules in Linux container)
   // For Node.js dev, prefer npm run dev which handles TypeScript via tsx
   // Fall back to direct functions-framework if no dev script exists
   const runCmd = isPython
     ? runtimeConfig.command.join(' ')
     : 'npm run dev 2>/dev/null || ' + runtimeConfig.command.join(' ');
 
-  const containerCommand = ['sh', '-c', `${installCmd}; ${runCmd}`];
+  const containerCommand = isPython
+    ? [
+        'sh',
+        '-c',
+        [
+          'cp -r /source/* /app/ 2>/dev/null || true',
+          'cd /app',
+          'pip install -r requirements.txt 2>/dev/null || true',
+          'pip install functions-framework',
+          runCmd,
+        ].join(' && '),
+      ]
+    : [
+        'sh',
+        '-c',
+        [
+          // Copy source files to /app, excluding node_modules
+          'cp -r /source/* /app/ 2>/dev/null || true',
+          'cd /app',
+          // Always install fresh for Linux platform
+          'npm install',
+          // Run the dev server
+          runCmd,
+        ].join(' && '),
+      ];
 
   const labels = {
     'app.kubernetes.io/name': functionName,
@@ -103,16 +121,21 @@ export function generateFunctionManifests(options: FunctionManifestOptions): Gen
               volumeMounts: [
                 {
                   name: 'source',
+                  mountPath: '/source',
+                  readOnly: true,
+                },
+                {
+                  name: 'workdir',
                   mountPath: '/app',
                 },
               ],
               workingDir: '/app',
               resources: {
                 limits: {
-                  memory: options.function.memory || '256Mi',
+                  memory: options.function.memory || '512Mi',
                 },
                 requests: {
-                  memory: '128Mi',
+                  memory: '256Mi',
                 },
               },
             },
@@ -124,6 +147,10 @@ export function generateFunctionManifests(options: FunctionManifestOptions): Gen
                 path: options.sourceDir,
                 type: 'DirectoryOrCreate',
               },
+            },
+            {
+              name: 'workdir',
+              emptyDir: {},
             },
           ],
         },

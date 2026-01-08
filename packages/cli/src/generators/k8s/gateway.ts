@@ -202,9 +202,11 @@ function generateNginxConfig(
     // Strip trailing /* for location matching
     const basePath = route.path.replace(/\/?\*$/, '');
 
+    // Preserve the path prefix when proxying (don't strip it)
+    // This means /api/health proxies to backend as /api/health
     return `
         location ${basePath}/ {
-            proxy_pass ${upstream}/;
+            proxy_pass ${upstream};
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection 'upgrade';

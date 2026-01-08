@@ -13,6 +13,7 @@ export interface ConfigMapOptions {
   firestoreEmulatorHost?: string;
   authEmulatorHost?: string;
   pubsubEmulatorHost?: string;
+  kernelUrl?: string;
   additionalEnv?: Record<string, string>;
 }
 
@@ -47,6 +48,11 @@ export function generateConfigMap(options: ConfigMapOptions): GeneratedManifest 
     data.PUBSUB_EMULATOR_HOST = options.pubsubEmulatorHost;
   } else {
     data.PUBSUB_EMULATOR_HOST = 'pubsub-emulator:8085';
+  }
+
+  // Add kernel URL for @stacksolo/runtime auth middleware
+  if (options.kernelUrl) {
+    data.KERNEL_URL = options.kernelUrl;
   }
 
   // Add any additional environment variables

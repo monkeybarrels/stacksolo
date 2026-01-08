@@ -49,11 +49,21 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
   // Track service ports for ingress
   const servicePortMap: Record<string, number> = {};
 
+  // Determine kernel URL for configmap (need to do this before generating configmap)
+  let kernelUrl: string | undefined;
+  if (config.project.kernel) {
+    // NATS kernel uses port 8090
+    kernelUrl = `http://${config.project.kernel.name}:8090`;
+  } else if (config.project.gcpKernel) {
+    // GCP kernel uses port 8080
+    kernelUrl = `http://${config.project.gcpKernel.name}:8080`;
+  }
+
   // 1. Generate namespace
   manifests.push(generateNamespace(projectName));
 
-  // 2. Generate ConfigMap
-  manifests.push(generateConfigMap({ projectName }));
+  // 2. Generate ConfigMap (with kernel URL if configured)
+  manifests.push(generateConfigMap({ projectName, kernelUrl }));
 
   // 3. Generate emulators (if enabled)
   if (includeEmulators) {
