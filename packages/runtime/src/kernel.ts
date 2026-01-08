@@ -108,11 +108,79 @@ export interface KernelErrorResponse {
 }
 
 // =============================================================================
-// Auth Client (HTTP)
+// Auth Client (HTTP + Local Firebase Admin)
 // =============================================================================
+
+// Lazy-loaded Firebase Admin for local dev
+let firebaseAdminAuth: any = null;
+
+/**
+ * Initialize Firebase Admin for local token validation
+ */
+async function getFirebaseAuth() {
+  if (firebaseAdminAuth) {
+    return firebaseAdminAuth;
+  }
+
+  try {
+    const admin = await import('firebase-admin');
+
+    // Initialize if not already done
+    if (admin.apps.length === 0) {
+      admin.initializeApp({
+        projectId: env.firebaseProjectId || 'demo-local',
+      });
+    }
+
+    firebaseAdminAuth = admin.auth();
+    return firebaseAdminAuth;
+  } catch {
+    throw new Error(
+      'firebase-admin is required for local token validation. Install it with: npm install firebase-admin'
+    );
+  }
+}
+
+/**
+ * Validate token locally using Firebase Admin SDK
+ */
+async function validateTokenLocally(token: string): Promise<ValidateTokenResponse> {
+  try {
+    const auth = await getFirebaseAuth();
+    const decodedToken = await auth.verifyIdToken(token);
+
+    return {
+      valid: true,
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      claims: decodedToken,
+    };
+  } catch (error: any) {
+    // Map Firebase errors to our error codes
+    let code: ValidateTokenError['code'] = 'INVALID_TOKEN';
+
+    if (error.code === 'auth/id-token-expired') {
+      code = 'TOKEN_EXPIRED';
+    } else if (error.code === 'auth/id-token-revoked') {
+      code = 'TOKEN_REVOKED';
+    } else if (error.code === 'auth/argument-error') {
+      code = 'MALFORMED_TOKEN';
+    }
+
+    return {
+      valid: false,
+      error: error.message || 'Token validation failed',
+      code,
+    };
+  }
+}
 
 /**
  * Validate a Firebase ID token via the kernel
+ *
+ * In local development (when FIRESTORE_EMULATOR_HOST is set), validates
+ * directly using Firebase Admin SDK against the Auth emulator.
+ * In production, calls the kernel service.
  *
  * @param token - Firebase ID token from client
  * @returns Validation result with user info or error
@@ -134,6 +202,13 @@ export async function validateToken(token: string): Promise<ValidateTokenRespons
   // Strip "Bearer " prefix if present
   const cleanToken = token.startsWith('Bearer ') ? token.slice(7) : token;
 
+  // In local dev, validate directly using Firebase Admin SDK
+  // This avoids needing to run the kernel locally
+  if (env.isLocal) {
+    return validateTokenLocally(cleanToken);
+  }
+
+  // In production, call the kernel
   const response = await fetch(`${env.kernelAuthUrl}/validate`, {
     method: 'POST',
     headers: {
