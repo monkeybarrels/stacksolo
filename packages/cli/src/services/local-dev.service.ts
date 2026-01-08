@@ -185,8 +185,10 @@ function spawnService(
   };
 
   // Set Firebase project ID if configured (for token validation)
+  // Also set VITE_ prefix for Vite-based UIs
   if (firebaseProjectId) {
     env.FIREBASE_PROJECT_ID = firebaseProjectId;
+    env.VITE_FIREBASE_PROJECT_ID = firebaseProjectId;
   }
 
   // For UIs, we need to pass port via CLI args since Vite doesn't use PORT env
@@ -232,14 +234,15 @@ function spawnService(
  * Start Firebase emulators
  */
 async function startFirebaseEmulators(
-  manager: LocalProcessManager
+  manager: LocalProcessManager,
+  projectId: string = 'demo-local'
 ): Promise<ChildProcess | null> {
   const spinner = ora('Starting Firebase emulators...').start();
 
   try {
     const proc = spawn(
       'firebase',
-      ['emulators:start', '--only', 'firestore,auth', '--project', 'demo-local'],
+      ['emulators:start', '--only', 'firestore,auth', '--project', projectId],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
@@ -383,17 +386,17 @@ export async function startLocalEnvironment(options: {
     isShuttingDown: false,
   };
 
+  // Get Firebase project ID from config (for token validation and emulators)
+  const firebaseProjectId = config.project.gcpKernel?.firebaseProjectId
+    || config.project.gcpProjectId;
+
   // Start Firebase emulators if enabled
   if (options.includeEmulators !== false) {
-    const emulatorProc = await startFirebaseEmulators(manager);
+    const emulatorProc = await startFirebaseEmulators(manager, firebaseProjectId);
     if (emulatorProc) {
       manager.processes.set('firebase-emulator', emulatorProc);
     }
   }
-
-  // Get Firebase project ID from config (for token validation)
-  const firebaseProjectId = config.project.gcpKernel?.firebaseProjectId
-    || config.project.gcpProjectId;
 
   // Start all services
   const spinner = ora('Starting services...').start();
