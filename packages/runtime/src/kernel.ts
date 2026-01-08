@@ -116,6 +116,7 @@ let firebaseAdminAuth: any = null;
 
 /**
  * Initialize Firebase Admin for local token validation
+ * Uses createRequire to resolve firebase-admin from the consuming app's node_modules
  */
 async function getFirebaseAuth() {
   if (firebaseAdminAuth) {
@@ -123,7 +124,11 @@ async function getFirebaseAuth() {
   }
 
   try {
-    const admin = await import('firebase-admin');
+    // Use createRequire to resolve from the app's working directory
+    // This allows the runtime package to find firebase-admin in the consuming app's node_modules
+    const { createRequire } = await import('module');
+    const require = createRequire(process.cwd() + '/package.json');
+    const admin = require('firebase-admin');
 
     // Initialize if not already done
     if (admin.apps.length === 0) {
@@ -134,9 +139,9 @@ async function getFirebaseAuth() {
 
     firebaseAdminAuth = admin.auth();
     return firebaseAdminAuth;
-  } catch {
+  } catch (e: any) {
     throw new Error(
-      'firebase-admin is required for local token validation. Install it with: npm install firebase-admin'
+      `firebase-admin is required for local token validation. Install it with: npm install firebase-admin (${e.message})`
     );
   }
 }
