@@ -73,8 +73,9 @@ export function generateUIManifests(options: UIManifestOptions): GeneratedManife
                 'sh',
                 '-c',
                 [
-                  // Copy source files to /app, excluding node_modules
-                  'cp -r /source/* /app/ 2>/dev/null || true',
+                  // Copy source files to /app, excluding node_modules (macOS binaries don't work in Linux)
+                  'cd /source',
+                  'find . -maxdepth 1 ! -name node_modules ! -name . -exec cp -r {} /app/ \\;',
                   'cd /app',
                   // Always install fresh for Linux platform
                   'npm install',
