@@ -401,7 +401,7 @@ function resolveContainer(
 
   return {
     id: `container-${container.name}`,
-    type: 'gcp:cloud_run',
+    type: 'gcp-cdktf:cloud_run',
     name: container.name,
     config: {
       name: container.name,
@@ -472,7 +472,7 @@ function resolveFunction(
 
   return {
     id: `function-${fn.name}`,
-    type: 'gcp:cloud_function',
+    type: 'gcp-cdktf:cloud_function',
     name: fn.name,
     config: {
       name: fn.name,
