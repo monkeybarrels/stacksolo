@@ -116,8 +116,16 @@ export async function deployConfig(
 
   try {
     // Load plugins from config (registers providers/resources with registry)
+    // Auto-detect required plugins based on config
     if (!pluginsLoaded) {
-      await loadPlugins(config.project.plugins);
+      const pluginsToLoad = [...(config.project.plugins || [])];
+
+      // Auto-add gcp-kernel plugin if gcpKernel is configured
+      if (config.project.gcpKernel && !pluginsToLoad.includes('@stacksolo/plugin-gcp-kernel')) {
+        pluginsToLoad.push('@stacksolo/plugin-gcp-kernel');
+      }
+
+      await loadPlugins(pluginsToLoad);
       pluginsLoaded = true;
     }
 

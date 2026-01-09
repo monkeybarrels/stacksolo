@@ -16,7 +16,7 @@ import type { Plugin } from '@stacksolo/core';
 import { gcpKernelResource } from './resources/index';
 
 /** Plugin version - must match package.json */
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 export const plugin: Plugin = {
   name: '@stacksolo/plugin-gcp-kernel',
@@ -31,7 +31,7 @@ export const plugin: Plugin = {
         http: 8080,
       },
       env: {
-        PORT: '8080',
+        // PORT is automatically set by Cloud Run - don't specify it
         GCP_PROJECT_ID: '',
         FIREBASE_PROJECT_ID: '',
         GCS_BUCKET: '',
