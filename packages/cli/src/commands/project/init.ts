@@ -31,6 +31,14 @@ import {
   checkOrgPolicy,
   fixOrgPolicy,
   checkAndFixCloudBuildPermissions,
+  isFirebaseInstalled,
+  checkFirebaseAuth,
+  addFirebaseToProject,
+  getFirebaseAuthConsoleUrl,
+  getBillingConsoleUrl,
+  isBillingEnabled,
+  generateProjectId,
+  isValidProjectId,
 } from '../../gcp';
 import {
   generateConfig,
@@ -122,6 +130,501 @@ const UI_FRAMEWORKS: Array<{
     description: 'Simple HTML/CSS/JS - no build step',
   },
 ];
+
+/**
+ * Wait for user to complete a manual step
+ * Returns true if user wants to continue, false if they want to quit
+ */
+async function waitForManualStep(
+  description: string,
+  url: string,
+  instruction: string
+): Promise<{ continue: boolean; retry: boolean }> {
+  console.log(chalk.yellow(`\n  ${description}\n`));
+  console.log(chalk.white(`  ${url}\n`));
+  console.log(chalk.gray(`  ${instruction}\n`));
+
+  const { action } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'action',
+      message: 'What would you like to do?',
+      choices: [
+        { name: 'Continue (I\'ve completed this step)', value: 'continue' },
+        { name: 'Open URL and wait', value: 'open' },
+        { name: 'Quit and resume later', value: 'quit' },
+      ],
+    },
+  ]);
+
+  if (action === 'open') {
+    // Try to open URL in browser
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    try {
+      const platform = process.platform;
+      if (platform === 'darwin') {
+        await execAsync(`open "${url}"`);
+      } else if (platform === 'win32') {
+        await execAsync(`start "${url}"`);
+      } else {
+        await execAsync(`xdg-open "${url}"`);
+      }
+      console.log(chalk.gray('\n  Opened in browser. Complete the step and press Enter.\n'));
+    } catch {
+      console.log(chalk.gray('\n  Could not open browser. Please open the URL manually.\n'));
+    }
+
+    // Wait for user to press enter
+    await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'done',
+        message: 'Press Enter when done...',
+      },
+    ]);
+
+    return { continue: true, retry: false };
+  }
+
+  if (action === 'quit') {
+    return { continue: false, retry: false };
+  }
+
+  return { continue: true, retry: false };
+}
+
+/**
+ * Handle --create-project flow
+ * Creates a new GCP project with Firebase enabled
+ */
+async function handleCreateProject(
+  cwd: string,
+  options: {
+    name?: string;
+    region?: string;
+    template?: string;
+  }
+): Promise<void> {
+  // Print banner
+  console.log(chalk.cyan(BANNER));
+  console.log(chalk.bold('  Create a new GCP + Firebase project\n'));
+  console.log(chalk.gray('─'.repeat(75)));
+
+  // =========================================
+  // Step 1: Check CLIs
+  // =========================================
+  console.log(chalk.cyan.bold('\n  Step 1: Prerequisites\n'));
+
+  // Check gcloud
+  const gcloudSpinner = ora('Checking gcloud CLI...').start();
+  if (!(await isGcloudInstalled())) {
+    gcloudSpinner.fail('gcloud CLI not found');
+    console.log(chalk.red('\n  gcloud CLI is required.\n'));
+    console.log(chalk.gray('  Install: https://cloud.google.com/sdk/docs/install\n'));
+    return;
+  }
+
+  const authInfo = await checkGcloudAuth();
+  if (!authInfo) {
+    gcloudSpinner.fail('Not authenticated to GCP');
+    console.log(chalk.red('\n  Please authenticate first:\n'));
+    console.log(chalk.white('    gcloud auth login'));
+    console.log(chalk.white('    gcloud auth application-default login\n'));
+    return;
+  }
+  gcloudSpinner.succeed(`gcloud authenticated as ${chalk.green(authInfo.account)}`);
+
+  // Check firebase
+  const firebaseSpinner = ora('Checking Firebase CLI...').start();
+  if (!(await isFirebaseInstalled())) {
+    firebaseSpinner.fail('Firebase CLI not found');
+    console.log(chalk.red('\n  Firebase CLI is required for --create-project.\n'));
+    console.log(chalk.gray('  Install: npm install -g firebase-tools'));
+    console.log(chalk.gray('  Then run: firebase login\n'));
+    return;
+  }
+
+  const firebaseAuth = await checkFirebaseAuth();
+  if (!firebaseAuth) {
+    firebaseSpinner.fail('Not authenticated to Firebase');
+    console.log(chalk.red('\n  Please authenticate first:\n'));
+    console.log(chalk.white('    firebase login\n'));
+    return;
+  }
+  firebaseSpinner.succeed('Firebase CLI authenticated');
+
+  // =========================================
+  // Step 2: Project Details
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 2: Project Details\n'));
+
+  // Get project name
+  let projectName = options.name;
+  if (!projectName) {
+    const defaultName = path.basename(cwd).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const { name } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'name',
+        message: 'Project name:',
+        default: defaultName,
+        validate: (input: string) => {
+          if (!input) return 'Project name is required';
+          if (!/^[a-z][a-z0-9-]*$/.test(input)) {
+            return 'Must start with letter, only lowercase, numbers, hyphens';
+          }
+          return true;
+        },
+      },
+    ]);
+    projectName = name;
+  }
+
+  // Generate or get project ID
+  const suggestedId = generateProjectId(projectName);
+  const { projectId } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'projectId',
+      message: 'GCP Project ID:',
+      default: suggestedId,
+      validate: (input: string) => {
+        const result = isValidProjectId(input);
+        return result.valid || result.error || 'Invalid project ID';
+      },
+    },
+  ]);
+
+  // Get region
+  let region = options.region;
+  if (!region) {
+    const regions = getRegionsForProvider('gcp');
+    const { selectedRegion } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedRegion',
+        message: 'Region:',
+        choices: regions.map((r) => ({ name: r.name, value: r.value })),
+        default: 'us-central1',
+      },
+    ]);
+    region = selectedRegion;
+  }
+
+  console.log(chalk.gray(`\n  Project: ${chalk.white(projectName)}`));
+  console.log(chalk.gray(`  GCP ID:  ${chalk.white(projectId)}`));
+  console.log(chalk.gray(`  Region:  ${chalk.white(region)}`));
+
+  // =========================================
+  // Step 3: Create GCP Project
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 3: Create GCP Project\n'));
+
+  const createSpinner = ora('Creating GCP project...').start();
+  const createResult = await createProject(projectId, projectName);
+
+  if (!createResult.success) {
+    createSpinner.fail('Failed to create project');
+    console.log(chalk.red(`\n  ${createResult.error}\n`));
+    return;
+  }
+  createSpinner.succeed(`Created GCP project: ${chalk.green(projectId)}`);
+
+  // Set as active project
+  await setActiveProject(projectId);
+
+  // =========================================
+  // Step 4: Enable Billing (Manual Step)
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 4: Enable Billing\n'));
+
+  // Check if billing is already enabled
+  const billingSpinner = ora('Checking billing status...').start();
+  let billingEnabled = await isBillingEnabled(projectId);
+
+  if (billingEnabled) {
+    billingSpinner.succeed('Billing is already enabled');
+  } else {
+    billingSpinner.stop();
+
+    // Try to auto-link billing
+    const billingAccounts = await listBillingAccounts();
+
+    if (billingAccounts.length > 0) {
+      const { billingAction } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'billingAction',
+          message: 'Link a billing account:',
+          choices: [
+            ...billingAccounts.map((b) => ({
+              name: `${b.name} (${b.id})`,
+              value: b.id,
+            })),
+            new inquirer.Separator(),
+            { name: 'Configure manually in GCP Console', value: '__manual__' },
+          ],
+        },
+      ]);
+
+      if (billingAction !== '__manual__') {
+        const linkSpinner = ora('Linking billing account...').start();
+        const linked = await linkBillingAccount(projectId, billingAction);
+        if (linked) {
+          linkSpinner.succeed('Billing account linked');
+          billingEnabled = true;
+        } else {
+          linkSpinner.warn('Could not link billing account automatically');
+        }
+      }
+    }
+
+    // If still not enabled, manual step
+    if (!billingEnabled) {
+      const billingUrl = getBillingConsoleUrl(projectId);
+      const result = await waitForManualStep(
+        'Billing must be enabled to use GCP services.',
+        billingUrl,
+        'Link a billing account in the GCP Console, then continue.'
+      );
+
+      if (!result.continue) {
+        console.log(chalk.yellow('\n  Project created but billing not enabled.'));
+        console.log(chalk.gray(`  Resume setup later by running: stacksolo init --project-id ${projectId}\n`));
+        return;
+      }
+    }
+  }
+
+  // =========================================
+  // Step 5: Enable APIs
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 5: Enable GCP APIs\n'));
+
+  const apisSpinner = ora('Enabling required APIs...').start();
+  const apiResult = await enableApis(projectId, REQUIRED_APIS, (api, success) => {
+    if (success) {
+      apisSpinner.text = `Enabled ${api}`;
+    }
+  });
+
+  if (apiResult.failed.length === 0) {
+    apisSpinner.succeed(`Enabled ${apiResult.enabled.length} APIs`);
+  } else {
+    apisSpinner.warn(`Enabled ${apiResult.enabled.length} APIs, ${apiResult.failed.length} failed`);
+    console.log(chalk.yellow('  Failed APIs (may need billing):'));
+    for (const api of apiResult.failed) {
+      console.log(chalk.gray(`    - ${api}`));
+    }
+  }
+
+  // =========================================
+  // Step 6: Add Firebase
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 6: Add Firebase\n'));
+
+  const firebaseAddSpinner = ora('Adding Firebase to project...').start();
+  const firebaseResult = await addFirebaseToProject(projectId);
+
+  if (!firebaseResult.success) {
+    firebaseAddSpinner.fail('Failed to add Firebase');
+    console.log(chalk.red(`\n  ${firebaseResult.error}\n`));
+    console.log(chalk.gray('  You can add Firebase manually later:'));
+    console.log(chalk.white(`    firebase projects:addfirebase ${projectId}\n`));
+  } else {
+    firebaseAddSpinner.succeed('Firebase added to project');
+  }
+
+  // =========================================
+  // Step 7: Configure Firebase Auth (Manual Step)
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 7: Configure Firebase Authentication\n'));
+
+  const authUrl = getFirebaseAuthConsoleUrl(projectId);
+  const { needsAuth } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'needsAuth',
+      message: 'Do you need Firebase Authentication?',
+      default: true,
+    },
+  ]);
+
+  if (needsAuth) {
+    const authResult = await waitForManualStep(
+      'Enable authentication providers in Firebase Console.',
+      authUrl,
+      'Click "Get Started", then enable Email/Password, Google, or other providers.'
+    );
+
+    if (!authResult.continue) {
+      console.log(chalk.yellow('\n  You can configure auth later at:'));
+      console.log(chalk.gray(`  ${authUrl}\n`));
+    }
+  }
+
+  // =========================================
+  // Step 8: Fix Org Policy & Cloud Build
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 8: Configure Permissions\n'));
+
+  // Check org policy
+  const policySpinner = ora('Checking org policy...').start();
+  const policyStatus = await checkOrgPolicy(projectId);
+
+  if (policyStatus.hasRestriction && policyStatus.canOverride) {
+    policySpinner.text = 'Fixing org policy...';
+    const fixed = await fixOrgPolicy(projectId);
+    if (fixed) {
+      policySpinner.succeed('Org policy configured for public access');
+    } else {
+      policySpinner.warn('Could not update org policy - some features may be limited');
+    }
+  } else if (policyStatus.hasRestriction) {
+    policySpinner.warn('Org policy restricts public access - contact your admin');
+  } else {
+    policySpinner.succeed('No org policy restrictions');
+  }
+
+  // Fix Cloud Build permissions
+  const iamSpinner = ora('Configuring Cloud Build permissions...').start();
+  const iamResult = await checkAndFixCloudBuildPermissions(projectId);
+  if (iamResult.failed.length === 0) {
+    iamSpinner.succeed('Cloud Build permissions configured');
+  } else {
+    iamSpinner.warn('Some permissions could not be set');
+  }
+
+  // =========================================
+  // Step 9: Generate Config
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.cyan.bold('\n  Step 9: Generate Project Files\n'));
+
+  // Select project type
+  const { projectType } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'projectType',
+      message: 'What are you building?',
+      choices: PROJECT_TYPES.map((t) => ({
+        name: `${t.name}\n      ${chalk.gray(t.description)}`,
+        value: t.value,
+        short: t.name,
+      })),
+      default: 'ui-api',
+    },
+  ]);
+
+  let uiFramework: UIFramework | undefined;
+  if (projectType === 'ui-api' || projectType === 'ui-only') {
+    const { selectedFramework } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedFramework',
+        message: 'Which UI framework?',
+        choices: UI_FRAMEWORKS.map((f) => ({
+          name: `${f.name}\n      ${chalk.gray(f.description)}`,
+          value: f.value,
+          short: f.name,
+        })),
+        default: 'react',
+      },
+    ]);
+    uiFramework = selectedFramework;
+  }
+
+  // Generate config with Firebase/kernel settings
+  const generateSpinner = ora('Generating configuration...').start();
+
+  const config = generateConfig({
+    projectName,
+    gcpProjectId: projectId,
+    region,
+    projectType,
+    uiFramework,
+    needsDatabase: false,
+    needsBucket: false,
+  });
+
+  // Add gcpKernel config for Firebase Auth support
+  if (needsAuth) {
+    (config.project as Record<string, unknown>).gcpKernel = {
+      name: 'kernel',
+      firebaseProjectId: projectId,
+      storageBucket: `${projectId}.firebasestorage.app`,
+    };
+    // Add plugin
+    if (!config.project.plugins) {
+      config.project.plugins = [];
+    }
+    if (!config.project.plugins.includes('@stacksolo/plugin-gcp-kernel')) {
+      config.project.plugins.push('@stacksolo/plugin-gcp-kernel');
+    }
+  }
+
+  // Create .stacksolo directory
+  await createStacksoloDir(cwd, {
+    gcpProjectId: projectId,
+    orgPolicyFixed: !policyStatus.hasRestriction || policyStatus.canOverride,
+    apisEnabled: REQUIRED_APIS,
+  });
+
+  // Write config
+  await createConfigFile(cwd, config);
+
+  // Scaffold templates
+  const scaffoldedFiles = await scaffoldTemplates(cwd, projectType, uiFramework);
+  generateSpinner.succeed('Project files created');
+
+  // Register in global registry
+  try {
+    const registry = getRegistry();
+    const configPath = path.join(cwd, '.stacksolo', 'stacksolo.config.json');
+    await registry.registerProject({
+      name: projectName,
+      gcpProjectId: projectId,
+      region,
+      configPath,
+    });
+  } catch {
+    // Non-blocking
+  }
+
+  // =========================================
+  // Done!
+  // =========================================
+  console.log(chalk.gray('\n─'.repeat(75)));
+  console.log(chalk.bold.green('\n  Success! Your project is ready.\n'));
+
+  console.log(chalk.white('  Created:'));
+  console.log(chalk.green(`    ✓ GCP Project: ${projectId}`));
+  console.log(chalk.green(`    ✓ Firebase Project: ${projectId}`));
+  if (needsAuth) {
+    console.log(chalk.green('    ✓ Firebase Auth enabled'));
+  }
+  console.log(chalk.green('    ✓ .stacksolo/stacksolo.config.json'));
+
+  console.log(chalk.gray('\n  Next steps:\n'));
+  console.log(chalk.white('    1. Review your config:'));
+  console.log(chalk.cyan('       cat .stacksolo/stacksolo.config.json'));
+  console.log(chalk.white('    2. Install dependencies:'));
+  console.log(chalk.cyan('       npm install'));
+  console.log(chalk.white('    3. Start development:'));
+  console.log(chalk.cyan('       stacksolo dev'));
+  console.log(chalk.white('    4. Deploy to GCP:'));
+  console.log(chalk.cyan('       stacksolo deploy'));
+  console.log('');
+}
 
 /**
  * Handle remote template initialization
@@ -413,8 +916,16 @@ export const initCommand = new Command('init')
   .option('--skip-org-policy', 'Skip org policy check and fix')
   .option('--skip-apis', 'Skip enabling GCP APIs')
   .option('--list-templates', 'List available remote templates')
+  .option('--create-project', 'Create a new GCP + Firebase project')
   .action(async (options) => {
     const cwd = process.cwd();
+
+    // =========================================
+    // Handle --create-project
+    // =========================================
+    if (options.createProject) {
+      return await handleCreateProject(cwd, options);
+    }
 
     // =========================================
     // Handle --list-templates

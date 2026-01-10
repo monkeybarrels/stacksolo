@@ -921,6 +921,13 @@ function resolveCdktfConfig(
     functionIds.push(functionId);
     functionNames.push(functionName);
 
+    // Build environment variables
+    // Auto-inject GOOGLE_CLOUD_PROJECT when gcpKernel is configured (required for Firebase/Firestore)
+    const functionEnv: Record<string, string> = {
+      ...(hasGcpKernel ? { GOOGLE_CLOUD_PROJECT: projectInfo.gcpProjectId } : {}),
+      ...fn.env,
+    };
+
     resources.push({
       id: functionId,
       type: 'gcp-cdktf:cloud_function',
@@ -939,6 +946,7 @@ function resolveCdktfConfig(
         allowUnauthenticated: fn.allowUnauthenticated ?? true,
         projectId: projectInfo.gcpProjectId,
         projectName: projectInfo.name,
+        environmentVariables: Object.keys(functionEnv).length > 0 ? functionEnv : undefined,
       },
       dependsOn: [connectorId],
       network: network.name,

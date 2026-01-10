@@ -39,8 +39,22 @@ npm install -g stacksolo
 Initialize a new StackSolo project.
 
 ```bash
-stacksolo init
+stacksolo init [options]
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-n, --name <name>` | Project name |
+| `--project-id <id>` | GCP project ID |
+| `-r, --region <region>` | Region |
+| `-t, --template <template>` | Project template (function-api, ui-api, etc.) |
+| `-y, --yes` | Skip prompts and use defaults |
+| `--create-project` | Create a new GCP + Firebase project |
+| `--list-templates` | List available remote templates |
+| `--skip-org-policy` | Skip org policy check and fix |
+| `--skip-apis` | Skip enabling GCP APIs |
 
 **What it does:**
 1. Checks gcloud authentication
@@ -48,6 +62,37 @@ stacksolo init
 3. Enables required APIs
 4. Asks what type of app you're building
 5. Generates `.stacksolo/stacksolo.config.json`
+
+#### Create Project Mode (`--create-project`)
+
+Create a brand new GCP project with Firebase pre-configured:
+
+```bash
+stacksolo init --create-project
+```
+
+This interactive flow:
+1. Checks gcloud and firebase CLI authentication
+2. Prompts for project name and auto-generates a unique GCP project ID
+3. Creates the GCP project
+4. Guides you through enabling billing (with automatic linking if you have billing accounts)
+5. Enables all required GCP APIs
+6. Adds Firebase to the project
+7. Optionally configures Firebase Authentication (pauses for manual setup)
+8. Sets up org policies and Cloud Build permissions
+9. Generates your stacksolo config with kernel support
+
+**Example:**
+
+```bash
+# Create new project interactively
+stacksolo init --create-project
+
+# Create with pre-set name and region
+stacksolo init --create-project --name my-app --region us-central1
+```
+
+**Why use this?** Each stacksolo project gets its own isolated GCP/Firebase project. This avoids cross-project complexity and keeps billing/quotas separate.
 
 ### `stacksolo clone`
 

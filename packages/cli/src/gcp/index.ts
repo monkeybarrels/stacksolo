@@ -34,3 +34,18 @@ export {
   grantIamRole,
   REQUIRED_IAM_BINDINGS,
 } from './iam';
+
+export {
+  isFirebaseInstalled,
+  checkFirebaseAuth,
+  listFirebaseProjects,
+  hasFirebaseEnabled,
+  addFirebaseToProject,
+  getFirebaseAuthConsoleUrl,
+  getFirebaseConsoleUrl,
+  getBillingConsoleUrl,
+  isBillingEnabled,
+  generateProjectId,
+  isValidProjectId,
+  type FirebaseProject,
+} from './firebase';
