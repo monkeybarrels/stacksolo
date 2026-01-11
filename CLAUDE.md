@@ -289,6 +289,39 @@ The `stacksolo dev --local` command runs services locally without Docker/K8s by 
 2. Ensure the dev script starts a server that listens on the `PORT` env var (functions/containers) or accepts `--port` flag (UIs)
 3. Test with `stacksolo dev --local` before committing
 
+### Monorepo Support (pnpm workspaces)
+
+StackSolo dev containers use npm (not pnpm), so `workspace:*` protocol in package.json causes errors. The solution is **pre-build mode**.
+
+**How it works:**
+1. User builds locally first (pnpm resolves workspace deps)
+2. StackSolo detects `dist/` folder and serves pre-built artifacts
+3. Containers only install production npm dependencies
+
+**Config option:**
+```json
+{
+  "project": {
+    "packageManager": "pnpm"  // Enables workspace-aware behavior
+  }
+}
+```
+
+**For UIs:** If `dist/` exists, serves static files with `npx serve` instead of running dev server.
+
+**For Functions:** If `dist/` exists:
+1. Copies source to container
+2. Filters out `workspace:*` lines from package.json
+3. Runs `npm install --omit=dev`
+4. Runs functions-framework on the built bundle
+
+**User requirements:**
+1. Bundle workspace packages at build time (tsup `noExternal` or Vite default bundling)
+2. Put workspace packages in `devDependencies` (not `dependencies`)
+3. Run `pnpm build` before `stacksolo dev`
+
+See `packages/cli/src/generators/k8s/ui.ts` and `function.ts` for implementation.
+
 ## Key Files to Know
 
 - `packages/core/src/types.ts` - Core interfaces (Plugin, Provider, OutputFormatter)

@@ -3,7 +3,7 @@
  * Main entry point for generating Kubernetes manifests from stacksolo.config.json
  */
 
-import type { StackSoloConfig } from '@stacksolo/blueprint';
+import type { StackSoloConfig, PackageManager } from '@stacksolo/blueprint';
 import type { GeneratedManifest, K8sGeneratorResult, Runtime, UIFramework } from './types';
 import { generateNamespace } from './namespace';
 import { generateConfigMap } from './configmap';
@@ -44,6 +44,7 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
   const warnings: string[] = [];
 
   const projectName = config.project.name;
+  const packageManager = config.project.packageManager as PackageManager | undefined;
   const portAllocator = createPortAllocator();
 
   // Track service ports for ingress
@@ -129,6 +130,7 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
           },
           sourceDir,
           port,
+          packageManager,
         });
 
         manifests.push(manifest);
@@ -155,6 +157,7 @@ export function generateK8sManifests(options: GenerateK8sOptions): K8sGeneratorR
           },
           sourceDir,
           port,
+          packageManager,
         });
 
         manifests.push(manifest);

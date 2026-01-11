@@ -11,7 +11,14 @@ import type {
 } from './types';
 import { generateYamlDocument, combineYamlDocuments } from './yaml';
 import { sanitizeNamespaceName } from './namespace';
-import { getRuntimeConfig, isPythonRuntime } from './runtime';
+import {
+  getRuntimeConfig,
+  isPythonRuntime,
+  getInstallCommand,
+  getNodeImage,
+  getPackageManagerSetup,
+  type PackageManager,
+} from './runtime';
 
 export interface FunctionConfig {
   name: string;
@@ -26,10 +33,16 @@ export interface FunctionManifestOptions {
   function: FunctionConfig;
   sourceDir: string;
   port: number;
+  packageManager?: PackageManager;
 }
 
 /**
  * Generate Deployment and Service manifests for a function
+ *
+ * Uses pre-build mode for monorepo compatibility:
+ * - If dist/ folder exists, run the built bundle with functions-framework
+ * - This avoids needing to install devDependencies which may have workspace:* refs
+ * - Run your build locally first (pnpm build) before stacksolo dev
  */
 export function generateFunctionManifests(options: FunctionManifestOptions): GeneratedManifest {
   const namespace = sanitizeNamespaceName(options.projectName);
@@ -37,40 +50,34 @@ export function generateFunctionManifests(options: FunctionManifestOptions): Gen
   const runtimeConfig = getRuntimeConfig(options.function.runtime, options.function.entryPoint);
   const isPython = isPythonRuntime(options.function.runtime);
 
-  // Build command that copies source and installs fresh Linux deps
-  // This avoids platform-specific native module issues (macOS node_modules in Linux container)
-  // For Node.js dev, prefer npm run dev which handles TypeScript via tsx
-  // Fall back to direct functions-framework if no dev script exists
-  const runCmd = isPython
-    ? runtimeConfig.command.join(' ')
-    : 'npm run dev 2>/dev/null || ' + runtimeConfig.command.join(' ');
+  let containerCommand: string[];
+  let containerImage: string;
 
-  const containerCommand = isPython
-    ? [
-        'sh',
-        '-c',
-        [
-          'cp -r /source/* /app/ 2>/dev/null || true',
-          'cd /app',
-          'pip install -r requirements.txt 2>/dev/null || true',
-          'pip install functions-framework',
-          runCmd,
-        ].join(' && '),
-      ]
-    : [
-        'sh',
-        '-c',
-        [
-          // Copy source files to /app, excluding node_modules (macOS binaries don't work in Linux)
-          'cd /source',
-          'find . -maxdepth 1 ! -name node_modules ! -name . -exec cp -r {} /app/ \\;',
-          'cd /app',
-          // Always install fresh for Linux platform
-          'npm install',
-          // Run the dev server
-          runCmd,
-        ].join(' && '),
-      ];
+  if (isPython) {
+    // Python: standard install flow (no workspace:* issues)
+    containerImage = runtimeConfig.image;
+    containerCommand = [
+      'sh',
+      '-c',
+      [
+        'cp -r /source/* /app/ 2>/dev/null || true',
+        'cd /app',
+        'pip install -r requirements.txt 2>/dev/null || true',
+        'pip install functions-framework',
+        runtimeConfig.command.join(' '),
+      ].join(' && '),
+    ];
+  } else {
+    // Node.js: pre-build mode - check for dist/ folder first
+    containerImage = 'node:20-slim';
+    const functionsFrameworkCmd = runtimeConfig.command.join(' ');
+
+    // Pre-build mode: if dist/ exists, filter workspace refs from package.json, install prod deps, run
+    // The grep -v removes lines with "workspace:" to prevent npm errors
+    const command = 'cd /source && if [ -d dist ]; then echo "Running pre-built function from dist/" && find . -maxdepth 1 ! -name node_modules ! -name . -exec cp -r {} /app/ \\; && cd /app && grep -v "workspace:" package.json > package.json.tmp && mv package.json.tmp package.json && npm install --omit=dev && ' + functionsFrameworkCmd + '; else echo "No dist/ folder. Trying dev mode..." && find . -maxdepth 1 ! -name node_modules ! -name . -exec cp -r {} /app/ \\; && cd /app && npm install && (npm run dev 2>/dev/null || ' + functionsFrameworkCmd + '); fi';
+
+    containerCommand = ['sh', '-c', command];
+  }
 
   const labels = {
     'app.kubernetes.io/name': functionName,
@@ -106,7 +113,7 @@ export function generateFunctionManifests(options: FunctionManifestOptions): Gen
           containers: [
             {
               name: functionName,
-              image: runtimeConfig.image,
+              image: containerImage,
               command: containerCommand,
               ports: [
                 {

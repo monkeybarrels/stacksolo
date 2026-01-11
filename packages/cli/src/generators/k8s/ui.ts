@@ -11,7 +11,7 @@ import type {
 } from './types';
 import { generateYamlDocument, combineYamlDocuments } from './yaml';
 import { sanitizeNamespaceName } from './namespace';
-import { getFrameworkConfig } from './runtime';
+import { type PackageManager } from './runtime';
 
 export interface UIConfig {
   name: string;
@@ -23,15 +23,24 @@ export interface UIManifestOptions {
   ui: UIConfig;
   sourceDir: string;
   port: number;
+  packageManager?: PackageManager;
 }
 
 /**
  * Generate Deployment and Service manifests for a UI application
+ *
+ * Uses pre-build mode for monorepo compatibility:
+ * - If dist/ folder exists, serve static files with npx serve
+ * - This avoids needing to install devDependencies which may have workspace:* refs
+ * - Run your build locally first (pnpm build) before stacksolo dev
  */
 export function generateUIManifests(options: UIManifestOptions): GeneratedManifest {
   const namespace = sanitizeNamespaceName(options.projectName);
   const uiName = sanitizeName(options.ui.name);
-  const frameworkConfig = getFrameworkConfig(options.ui.framework, options.port);
+
+  // Pre-build mode: serve static files from dist/ folder
+  // This works with monorepos because the build already happened locally with workspace deps resolved
+  const command = 'if [ -d /source/dist ]; then echo "Serving pre-built static files from dist/" && npx serve /source/dist -l ' + options.port + ' -s; else echo "No dist/ folder found. Running dev server..." && cd /source && npm install && npm run dev -- --host 0.0.0.0 --port ' + options.port + '; fi';
 
   const labels = {
     'app.kubernetes.io/name': uiName,
@@ -68,21 +77,7 @@ export function generateUIManifests(options: UIManifestOptions): GeneratedManife
             {
               name: uiName,
               image: 'node:20-slim',
-              // Copy source (excluding node_modules) to working directory, then install fresh Linux deps
-              command: [
-                'sh',
-                '-c',
-                [
-                  // Copy source files to /app, excluding node_modules (macOS binaries don't work in Linux)
-                  'cd /source',
-                  'find . -maxdepth 1 ! -name node_modules ! -name . -exec cp -r {} /app/ \\;',
-                  'cd /app',
-                  // Always install fresh for Linux platform
-                  'npm install',
-                  // Run the dev server
-                  frameworkConfig.command.join(' '),
-                ].join(' && '),
-              ],
+              command: ['sh', '-c', command],
               ports: [
                 {
                   containerPort: options.port,

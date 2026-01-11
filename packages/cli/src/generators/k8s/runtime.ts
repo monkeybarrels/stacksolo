@@ -115,3 +115,60 @@ export function isNodeRuntime(runtime: Runtime): boolean {
 export function isPythonRuntime(runtime: Runtime): boolean {
   return runtime.startsWith('python');
 }
+
+/**
+ * Package manager type (re-export from blueprint for convenience)
+ */
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
+
+/**
+ * Get the install command for a package manager
+ * Returns production-only install to skip devDependencies (which may have workspace:* refs)
+ */
+export function getInstallCommand(packageManager: PackageManager = 'npm'): string {
+  switch (packageManager) {
+    case 'pnpm':
+      // --prod skips devDependencies, --ignore-workspace prevents workspace:* resolution errors
+      return 'pnpm install --prod --ignore-workspace';
+    case 'yarn':
+      return 'yarn install --production';
+    case 'bun':
+      return 'bun install --production';
+    case 'npm':
+    default:
+      // --omit=dev skips devDependencies (which may contain workspace:* refs)
+      return 'npm install --omit=dev';
+  }
+}
+
+/**
+ * Get the container image for a package manager
+ * Some package managers need different base images
+ */
+export function getNodeImage(packageManager: PackageManager = 'npm'): string {
+  switch (packageManager) {
+    case 'bun':
+      return 'oven/bun:1-slim';
+    case 'pnpm':
+    case 'yarn':
+    case 'npm':
+    default:
+      return 'node:20-slim';
+  }
+}
+
+/**
+ * Get any setup commands needed before install (e.g., enabling corepack for pnpm/yarn)
+ */
+export function getPackageManagerSetup(packageManager: PackageManager = 'npm'): string | null {
+  switch (packageManager) {
+    case 'pnpm':
+      return 'corepack enable && corepack prepare pnpm@latest --activate';
+    case 'yarn':
+      return 'corepack enable';
+    case 'bun':
+    case 'npm':
+    default:
+      return null;
+  }
+}

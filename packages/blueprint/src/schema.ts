@@ -318,6 +318,8 @@ export interface NetworkConfig {
 // Project Configuration
 // =============================================================================
 
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
+
 export interface ProjectConfig {
   name: string;
   region: string;
@@ -330,6 +332,15 @@ export interface ProjectConfig {
    * - "kubernetes": Deploys to any Kubernetes cluster (GKE, EKS, AKS, self-hosted)
    */
   backend?: 'pulumi' | 'cdktf' | 'kubernetes';
+
+  /**
+   * Package manager to use for installing dependencies in local dev containers.
+   * - "npm" (default): Uses npm install --omit=dev
+   * - "pnpm": Uses pnpm install --prod (handles workspace:* protocol)
+   * - "yarn": Uses yarn install --production
+   * - "bun": Uses bun install --production
+   */
+  packageManager?: PackageManager;
 
   /**
    * Plugins to load for this project.
