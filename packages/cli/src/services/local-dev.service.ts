@@ -182,6 +182,7 @@ function spawnService(
     FIRESTORE_EMULATOR_HOST: 'localhost:8080',
     FIREBASE_AUTH_EMULATOR_HOST: 'localhost:9099',
     PUBSUB_EMULATOR_HOST: 'localhost:8085',
+    FIREBASE_STORAGE_EMULATOR_HOST: 'localhost:9199',
   };
 
   // Set Firebase project ID if configured (for token validation)
@@ -242,7 +243,7 @@ async function startFirebaseEmulators(
   try {
     const proc = spawn(
       'firebase',
-      ['emulators:start', '--only', 'firestore,auth', '--project', projectId],
+      ['emulators:start', '--only', 'firestore,auth,storage', '--project', projectId],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
@@ -423,6 +424,7 @@ export async function startLocalEnvironment(options: {
     console.log(`    ${chalk.yellow('●')} Firebase UI          ${chalk.cyan('http://localhost:4000')}`);
     console.log(`    ${chalk.yellow('●')} Firestore            ${chalk.gray('localhost:8080')}`);
     console.log(`    ${chalk.yellow('●')} Firebase Auth        ${chalk.gray('localhost:9099')}`);
+    console.log(`    ${chalk.yellow('●')} Firebase Storage     ${chalk.gray('localhost:9199')}`);
   }
 
   console.log(chalk.bold('\n  Commands:\n'));
