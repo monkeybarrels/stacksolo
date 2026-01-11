@@ -174,6 +174,7 @@ function spawnService(
   manager: LocalProcessManager,
   firebaseProjectId?: string
 ): ChildProcess | null {
+  // Start with process.env but override critical vars to ensure consistency
   const env: Record<string, string> = {
     ...process.env,
     PORT: String(service.port),
@@ -183,17 +184,15 @@ function spawnService(
     FIREBASE_AUTH_EMULATOR_HOST: 'localhost:9099',
     PUBSUB_EMULATOR_HOST: 'localhost:8085',
     FIREBASE_STORAGE_EMULATOR_HOST: 'localhost:9199',
+    // Clear any existing project ID vars from shell that might conflict
+    ...(firebaseProjectId ? {
+      FIREBASE_PROJECT_ID: firebaseProjectId,
+      GCLOUD_PROJECT: firebaseProjectId,
+      GOOGLE_CLOUD_PROJECT: firebaseProjectId,
+      GCP_PROJECT_ID: firebaseProjectId,
+      VITE_FIREBASE_PROJECT_ID: firebaseProjectId,
+    } : {}),
   };
-
-  // Set Firebase project ID if configured (for token validation)
-  // Also set VITE_ prefix for Vite-based UIs
-  // GCLOUD_PROJECT is used by Firebase Admin SDK for project detection
-  if (firebaseProjectId) {
-    env.FIREBASE_PROJECT_ID = firebaseProjectId;
-    env.GCLOUD_PROJECT = firebaseProjectId;
-    env.GOOGLE_CLOUD_PROJECT = firebaseProjectId;
-    env.VITE_FIREBASE_PROJECT_ID = firebaseProjectId;
-  }
 
   // For UIs, we need to pass port via CLI args since Vite doesn't use PORT env
   const args = service.type === 'ui'
