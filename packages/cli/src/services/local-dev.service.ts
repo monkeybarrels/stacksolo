@@ -187,8 +187,11 @@ function spawnService(
 
   // Set Firebase project ID if configured (for token validation)
   // Also set VITE_ prefix for Vite-based UIs
+  // GCLOUD_PROJECT is used by Firebase Admin SDK for project detection
   if (firebaseProjectId) {
     env.FIREBASE_PROJECT_ID = firebaseProjectId;
+    env.GCLOUD_PROJECT = firebaseProjectId;
+    env.GOOGLE_CLOUD_PROJECT = firebaseProjectId;
     env.VITE_FIREBASE_PROJECT_ID = firebaseProjectId;
   }
 
