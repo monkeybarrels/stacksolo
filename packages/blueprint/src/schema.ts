@@ -190,6 +190,21 @@ export interface WebAdminConfig {
 }
 
 /**
+ * Firebase Emulators Configuration
+ *
+ * Configure Firebase emulator behavior for local development.
+ * Supports data persistence between dev sessions.
+ */
+export interface FirebaseEmulatorsConfig {
+  /** Enable Firebase emulators (default: true when gcpKernel is configured) */
+  enabled?: boolean;
+  /** Path to export emulator data on exit (e.g., ".stacksolo/emulator-data") */
+  exportOnExit?: string;
+  /** Path to import emulator data on start (e.g., ".stacksolo/emulator-data") */
+  importOnStart?: string;
+}
+
+/**
  * Kubernetes Backend Configuration
  *
  * Configuration for deploying to any Kubernetes cluster (GKE, EKS, AKS, self-hosted).
@@ -365,6 +380,9 @@ export interface ProjectConfig {
 
   // Web Admin UI (optional local dev dashboard)
   webAdmin?: WebAdminConfig;
+
+  // Firebase Emulators (local dev data persistence)
+  firebaseEmulators?: FirebaseEmulatorsConfig;
 
   // Zero Trust configurations (IAP + dynamic access control)
   zeroTrust?: ZeroTrustConfig;

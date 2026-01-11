@@ -232,18 +232,55 @@ function spawnService(
 }
 
 /**
+ * Check if a directory exists
+ */
+async function directoryExists(dirPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(dirPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+interface FirebaseEmulatorOptions {
+  projectId: string;
+  exportOnExit?: string;
+  importOnStart?: string;
+}
+
+/**
  * Start Firebase emulators
  */
 async function startFirebaseEmulators(
   manager: LocalProcessManager,
-  projectId: string = 'demo-local'
+  options: FirebaseEmulatorOptions
 ): Promise<ChildProcess | null> {
   const spinner = ora('Starting Firebase emulators...').start();
 
   try {
+    // Build args array
+    const args = ['emulators:start', '--only', 'firestore,auth,storage', '--project', options.projectId];
+
+    // Add import flag if path exists
+    if (options.importOnStart) {
+      const importPath = path.resolve(process.cwd(), options.importOnStart);
+      if (await directoryExists(importPath)) {
+        args.push('--import', importPath);
+        console.log(chalk.gray(`  Importing emulator data from: ${options.importOnStart}`));
+      }
+    }
+
+    // Add export-on-exit flag
+    if (options.exportOnExit) {
+      const exportPath = path.resolve(process.cwd(), options.exportOnExit);
+      args.push('--export-on-exit', exportPath);
+      console.log(chalk.gray(`  Will export emulator data to: ${options.exportOnExit}`));
+    }
+
     const proc = spawn(
       'firebase',
-      ['emulators:start', '--only', 'firestore,auth,storage', '--project', projectId],
+      args,
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
@@ -391,9 +428,16 @@ export async function startLocalEnvironment(options: {
   const firebaseProjectId = config.project.gcpKernel?.firebaseProjectId
     || config.project.gcpProjectId;
 
+  // Get Firebase emulator config
+  const emulatorConfig = config.project.firebaseEmulators;
+
   // Start Firebase emulators if enabled
-  if (options.includeEmulators !== false) {
-    const emulatorProc = await startFirebaseEmulators(manager, firebaseProjectId);
+  if (options.includeEmulators !== false && emulatorConfig?.enabled !== false) {
+    const emulatorProc = await startFirebaseEmulators(manager, {
+      projectId: firebaseProjectId || 'demo-local',
+      exportOnExit: emulatorConfig?.exportOnExit,
+      importOnStart: emulatorConfig?.importOnStart,
+    });
     if (emulatorProc) {
       manager.processes.set('firebase-emulator', emulatorProc);
     }
@@ -419,12 +463,19 @@ export async function startLocalEnvironment(options: {
     console.log(`    ${service.color('●')} ${service.name.padEnd(20)} ${chalk.cyan(url)}`);
   }
 
-  if (options.includeEmulators !== false) {
+  if (options.includeEmulators !== false && emulatorConfig?.enabled !== false) {
     console.log(chalk.bold('\n  Emulators:\n'));
     console.log(`    ${chalk.yellow('●')} Firebase UI          ${chalk.cyan('http://localhost:4000')}`);
     console.log(`    ${chalk.yellow('●')} Firestore            ${chalk.gray('localhost:8080')}`);
     console.log(`    ${chalk.yellow('●')} Firebase Auth        ${chalk.gray('localhost:9099')}`);
     console.log(`    ${chalk.yellow('●')} Firebase Storage     ${chalk.gray('localhost:9199')}`);
+    if (emulatorConfig?.exportOnExit) {
+      console.log(chalk.bold('\n  Data Persistence:\n'));
+      console.log(`    ${chalk.green('●')} Export on exit       ${chalk.gray(emulatorConfig.exportOnExit)}`);
+      if (emulatorConfig.importOnStart) {
+        console.log(`    ${chalk.green('●')} Import on start      ${chalk.gray(emulatorConfig.importOnStart)}`);
+      }
+    }
   }
 
   console.log(chalk.bold('\n  Commands:\n'));
