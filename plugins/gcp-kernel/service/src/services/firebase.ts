@@ -6,6 +6,7 @@
  */
 
 import admin from 'firebase-admin';
+import { getFirestore } from 'firebase-admin/firestore';
 import { OAuth2Client } from 'google-auth-library';
 
 let initialized = false;
@@ -45,6 +46,12 @@ export function initializeFirebase(): void {
     admin.initializeApp({
       projectId: firebaseProjectId,
     });
+
+    // Configure Firestore to ignore undefined values
+    // This prevents errors when documents have optional fields
+    const db = getFirestore();
+    db.settings({ ignoreUndefinedProperties: true });
+
     initialized = true;
     console.log(`Firebase Admin initialized for project: ${firebaseProjectId}`);
   } catch (error) {
