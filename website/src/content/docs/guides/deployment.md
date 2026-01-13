@@ -229,6 +229,68 @@ stacksolo destroy --force
 
 **Warning:** This permanently deletes all resources including databases.
 
+## Firebase Hosting for Apps with Firebase Auth
+
+If your app uses Firebase Authentication with social providers (Google, Apple, etc.), you should use Firebase Hosting instead of GCS buckets. This avoids cross-origin cookie issues that cause "missing initial state" errors.
+
+### Configure Firebase Hosting
+
+1. Set `hosting: "firebase"` in your UI config:
+
+```json
+{
+  "networks": [{
+    "name": "main",
+    "uis": [{
+      "name": "web",
+      "hosting": "firebase",
+      "sourceDir": "apps/web"
+    }]
+  }]
+}
+```
+
+2. Create a `firebase.json` in your project root:
+
+```json
+{
+  "hosting": {
+    "public": "apps/web/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ]
+  }
+}
+```
+
+3. Set `authDomain` to your Firebase Hosting domain in your app:
+
+```env
+# .env.production
+VITE_FIREBASE_AUTH_DOMAIN=your-project.web.app
+```
+
+4. Deploy:
+
+```bash
+stacksolo deploy
+```
+
+StackSolo will run `firebase deploy --only hosting` after the Terraform apply completes.
+
+### Prerequisites
+
+- Firebase CLI installed: `npm install -g firebase-tools`
+- Logged in to Firebase: `firebase login`
+- Firebase project initialized: `firebase init`
+
+### Why Firebase Hosting?
+
+Modern browsers block third-party cookies/storage. When your app is hosted on a different domain than Firebase's `authDomain`, OAuth redirects fail with "missing initial state" errors. Firebase Hosting ensures same-origin hosting, avoiding these issues.
+
+---
+
 ## Troubleshooting
 
 ### "Permission denied"

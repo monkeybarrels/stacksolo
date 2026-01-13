@@ -618,9 +618,15 @@
       "type": "object",
       "properties": {
         "name": { "type": "string" },
+        "hosting": {
+          "type": "string",
+          "enum": ["gcs", "firebase"],
+          "default": "gcs",
+          "description": "Hosting provider: 'gcs' for Cloud Storage bucket (default), 'firebase' for Firebase Hosting (recommended for apps using Firebase Auth)"
+        },
         "sourceDir": {
           "type": "string",
-          "description": "Source directory (defaults to 'ui/<name>')"
+          "description": "Source directory (defaults to 'apps/<name>')"
         },
         "framework": {
           "type": "string",

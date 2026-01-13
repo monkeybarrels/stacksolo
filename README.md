@@ -113,7 +113,8 @@ See [Configuration Guide](https://stacksolo.dev/guides/configuration/) for all o
 - Cloud Functions (Gen2)
 - Cloud Run
 - Cloud SQL (PostgreSQL, MySQL)
-- Cloud Storage
+- Cloud Storage (static hosting with CDN)
+- Firebase Hosting (for apps with Firebase Auth)
 - Memorystore (Redis)
 - HTTP(S) Load Balancer
 - VPC Networks

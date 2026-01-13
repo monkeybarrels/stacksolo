@@ -141,7 +141,23 @@ export async function deployConfig(
     const uiResources = resolved.resources.filter(r => r.type === 'gcp-cdktf:storage_website');
     const gcpKernelResources = resolved.resources.filter(r => r.type === 'gcp-kernel:gcp_kernel');
 
-    if (functionResources.length === 0 && containerResources.length === 0 && uiResources.length === 0 && gcpKernelResources.length === 0) {
+    // Collect Firebase-hosted UIs from config (not CDKTF resources - deployed via Firebase CLI)
+    const firebaseUis: Array<{ name: string; sourceDir: string; buildCommand: string; buildOutputDir?: string; framework?: string }> = [];
+    for (const network of config.project.networks || []) {
+      for (const ui of network.uis || []) {
+        if (ui.hosting === 'firebase') {
+          firebaseUis.push({
+            name: ui.name,
+            sourceDir: ui.sourceDir || `apps/${ui.name}`,
+            buildCommand: ui.buildCommand || 'npm run build',
+            buildOutputDir: ui.buildOutputDir,
+            framework: ui.framework,
+          });
+        }
+      }
+    }
+
+    if (functionResources.length === 0 && containerResources.length === 0 && uiResources.length === 0 && gcpKernelResources.length === 0 && firebaseUis.length === 0) {
       throw new Error('CDKTF backend requires at least one cloud_function, cloud_run, gcp_kernel, or UI resource');
     }
 
@@ -755,6 +771,119 @@ terraform {
         await execAsync(`gsutil -m rsync -r -d "${distPath}" gs://${bucketName}`, { timeout: 300000 });
 
         log(`UI ${uiName} deployed to gs://${bucketName}`);
+      }
+    }
+
+    // Deploy Firebase-hosted UIs
+    if (firebaseUis.length > 0 && !preview && !destroy) {
+      log('Deploying Firebase-hosted UIs...');
+
+      for (const ui of firebaseUis) {
+        const uiName = ui.name;
+        const sourceDir = path.resolve(process.cwd(), ui.sourceDir);
+        const buildCommand = ui.buildCommand;
+        const buildOutputDir = ui.buildOutputDir;
+        let framework = ui.framework;
+
+        log(`Processing Firebase UI: ${uiName}`);
+
+        // Check if source directory exists
+        try {
+          await fs.access(sourceDir);
+        } catch {
+          throw new Error(`Firebase UI source directory not found: ${sourceDir}`);
+        }
+
+        // Detect framework if not specified
+        if (!framework) {
+          const packageJsonPath = path.join(sourceDir, 'package.json');
+          try {
+            const pkgContent = await fs.readFile(packageJsonPath, 'utf-8');
+            const pkg = JSON.parse(pkgContent);
+            if (pkg.dependencies?.['@sveltejs/kit'] || pkg.devDependencies?.['@sveltejs/kit']) {
+              framework = 'sveltekit';
+            } else if (pkg.dependencies?.vue || pkg.devDependencies?.vue) {
+              framework = 'vue';
+            } else if (pkg.dependencies?.react || pkg.devDependencies?.react) {
+              framework = 'react';
+            }
+          } catch {
+            framework = 'html';
+          }
+        }
+
+        // Determine build output directory
+        let distPath: string;
+        if (buildOutputDir) {
+          distPath = path.join(sourceDir, buildOutputDir);
+        } else if (framework === 'sveltekit') {
+          distPath = path.join(sourceDir, 'build');
+        } else {
+          distPath = path.join(sourceDir, 'dist');
+        }
+
+        // Build UI if not plain HTML
+        if (framework !== 'html') {
+          // Check if dist exists and is recent (skip build if already built)
+          let needsBuild = true;
+          try {
+            const distStat = await fs.stat(distPath);
+            const sourcePackageJson = path.join(sourceDir, 'package.json');
+            const sourceStat = await fs.stat(sourcePackageJson);
+            // Skip build if dist is newer than package.json (likely already built)
+            if (distStat.mtimeMs > sourceStat.mtimeMs) {
+              log(`Using existing build for ${uiName}`);
+              needsBuild = false;
+            }
+          } catch {
+            // dist doesn't exist, need to build
+          }
+
+          if (needsBuild) {
+            log(`Building ${uiName} (${framework})...`);
+            await execAsync(buildCommand, { cwd: sourceDir, timeout: 120000 });
+          }
+        } else {
+          distPath = sourceDir;
+        }
+
+        // Check for firebase.json in project root (Firebase Hosting config)
+        const firebaseJsonPath = path.join(process.cwd(), 'firebase.json');
+        try {
+          await fs.access(firebaseJsonPath);
+        } catch {
+          throw new Error(
+            `firebase.json not found in project root. Firebase Hosting requires a firebase.json config file.\n` +
+            `Run 'firebase init hosting' to create one, or add hosting config manually.`
+          );
+        }
+
+        // Deploy to Firebase Hosting
+        log(`Deploying ${uiName} to Firebase Hosting...`);
+        try {
+          const result = await execStreaming('firebase deploy --only hosting', {
+            cwd: process.cwd(),
+            onOutput: verboseLog,
+            timeout: 300000,
+          });
+          if (result.exitCode !== 0) {
+            throw new Error(result.stderr || 'Firebase deploy failed');
+          }
+
+          // Extract hosting URL from output
+          const urlMatch = result.stdout.match(/Hosting URL: (https:\/\/[^\s]+)/);
+          const hostingUrl = urlMatch ? urlMatch[1] : 'https://<project>.web.app';
+          log(`UI ${uiName} deployed to ${hostingUrl}`);
+        } catch (firebaseError) {
+          const errMsg = firebaseError instanceof Error ? firebaseError.message : String(firebaseError);
+          if (errMsg.includes('command not found') || errMsg.includes('firebase: not found')) {
+            throw new Error(
+              `Firebase CLI not found. Install it with: npm install -g firebase-tools\n` +
+              `Then authenticate with: firebase login`
+            );
+          }
+          throw firebaseError;
+        }
       }
     }
 

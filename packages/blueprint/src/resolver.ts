@@ -953,11 +953,13 @@ function resolveCdktfConfig(
     });
   }
 
-  // 4. Static UI Sites (Storage Website + CDN)
+  // 4. Static UI Sites (Storage Website + CDN) - skip Firebase-hosted UIs
   const uiIds: string[] = [];
   const uiNames: string[] = [];
+  const gcsUis = uis.filter(ui => ui.hosting !== 'firebase');
+  const firebaseUis = uis.filter(ui => ui.hosting === 'firebase');
 
-  for (const ui of uis) {
+  for (const ui of gcsUis) {
     const uiName = `${projectInfo.name}-${ui.name}`;
     const uiId = `ui-${ui.name}`;
     uiIds.push(uiId);
@@ -984,8 +986,16 @@ function resolveCdktfConfig(
     });
   }
 
+  // Firebase-hosted UIs are tracked but not created as CDKTF resources
+  // They will be deployed via `firebase deploy --only hosting` in deploy command
+  for (const ui of firebaseUis) {
+    const uiId = `ui-${ui.name}`;
+    uiIds.push(uiId);
+    uiNames.push(`${projectInfo.name}-${ui.name}`);
+  }
+
   // 7. Load Balancer (HTTP) - routes to functions, containers, and UIs based on loadBalancer config
-  // Build default routes if none specified
+  // Build default routes if none specified (only GCS-hosted UIs can be load-balanced)
   let routes: LoadBalancerRouteConfig[];
   if (network.loadBalancer?.routes) {
     routes = network.loadBalancer.routes;
@@ -994,17 +1004,18 @@ function resolveCdktfConfig(
     routes = [{ path: '/*', backend: containers[0].name }];
   } else if (functions.length > 0) {
     routes = [{ path: '/*', backend: functions[0].name }];
-  } else if (uis.length > 0) {
-    routes = [{ path: '/*', backend: uis[0].name }];
+  } else if (gcsUis.length > 0) {
+    // Only GCS-hosted UIs can be load-balanced (Firebase Hosting has its own CDN)
+    routes = [{ path: '/*', backend: gcsUis[0].name }];
   } else {
     routes = [];
   }
 
   // Map routes to function, container, or UI backends
   const mappedRoutes = routes.map((r: LoadBalancerRouteConfig) => {
-    // Check if backend is a UI
-    const isUI = uis.some(ui => ui.name === r.backend);
-    if (isUI) {
+    // Check if backend is a GCS-hosted UI (Firebase UIs can't be load-balanced)
+    const isGcsUI = gcsUis.some(ui => ui.name === r.backend);
+    if (isGcsUI) {
       return {
         path: r.path,
         uiName: `${projectInfo.name}-${r.backend}`,

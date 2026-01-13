@@ -3,6 +3,42 @@
 
 This file provides context for Claude (AI assistant) when working on this codebase.
 
+## MANDATORY: Documentation Requirements for ALL Changes
+
+**THIS IS NON-NEGOTIABLE. Every feature, config change, or code modification MUST include documentation updates.**
+
+### Required Documentation Updates
+
+| Change Type | Required Updates |
+|-------------|------------------|
+| **New feature** | Website docs, README.md, config-schema.md (if config), this CLAUDE.md |
+| **New config option** | `schema/config.json`, `website/src/content/docs/reference/config-schema.md`, relevant guide pages |
+| **New CLI command** | `website/src/content/docs/reference/cli.md`, README.md if major |
+| **New plugin** | Plugin README.md, plugin CLAUDE.md, website plugin page, sidebar in astro.config.mjs |
+| **Modified behavior** | Update all docs that reference the changed behavior |
+| **Bug fix with user impact** | Update relevant docs if behavior description changes |
+
+### Documentation Checklist (VERIFY BEFORE COMPLETING ANY PR)
+
+- [ ] `schema/config.json` updated if config options changed
+- [ ] `website/src/content/docs/` updated with feature documentation
+- [ ] `README.md` updated if it's a user-facing feature
+- [ ] This `CLAUDE.md` updated if architecture or patterns changed
+- [ ] Plugin `CLAUDE.md` updated if plugin internals changed
+- [ ] Examples are copy-paste ready and tested
+- [ ] Cross-references between related docs added
+
+### Why This Matters
+
+- Users rely on docs to understand features
+- AI assistants (including Claude) use CLAUDE.md files for context
+- Outdated docs cause support burden and user frustration
+- Documentation debt compounds quickly
+
+**If you skip documentation, you are creating technical debt. Do not skip this step.**
+
+---
+
 ## Project Overview
 
 StackSolo is a CLI tool that helps solo developers scaffold and deploy cloud infrastructure using CDKTF (Terraform). It's an open source project under MonkeyBarrels (monkeybarrels.com).

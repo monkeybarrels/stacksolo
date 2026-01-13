@@ -46,8 +46,11 @@ The `stacksolo.config.json` file (located in `.stacksolo/`) defines your entire 
       }],
       "uis": [{
         "name": "string",
+        "hosting": "gcs | firebase",
         "framework": "vue",
-        "sourceDir": "string"
+        "sourceDir": "string",
+        "buildCommand": "npm run build",
+        "buildOutputDir": "dist"
       }],
       "containers": [{
         "name": "string",
@@ -259,27 +262,72 @@ Static site / frontend deployments.
 ### ui.name
 **Type:** `string` (required)
 
-UI name. Source code expected in `ui/<name>/`.
+UI name. Source code expected in `apps/<name>/`.
+
+### ui.hosting
+**Type:** `"gcs" | "firebase"` (default: `"gcs"`)
+
+Hosting provider:
+- `gcs` - Cloud Storage bucket with CDN (default). Good for static sites and admin panels.
+- `firebase` - Firebase Hosting. **Recommended for apps using Firebase Auth** (avoids cross-origin cookie issues with OAuth).
+
+:::tip[When to use Firebase Hosting]
+If your app uses Firebase Authentication with social providers (Google, Facebook, etc.), use `hosting: "firebase"`. This avoids the "missing initial state" error that occurs when the app domain doesn't match the Firebase `authDomain`.
+:::
 
 ### ui.framework
-**Type:** `string` (default: `"vue"`)
+**Type:** `string` (default: auto-detected)
 
-Framework: `vue`, `nuxt`, `react`, `next`, `svelte`, `sveltekit`.
+Framework: `vue`, `react`, `sveltekit`, `html`.
 
 ### ui.sourceDir
 **Type:** `string` (optional)
 
-Custom source directory. Defaults to `ui/<name>`.
+Custom source directory. Defaults to `apps/<name>`.
+
+### ui.buildCommand
+**Type:** `string` (default: `"npm run build"`)
+
+Command to build the UI.
+
+### ui.buildOutputDir
+**Type:** `string` (optional)
+
+Build output directory. Defaults to `dist` (or `build` for SvelteKit).
+
+### GCS Hosting Example
+
+```json
+{
+  "uis": [{
+    "name": "docs",
+    "hosting": "gcs",
+    "framework": "vue",
+    "sourceDir": "./apps/docs"
+  }]
+}
+```
+
+### Firebase Hosting Example
 
 ```json
 {
   "uis": [{
     "name": "web",
+    "hosting": "firebase",
     "framework": "vue",
     "sourceDir": "./apps/web"
   }]
 }
 ```
+
+:::note[Firebase Hosting Requirements]
+When using `hosting: "firebase"`:
+1. A `firebase.json` file must exist in your project root with hosting config
+2. Firebase CLI must be installed (`npm install -g firebase-tools`)
+3. You must be logged in (`firebase login`)
+4. Your `.env.production` should set `VITE_FIREBASE_AUTH_DOMAIN` to your Firebase Hosting domain (e.g., `your-project.web.app`)
+:::
 
 ---
 

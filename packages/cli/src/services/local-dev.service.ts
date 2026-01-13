@@ -28,6 +28,7 @@ interface LocalService {
   sourceDir: string;
   port: number;
   color: typeof chalk.cyan;
+  env?: Record<string, string>;
 }
 
 interface LocalProcessManager {
@@ -59,26 +60,100 @@ class LocalPortAllocator {
 }
 
 /**
+ * Load .env.local file and return key-value pairs
+ */
+async function loadEnvLocal(projectRoot: string): Promise<Record<string, string>> {
+  const envLocalPath = path.join(projectRoot, '.env.local');
+  const envVars: Record<string, string> = {};
+
+  try {
+    const content = await fs.readFile(envLocalPath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex > 0) {
+        const key = trimmed.slice(0, eqIndex).trim();
+        const value = trimmed.slice(eqIndex + 1).trim();
+        envVars[key] = value;
+      }
+    }
+  } catch {
+    // .env.local doesn't exist, that's fine
+  }
+
+  return envVars;
+}
+
+/**
+ * Resolve @secret/name references using secrets from config or .env.local
+ * Priority: config value > .env.local > environment variable with matching name
+ */
+function resolveSecretReferences(
+  env: Record<string, string> | undefined,
+  secrets: Array<{ name: string; value?: string }> | undefined,
+  envLocal: Record<string, string>
+): Record<string, string> {
+  if (!env) return {};
+
+  const resolved: Record<string, string> = {};
+  const secretMap = new Map<string, string>();
+
+  // First, load secrets from config (if they have values)
+  for (const s of secrets || []) {
+    if (s.value) {
+      secretMap.set(s.name, s.value);
+    }
+  }
+
+  for (const [key, value] of Object.entries(env)) {
+    if (value.startsWith('@secret/')) {
+      const secretName = value.replace('@secret/', '');
+      // Try config secrets first, then .env.local (using the env var name, e.g., GROQ_API_KEY)
+      const secretValue = secretMap.get(secretName) || envLocal[key];
+      if (secretValue) {
+        resolved[key] = secretValue;
+      } else {
+        console.warn(`Warning: Secret "${secretName}" not found. Add ${key}= to .env.local`);
+      }
+    } else if (value.startsWith('@')) {
+      // Skip other references like @gcp-kernel/kernel.url - not available locally
+      console.warn(`Warning: Reference "${value}" for ${key} not resolved in local mode`);
+    } else {
+      resolved[key] = value;
+    }
+  }
+
+  return resolved;
+}
+
+/**
  * Collect all services from config
  */
-export function collectServices(
+export async function collectServices(
   config: StackSoloConfig,
   projectRoot: string
-): LocalService[] {
+): Promise<LocalService[]> {
   const services: LocalService[] = [];
   const portAllocator = new LocalPortAllocator();
   let colorIndex = 0;
+  const secrets = config.project.secrets;
+
+  // Load .env.local for secret values
+  const envLocal = await loadEnvLocal(projectRoot);
 
   for (const network of config.project.networks || []) {
     // Collect functions
     for (const func of network.functions || []) {
       const sourceDir = func.sourceDir?.replace(/^\.\//, '') || `functions/${func.name}`;
+      const resolvedEnv = resolveSecretReferences(func.env, secrets, envLocal);
       services.push({
         name: func.name,
         type: 'function',
         sourceDir: path.join(projectRoot, sourceDir),
         port: portAllocator.nextFunctionPort(),
         color: COLORS[colorIndex++ % COLORS.length],
+        env: resolvedEnv,
       });
     }
 
@@ -174,9 +249,33 @@ function spawnService(
   manager: LocalProcessManager,
   firebaseProjectId?: string
 ): ChildProcess | null {
-  // Start with process.env but override critical vars to ensure consistency
+  // Build environment without conflicting Firebase/GCP vars from parent shell
+  // These can cause project ID mismatches when running local dev
+  const FILTERED_ENV_VARS = [
+    // Project ID vars (we set our own)
+    'GCP_PROJECT_ID',
+    'GCLOUD_PROJECT',
+    'GOOGLE_CLOUD_PROJECT',
+    'FIREBASE_PROJECT_ID',
+    // Firebase Admin SDK vars (conflict with emulator)
+    'FIREBASE_ADMIN_PROJECT_ID',
+    'FIREBASE_ADMIN_CLIENT_EMAIL',
+    'FIREBASE_ADMIN_PRIVATE_KEY',
+    // Other GCP vars that might interfere
+    'GOOGLE_APPLICATION_CREDENTIALS',
+  ];
+
+  const parentEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (FILTERED_ENV_VARS.includes(key)) {
+      continue;
+    }
+    parentEnv[key] = value;
+  }
+
   const env: Record<string, string> = {
-    ...process.env,
+    ...parentEnv,
     PORT: String(service.port),
     NODE_ENV: 'development',
     // Firebase emulator connection vars
@@ -184,7 +283,7 @@ function spawnService(
     FIREBASE_AUTH_EMULATOR_HOST: 'localhost:9099',
     PUBSUB_EMULATOR_HOST: 'localhost:8085',
     FIREBASE_STORAGE_EMULATOR_HOST: 'localhost:9199',
-    // Clear any existing project ID vars from shell that might conflict
+    // Set project ID vars to match Firebase emulator project
     ...(firebaseProjectId ? {
       FIREBASE_PROJECT_ID: firebaseProjectId,
       GCLOUD_PROJECT: firebaseProjectId,
@@ -192,6 +291,8 @@ function spawnService(
       GCP_PROJECT_ID: firebaseProjectId,
       VITE_FIREBASE_PROJECT_ID: firebaseProjectId,
     } : {}),
+    // Service-specific env vars (with resolved secrets)
+    ...(service.env || {}),
   };
 
   // For UIs, we need to pass port via CLI args since Vite doesn't use PORT env
@@ -199,9 +300,16 @@ function spawnService(
     ? ['run', 'dev', '--', '--port', String(service.port)]
     : ['run', 'dev'];
 
+  console.log(service.color(`[${service.name}]`), `Starting: npm ${args.join(' ')} in ${service.sourceDir}`);
+  console.log(service.color(`[${service.name}]`), `FIREBASE_PROJECT_ID=${env.FIREBASE_PROJECT_ID}, GCP_PROJECT_ID=${env.GCP_PROJECT_ID}`);
+
   const proc = spawn('npm', args, {
     cwd: service.sourceDir,
-    env,
+    env: {
+      ...env,
+      // Force unbuffered output for Node.js
+      FORCE_COLOR: '1',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: true,
   });
@@ -365,7 +473,7 @@ export async function startLocalEnvironment(options: {
   }
 
   // Collect services
-  const services = collectServices(config, projectRoot);
+  const services = await collectServices(config, projectRoot);
 
   if (services.length === 0) {
     console.log(chalk.yellow('  No services found in config.\n'));

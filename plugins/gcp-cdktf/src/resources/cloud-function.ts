@@ -137,7 +137,14 @@ export const cloudFunction = defineResource({
     const projectId = fnConfig.projectId || '${var.project_id}';
     const projectName = fnConfig.projectName || '${var.project_name}';
     const gatewayUrl = fnConfig.gatewayUrl || '';
-    const additionalEnv = fnConfig.environmentVariables || {};
+    // Build environment variables - user values override defaults
+    const envVars: Record<string, string> = {
+      NODE_ENV: 'production',
+      GCP_PROJECT_ID: projectId,
+      ...(projectName ? { STACKSOLO_PROJECT_NAME: projectName } : {}),
+      ...(gatewayUrl ? { GATEWAY_URL: gatewayUrl } : {}),
+      ...(fnConfig.environmentVariables || {}),
+    };
     const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.CLOUD_FUNCTION);
 
     // Source bucket and zip (each function has its own source zip)
@@ -180,9 +187,7 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
     minInstanceCount: ${minInstances},
     ingressSettings: 'ALLOW_ALL',
     allTrafficOnLatestRevision: true,
-    environmentVariables: {
-      NODE_ENV: 'production',
-      GCP_PROJECT_ID: '${projectId}',${projectName ? `\n      STACKSOLO_PROJECT_NAME: '${projectName}',` : ''}${gatewayUrl ? `\n      GATEWAY_URL: '${gatewayUrl}',` : ''}${Object.entries(additionalEnv).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}
+    environmentVariables: {${Object.entries(envVars).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}
     },`;
 
     // Add VPC connector if specified

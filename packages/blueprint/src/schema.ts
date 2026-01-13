@@ -147,7 +147,9 @@ export interface CacheConfig {
 
 export interface UIConfig {
   name: string;
-  sourceDir?: string;             // e.g., './web' - defaults to 'ui/<name>'
+  /** Hosting provider: 'gcs' for Cloud Storage (default), 'firebase' for Firebase Hosting */
+  hosting?: 'gcs' | 'firebase';
+  sourceDir?: string;             // e.g., './web' - defaults to 'apps/<name>'
   framework?: 'react' | 'vue' | 'sveltekit' | 'html';  // Default: detect from package.json
   buildCommand?: string;          // Default: 'npm run build'
   buildOutputDir?: string;        // Default: 'dist' or 'build'
