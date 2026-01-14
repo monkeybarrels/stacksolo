@@ -148,6 +148,12 @@ export const cloudFunction = defineResource({
       projectName?: string;
       gatewayUrl?: string;
       environmentVariables?: Record<string, string>;
+      trigger?: {
+        type: 'http' | 'pubsub' | 'storage';
+        topic?: string;
+        bucket?: string;
+        event?: string;
+      };
     };
 
     const location = fnConfig.location;
@@ -174,12 +180,22 @@ export const cloudFunction = defineResource({
     const { regularEnvVars, secretEnvVars } = parseSecretReferences(allEnvVars);
 
     const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.CLOUD_FUNCTION);
+    const trigger = fnConfig.trigger;
 
     // Source bucket and zip (each function has its own source zip)
     // Use relative path - the zip will be copied to the terraform stack directory
     const sourceZipFileName = `${config.name}-source.zip`;
 
-    let code = `// Source bucket for function code
+    // Start building code - add project data source for storage triggers
+    let code = '';
+    if (trigger?.type === 'storage') {
+      code += `// Get project number for GCS service account
+const dataGoogleProjectProject = new DataGoogleProject(this, '${config.name}-project', {});
+
+`;
+    }
+
+    code += `// Source bucket for function code
 const ${varName}SourceBucket = new StorageBucket(this, '${config.name}-source', {
   name: '${projectId}-${config.name}-source',
   location: '${location}',
@@ -233,7 +249,39 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
     }
 
     code += `
-  },
+  },`;
+
+    // Add eventTrigger for storage or pubsub triggers
+    if (trigger?.type === 'storage' && trigger.bucket) {
+      const eventType = trigger.event === 'delete'
+        ? 'google.cloud.storage.object.v1.deleted'
+        : trigger.event === 'archive'
+        ? 'google.cloud.storage.object.v1.archived'
+        : trigger.event === 'metadataUpdate'
+        ? 'google.cloud.storage.object.v1.metadataUpdated'
+        : 'google.cloud.storage.object.v1.finalized'; // default to finalize
+
+      code += `
+  eventTrigger: {
+    eventType: '${eventType}',
+    triggerRegion: '${location}',
+    eventFilters: [{
+      attribute: 'bucket',
+      value: '${trigger.bucket}',
+    }],
+    retryPolicy: 'RETRY_POLICY_RETRY',
+  },`;
+    } else if (trigger?.type === 'pubsub' && trigger.topic) {
+      code += `
+  eventTrigger: {
+    eventType: 'google.cloud.pubsub.topic.v1.messagePublished',
+    triggerRegion: '${location}',
+    pubsubTopic: \`projects/\${${varName}Function.project}/topics/${trigger.topic}\`,
+    retryPolicy: 'RETRY_POLICY_RETRY',
+  },`;
+    }
+
+    code += `
   ${labelsCode}
 });`;
 
@@ -272,6 +320,34 @@ new ProjectIamMember(this, '${config.name}-secret-accessor', {
 });`;
     }
 
+    // Add Eventarc permissions for storage triggers
+    // GCS events require the Cloud Storage service account to have pubsub.publisher role
+    // and the function service account needs eventarc.eventReceiver
+    if (trigger?.type === 'storage') {
+      code += `
+
+// Enable Eventarc API for storage triggers
+const ${varName}EventarcApi = new ProjectService(this, '${config.name}-eventarc-api', {
+  service: 'eventarc.googleapis.com',
+  disableOnDestroy: false,
+});
+
+// Grant Eventarc event receiver to function's service account
+new ProjectIamMember(this, '${config.name}-eventarc-receiver', {
+  project: ${varName}Function.project,
+  role: 'roles/eventarc.eventReceiver',
+  member: \`serviceAccount:\${${varName}Function.serviceConfig.serviceAccountEmail}\`,
+});
+
+// Grant the GCS service account permission to publish Pub/Sub events
+// This is required for Eventarc to receive storage events
+new ProjectIamMember(this, '${config.name}-gcs-pubsub', {
+  project: ${varName}Function.project,
+  role: 'roles/pubsub.publisher',
+  member: \`serviceAccount:service-\${dataGoogleProjectProject.number}@gs-project-accounts.iam.gserviceaccount.com\`,
+});`;
+    }
+
     const imports = [
       "import { Cloudfunctions2Function } from '@cdktf/provider-google/lib/cloudfunctions2-function';",
       "import { Cloudfunctions2FunctionIamMember } from '@cdktf/provider-google/lib/cloudfunctions2-function-iam-member';",
@@ -280,9 +356,15 @@ new ProjectIamMember(this, '${config.name}-secret-accessor', {
       "import { StorageBucketObject } from '@cdktf/provider-google/lib/storage-bucket-object';",
     ];
 
-    // Add ProjectIamMember import if secrets are used
-    if (secretEnvVars.length > 0) {
+    // Add ProjectIamMember import if secrets or storage triggers are used
+    if (secretEnvVars.length > 0 || trigger?.type === 'storage') {
       imports.push("import { ProjectIamMember } from '@cdktf/provider-google/lib/project-iam-member';");
+    }
+
+    // Add ProjectService and DataGoogleProject imports for storage triggers
+    if (trigger?.type === 'storage') {
+      imports.push("import { ProjectService } from '@cdktf/provider-google/lib/project-service';");
+      imports.push("import { DataGoogleProject } from '@cdktf/provider-google/lib/data-google-project';");
     }
 
     return {

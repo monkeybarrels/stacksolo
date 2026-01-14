@@ -128,6 +128,71 @@ Serverless functions that run your backend code. They scale automatically and yo
 }
 ```
 
+#### Storage Triggers (Event-Driven Functions)
+
+Functions can be triggered by Cloud Storage events instead of HTTP requests. Perfect for processing uploaded files.
+
+**Config:**
+
+```json
+{
+  "functions": [{
+    "name": "pdf-processor",
+    "runtime": "nodejs20",
+    "entryPoint": "handler",
+    "memory": "1Gi",
+    "timeout": 300,
+    "trigger": {
+      "type": "storage",
+      "bucket": "uploads",
+      "event": "finalize"
+    }
+  }]
+}
+```
+
+| Trigger Field | Required | What it does |
+|---------------|----------|--------------|
+| `type` | Yes | Trigger type: `http`, `storage`, or `pubsub` |
+| `bucket` | Yes* | Bucket name to watch (for storage triggers) |
+| `event` | No | Event type: `finalize` (default), `delete`, `archive`, `metadataUpdate` |
+
+*Required when `type` is `storage`.
+
+**Storage event types:**
+
+| Event | When it fires |
+|-------|---------------|
+| `finalize` | New file uploaded or overwritten (default) |
+| `delete` | File deleted |
+| `archive` | File archived (for versioned buckets) |
+| `metadataUpdate` | File metadata changed |
+
+**Example function code for storage trigger:**
+
+```typescript
+// functions/pdf-processor/src/index.ts
+import { CloudEvent } from '@google-cloud/functions-framework';
+import { Storage } from '@google-cloud/storage';
+
+interface StorageObjectData {
+  bucket: string;
+  name: string;
+  contentType: string;
+}
+
+export async function handler(event: CloudEvent<StorageObjectData>) {
+  const { bucket, name, contentType } = event.data!;
+  console.log(`Processing file: ${name} from bucket: ${bucket}`);
+
+  // Download and process the file
+  const storage = new Storage();
+  const [contents] = await storage.bucket(bucket).file(name).download();
+
+  // Your processing logic here...
+}
+```
+
 ---
 
 ### 2. Load Balancer

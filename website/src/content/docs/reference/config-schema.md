@@ -280,6 +280,48 @@ Custom source directory. Defaults to `functions/<name>`.
 }
 ```
 
+### function.trigger
+**Type:** `object` (optional)
+
+Event trigger configuration for non-HTTP functions.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `string` | Trigger type: `http` (default), `storage`, `pubsub` |
+| `bucket` | `string` | Bucket name (required for storage triggers) |
+| `event` | `string` | Event type: `finalize` (default), `delete`, `archive`, `metadataUpdate` |
+| `topic` | `string` | Pub/Sub topic name (for pubsub triggers) |
+
+**Storage trigger example:**
+
+```json
+{
+  "functions": [{
+    "name": "pdf-processor",
+    "runtime": "nodejs20",
+    "entryPoint": "handler",
+    "memory": "1GB",
+    "timeout": 300,
+    "trigger": {
+      "type": "storage",
+      "bucket": "uploads",
+      "event": "finalize"
+    }
+  }]
+}
+```
+
+When a file is uploaded to the `uploads` bucket, the function is automatically invoked with the file information.
+
+**Storage event types:**
+
+| Event | Description |
+|-------|-------------|
+| `finalize` | File created or overwritten (default) |
+| `delete` | File deleted |
+| `archive` | File archived (versioned buckets) |
+| `metadataUpdate` | File metadata changed |
+
 ---
 
 ## UIs
