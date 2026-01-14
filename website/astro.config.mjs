@@ -28,6 +28,7 @@ export default defineConfig({
 					label: 'Guides',
 					items: [
 						{ label: 'Configuration', slug: 'guides/configuration' },
+						{ label: 'Secrets Management', slug: 'guides/secrets' },
 					],
 				},
 				{
@@ -41,6 +42,7 @@ export default defineConfig({
 					label: 'Plugins',
 					items: [
 						{ label: 'GCP CDKTF', slug: 'plugins/gcp-cdktf' },
+						{ label: 'Cloudflare', slug: 'plugins/cloudflare' },
 						{ label: 'Helm', slug: 'plugins/helm' },
 						{ label: 'Zero Trust', slug: 'plugins/zero-trust' },
 						{ label: 'Zero Trust Auth', slug: 'plugins/zero-trust-auth' },

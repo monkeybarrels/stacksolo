@@ -269,6 +269,16 @@ export async function deployConfig(
           delete pkg.scripts.dev;
         }
         delete pkg.devDependencies;
+
+        // Filter out workspace:* dependencies (pnpm workspace protocol not supported by npm)
+        if (pkg.dependencies) {
+          for (const [name, version] of Object.entries(pkg.dependencies)) {
+            if (typeof version === 'string' && version.startsWith('workspace:')) {
+              delete pkg.dependencies[name];
+              log(`Removed workspace dependency: ${name}@${version}`);
+            }
+          }
+        }
         await fs.writeFile(path.join(stagingDir, 'package.json'), JSON.stringify(pkg, null, 2));
 
         // Create zip from staging
@@ -769,6 +779,25 @@ terraform {
         // Upload to GCS using gsutil
         log(`Uploading ${uiName} to gs://${bucketName}...`);
         await execAsync(`gsutil -m rsync -r -d "${distPath}" gs://${bucketName}`, { timeout: 300000 });
+
+        // SPA routing fix: Copy index.html to common route paths
+        // This ensures direct navigation to client-side routes doesn't 404
+        // (GCS bucket 404 handling doesn't work through the load balancer)
+        const spaRoutes = ['app', 'login', 'dashboard', 'admin', 'settings', 'profile', 'home'];
+        const indexPath = path.join(distPath, 'index.html');
+        try {
+          await fs.access(indexPath);
+          for (const route of spaRoutes) {
+            try {
+              await execAsync(`gsutil cp gs://${bucketName}/index.html gs://${bucketName}/${route}`, { timeout: 30000 });
+            } catch {
+              // Ignore errors - route may not be needed
+            }
+          }
+          log(`Copied index.html to common SPA routes for ${uiName}`);
+        } catch {
+          // No index.html - not a SPA
+        }
 
         log(`UI ${uiName} deployed to gs://${bucketName}`);
       }

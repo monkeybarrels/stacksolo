@@ -11,11 +11,23 @@ interface RouteConfig {
   containerName?: string;   // For Cloud Run backend
   uiName?: string;          // For Storage bucket backend (static UI)
   iapEnabled?: boolean;     // Enable IAP on this route's backend
+  iapConfigName?: string;   // Name of the IAP config (for OAuth client reference)
 }
 
 interface IapConfig {
   backend: string;          // Backend service name to protect
   allowedMembers: string[]; // IAM members allowed access
+}
+
+interface IapWebBackendConfig {
+  name: string;             // IAP config name (matches zero-trust:iap_web_backend)
+  backend: string;          // Backend service name to protect
+}
+
+interface DnsConfig {
+  provider: 'cloudflare';   // DNS provider
+  zoneId?: string;          // Cloudflare zone ID (can also be at project level)
+  proxied?: boolean;        // Enable Cloudflare proxy (default: true)
 }
 
 export const loadBalancer = defineResource({
@@ -76,6 +88,26 @@ export const loadBalancer = defineResource({
           type: 'object',
         },
       },
+      dns: {
+        type: 'object',
+        title: 'DNS Configuration',
+        description: 'Automatic DNS record creation (requires Cloudflare plugin)',
+        properties: {
+          provider: {
+            type: 'string',
+            enum: ['cloudflare'],
+            description: 'DNS provider',
+          },
+          zoneId: {
+            type: 'string',
+            description: 'Cloudflare zone ID (optional if set at project level)',
+          },
+          proxied: {
+            type: 'boolean',
+            description: 'Enable Cloudflare proxy (default: true)',
+          },
+        },
+      },
     },
     required: ['name', 'region'],
   },
@@ -93,6 +125,9 @@ export const loadBalancer = defineResource({
       enableHttps?: boolean;
       redirectHttpToHttps?: boolean;
       iap?: IapConfig[];
+      iapWebBackends?: IapWebBackendConfig[];
+      dns?: DnsConfig;
+      cloudflareZoneId?: string;  // Can be passed from project-level config
       projectName?: string;
     };
 
@@ -110,9 +145,35 @@ export const loadBalancer = defineResource({
     const uniqueContainers = [...new Set(containerRoutes.map(r => r.containerName!))];
     const uniqueUIs = [...new Set(uiRoutes.map(r => r.uiName!))];
 
+    // Build a map of backends that have IAP enabled
+    const iapWebBackendMap = new Map<string, IapWebBackendConfig>();
+    for (const iapWb of lbConfig.iapWebBackends || []) {
+      iapWebBackendMap.set(iapWb.backend, iapWb);
+    }
+    // Also check routes for iapEnabled flag
+    for (const route of routes) {
+      if (route.iapEnabled && route.iapConfigName) {
+        const backend = route.functionName || route.containerName;
+        if (backend && !iapWebBackendMap.has(backend)) {
+          iapWebBackendMap.set(backend, { name: route.iapConfigName, backend });
+        }
+      }
+    }
+
     // Generate NEG and Backend for each unique function
     const functionNegBackendCode = uniqueFunctions.map(fnName => {
       const fnVar = toVariableName(fnName);
+      const iapConfig = iapWebBackendMap.get(fnName);
+      const iapVarName = iapConfig ? toVariableName(iapConfig.name) : null;
+
+      // Generate IAP block if this backend has IAP enabled
+      const iapBlock = iapConfig ? `
+  iap: {
+    enabled: true,
+    oauth2ClientId: ${iapVarName}Client.clientId,
+    oauth2ClientSecret: ${iapVarName}Client.secret,
+  },` : '';
+
       return `// Serverless NEG for Cloud Function ${fnName}
 const ${fnVar}Neg = new ComputeRegionNetworkEndpointGroup(this, '${fnName}-neg', {
   name: '${fnName}-neg',
@@ -123,20 +184,31 @@ const ${fnVar}Neg = new ComputeRegionNetworkEndpointGroup(this, '${fnName}-neg',
   },
 });
 
-// Backend service for ${fnName}
+// Backend service for ${fnName}${iapConfig ? ' (IAP protected)' : ''}
 // Note: timeoutSec and portName are not supported for serverless NEG backend services
 const ${fnVar}Backend = new ComputeBackendService(this, '${fnName}-backend', {
   name: '${lbConfig.name}-${fnName}-backend',
   protocol: 'HTTP',
   backend: [{
     group: ${fnVar}Neg.selfLink,
-  }],
+  }],${iapBlock}
 });`;
     }).join('\n\n');
 
     // Generate NEG and Backend for each unique Cloud Run container
     const containerNegBackendCode = uniqueContainers.map(containerName => {
       const containerVar = toVariableName(containerName);
+      const iapConfig = iapWebBackendMap.get(containerName);
+      const iapVarName = iapConfig ? toVariableName(iapConfig.name) : null;
+
+      // Generate IAP block if this backend has IAP enabled
+      const iapBlock = iapConfig ? `
+  iap: {
+    enabled: true,
+    oauth2ClientId: ${iapVarName}Client.clientId,
+    oauth2ClientSecret: ${iapVarName}Client.secret,
+  },` : '';
+
       return `// Serverless NEG for Cloud Run ${containerName}
 const ${containerVar}Neg = new ComputeRegionNetworkEndpointGroup(this, '${containerName}-neg', {
   name: '${containerName}-neg',
@@ -147,14 +219,14 @@ const ${containerVar}Neg = new ComputeRegionNetworkEndpointGroup(this, '${contai
   },
 });
 
-// Backend service for ${containerName}
+// Backend service for ${containerName}${iapConfig ? ' (IAP protected)' : ''}
 // Note: timeoutSec is not supported for serverless NEG backend services
 const ${containerVar}Backend = new ComputeBackendService(this, '${containerName}-backend', {
   name: '${lbConfig.name}-${containerName}-backend',
   protocol: 'HTTP',
   backend: [{
     group: ${containerVar}Neg.selfLink,
-  }],
+  }],${iapBlock}
 });`;
     }).join('\n\n');
 
@@ -360,6 +432,37 @@ new ComputeGlobalForwardingRule(this, '${config.name}-http-rule', {
       );
     }
 
+    // Generate Cloudflare DNS record if configured
+    let dnsCode = '';
+    if (lbConfig.dns?.provider === 'cloudflare' && lbConfig.domain) {
+      const zoneId = lbConfig.dns.zoneId || lbConfig.cloudflareZoneId;
+      if (zoneId) {
+        const proxied = lbConfig.dns.proxied ?? true;
+        // Extract subdomain from domain (e.g., "app.example.com" -> "app")
+        const domainParts = lbConfig.domain.split('.');
+        const recordName = domainParts.length > 2 ? domainParts[0] : '@';
+
+        dnsCode = `
+
+// =============================================================================
+// Cloudflare DNS Record
+// =============================================================================
+
+// DNS record pointing ${lbConfig.domain} to load balancer IP
+const ${varName}DnsRecord = new CloudflareRecord(this, '${config.name}-dns', {
+  zoneId: '${zoneId}',
+  name: '${recordName}',
+  type: 'A',
+  value: ${varName}Ip.address,
+  proxied: ${proxied},
+  ttl: 1,
+});`;
+        imports.push(
+          "import { Record as CloudflareRecord } from '@cdktf/provider-cloudflare/lib/record';",
+        );
+      }
+    }
+
     const code = `${iapCode}${negBackendCode}
 
 ${urlMapConfig}
@@ -369,7 +472,7 @@ const ${varName}Ip = new ComputeGlobalAddress(this, '${config.name}-ip', {
   name: '${config.name}-ip',
   ${labelsCode}
 });
-${httpsCode}${httpRedirectCode}${httpOnlyCode}`;
+${httpsCode}${httpRedirectCode}${httpOnlyCode}${dnsCode}`;
 
     // Build outputs
     const outputs = [
@@ -380,8 +483,16 @@ ${httpsCode}${httpRedirectCode}${httpOnlyCode}`;
       outputs.push(
         `// HTTPS URL: https://${lbConfig.domain}`,
         `// Note: SSL certificate provisioning may take 15-60 minutes`,
-        `// DNS must point ${lbConfig.domain} to the load balancer IP`,
       );
+      if (lbConfig.dns?.provider === 'cloudflare') {
+        outputs.push(
+          `// DNS record auto-created via Cloudflare (proxied: ${lbConfig.dns.proxied ?? true})`,
+        );
+      } else {
+        outputs.push(
+          `// DNS must point ${lbConfig.domain} to the load balancer IP`,
+        );
+      }
     }
 
     if (iapConfigs.length > 0) {

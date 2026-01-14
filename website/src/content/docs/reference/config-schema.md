@@ -124,6 +124,33 @@ List of plugins to load. Plugins are npm packages.
 
 ---
 
+## Cloudflare
+
+Configuration for Cloudflare DNS integration. Requires `@stacksolo/plugin-cloudflare`.
+
+### cloudflare.zoneId
+**Type:** `string` (required)
+
+Your Cloudflare Zone ID (found in Cloudflare dashboard, Overview tab).
+
+### cloudflare.apiToken
+**Type:** `string` (required)
+
+Cloudflare API token with "Edit zone DNS" permission. Use `@secret/` syntax for secure storage.
+
+```json
+{
+  "project": {
+    "cloudflare": {
+      "zoneId": "your-zone-id",
+      "apiToken": "@secret/cloudflare-api-token"
+    }
+  }
+}
+```
+
+---
+
 ## Kernel (NATS-based)
 
 For projects that need shared infrastructure services using NATS for messaging.
@@ -385,6 +412,16 @@ Enable HTTPS with a Google-managed SSL certificate. Requires `domain` to be set.
 
 Redirect all HTTP traffic to HTTPS. Recommended when `enableHttps` is true.
 
+### loadBalancer.dns
+**Type:** `object` (optional)
+
+Automatic DNS configuration. Requires `@stacksolo/plugin-cloudflare`.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `provider` | `string` | - | DNS provider (`cloudflare`) |
+| `proxied` | `boolean` | `true` | Enable Cloudflare proxy (CDN, DDoS protection) |
+
 ### loadBalancer.routes
 **Type:** `Route[]` (required)
 
@@ -430,6 +467,33 @@ Backend service name (must match a function, ui, or container name).
   }
 }
 ```
+
+### With Automatic Cloudflare DNS
+
+```json
+{
+  "project": {
+    "cloudflare": {
+      "zoneId": "your-zone-id",
+      "apiToken": "@secret/cloudflare-api-token"
+    },
+    "networks": [{
+      "loadBalancer": {
+        "name": "gateway",
+        "domain": "app.example.com",
+        "enableHttps": true,
+        "dns": {
+          "provider": "cloudflare",
+          "proxied": true
+        },
+        "routes": [{ "path": "/*", "backend": "api" }]
+      }
+    }]
+  }
+}
+```
+
+When `dns.provider: cloudflare` is set, the deployment automatically creates a DNS A record pointing your domain to the load balancer IP.
 
 :::note[IAP Requires HTTPS]
 If you're using Zero Trust IAP (`zeroTrust.iapWebBackends`), you **must** configure `domain` and `enableHttps: true`. The deployment will fail with an error otherwise.

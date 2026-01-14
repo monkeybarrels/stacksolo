@@ -44,6 +44,11 @@ import {
   ensureCloudFunctionsPrerequisites,
 } from '../../services/preflight.service';
 import { getPluginFormatter, loadPlugins } from '../../services/plugin-loader.service';
+import {
+  checkSecrets,
+  createMissingSecrets,
+  SecretReference,
+} from '../../services/secret-manager.service';
 
 const execAsync = promisify(exec);
 
@@ -111,6 +116,7 @@ export const deployCommand = new Command('deploy')
   .option('--delete-conflicts', 'Automatically delete conflicting resources')
   .option('-v, --verbose', 'Show real-time Terraform and Docker output')
   .option('--helm', 'Generate Helm chart instead of raw K8s manifests (kubernetes backend only)')
+  .option('--skip-secrets', 'Skip secret validation and auto-creation')
   .action(async (options) => {
     await runDeploy(options);
   });
@@ -128,6 +134,7 @@ interface DeployOptions {
   deleteConflicts?: boolean;
   verbose?: boolean;
   helm?: boolean;
+  skipSecrets?: boolean;
 }
 
 interface RetryContext {
@@ -453,6 +460,20 @@ async function runDeploy(
     const hasContainers = resolved.resources.some((r) => r.type === 'gcp:cloud_run');
     const hasGcpKernel = resolved.resources.some((r) => r.type === 'gcp-kernel:gcp_kernel');
 
+    // Check for @secret/ references in config
+    const hasSecretRefs = (config.project.networks || []).some(network =>
+      (network.functions || []).some(fn =>
+        Object.values(fn.env || {}).some(v => typeof v === 'string' && v.startsWith('@secret/'))
+      ) ||
+      (network.containers || []).some(c =>
+        Object.values(c.env || {}).some(v => typeof v === 'string' && v.startsWith('@secret/')) ||
+        Object.values(c.secrets || {}).some(v => typeof v === 'string' && v.startsWith('@secret/'))
+      )
+    );
+
+    if (hasSecretRefs && !options.destroy && !options.skipSecrets) {
+      phases.push('Checking secrets');
+    }
     if (!options.destroy && !options.skipPreflight && !options.force) {
       phases.push('Pre-flight checks');
     }
@@ -478,6 +499,102 @@ async function runDeploy(
     }
 
     console.log('');
+  }
+
+  // Secret validation and auto-creation (only on first attempt, not destroy)
+  if (!options.destroy && !options.skipSecrets && retryCount === 0) {
+    const secretCheck = await checkSecrets(config, config.project.gcpProjectId);
+
+    if (secretCheck.required.length > 0) {
+      console.log(progress.next());
+      const secretSpinner = ora('Checking secrets in Secret Manager...').start();
+
+      if (secretCheck.missing.length === 0) {
+        secretSpinner.succeed(`All ${secretCheck.required.length} required secret(s) exist`);
+      } else {
+        secretSpinner.warn(`${secretCheck.missing.length} of ${secretCheck.required.length} secret(s) missing`);
+
+        // Show which secrets are missing
+        console.log(chalk.yellow('\n  Missing secrets:'));
+        for (const secret of secretCheck.missing) {
+          console.log(chalk.gray(`    - ${secret.secretName} (${secret.envKey} in ${secret.source})`));
+        }
+        console.log('');
+
+        // Interactive prompt for missing secrets
+        const inquirer = await import('inquirer');
+        const { createSecrets } = await inquirer.default.prompt([
+          {
+            type: 'confirm',
+            name: 'createSecrets',
+            message: 'Create missing secrets now?',
+            default: true,
+          },
+        ]);
+
+        if (createSecrets) {
+          // Read .env.production for potential values
+          const { readEnvProductionFile } = await import('../../services/secret-manager.service');
+          const envValues = await readEnvProductionFile(process.cwd());
+
+          // Prompt user for each missing secret
+          const promptForValue = async (envKey: string, secretName: string): Promise<string | null> => {
+            // Check if value exists in .env.production
+            if (envValues[envKey]) {
+              const { useEnvValue } = await inquirer.default.prompt([
+                {
+                  type: 'confirm',
+                  name: 'useEnvValue',
+                  message: `Found ${envKey} in .env.production. Use this value?`,
+                  default: true,
+                },
+              ]);
+
+              if (useEnvValue) {
+                return envValues[envKey];
+              }
+            }
+
+            // Prompt for manual entry
+            const { secretValue } = await inquirer.default.prompt([
+              {
+                type: 'password',
+                name: 'secretValue',
+                message: `Enter value for ${envKey} (${secretName}):`,
+                mask: '*',
+              },
+            ]);
+
+            return secretValue || null;
+          };
+
+          const createResult = await createMissingSecrets(
+            secretCheck.missing,
+            config.project.gcpProjectId,
+            process.cwd(),
+            {
+              onLog: (msg) => console.log(chalk.gray(msg)),
+              promptForValue,
+            }
+          );
+
+          if (createResult.created.length > 0) {
+            console.log(chalk.green(`\n  Created ${createResult.created.length} secret(s) successfully`));
+          }
+          if (createResult.skipped.length > 0) {
+            console.log(chalk.yellow(`  Skipped ${createResult.skipped.length} secret(s) (no value provided)`));
+          }
+          if (createResult.failed.length > 0) {
+            console.log(chalk.red(`  Failed to create ${createResult.failed.length} secret(s)`));
+            console.log(chalk.gray('\n  Deployment may fail if these secrets are required.'));
+          }
+          console.log('');
+        } else {
+          console.log(chalk.yellow('\n  Skipping secret creation.'));
+          console.log(chalk.gray('  Deployment may fail if these secrets are required.\n'));
+        }
+      }
+    }
   }
 
   // Pre-flight conflict detection (only on first attempt, not destroy, not force)

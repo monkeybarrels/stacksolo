@@ -193,8 +193,49 @@ Routes incoming traffic to the right place based on the URL path. This is how yo
 | `routes[].path` | Yes | URL path pattern (e.g., `/api/*`) |
 | `routes[].functionName` | * | Function to route to |
 | `routes[].uiName` | * | Static website to route to |
+| `domain` | No | Custom domain for HTTPS |
+| `enableHttps` | No | Enable HTTPS with managed SSL certificate |
+| `dns` | No | Auto-configure DNS (requires Cloudflare plugin) |
 
 *Either `functionName` or `uiName` is required for each route.
+
+**With custom domain and HTTPS:**
+
+```json
+{
+  "loadBalancer": {
+    "name": "gateway",
+    "domain": "app.example.com",
+    "enableHttps": true,
+    "redirectHttpToHttps": true,
+    "routes": [
+      { "path": "/api/*", "functionName": "api" },
+      { "path": "/*", "uiName": "web" }
+    ]
+  }
+}
+```
+
+**With automatic Cloudflare DNS:**
+
+```json
+{
+  "loadBalancer": {
+    "name": "gateway",
+    "domain": "app.example.com",
+    "enableHttps": true,
+    "dns": {
+      "provider": "cloudflare",
+      "proxied": true
+    },
+    "routes": [
+      { "path": "/*", "functionName": "api" }
+    ]
+  }
+}
+```
+
+When using Cloudflare DNS, you also need to configure `cloudflare.zoneId` at the project level.
 
 **How path matching works:**
 

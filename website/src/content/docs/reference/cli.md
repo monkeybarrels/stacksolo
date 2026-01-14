@@ -186,10 +186,47 @@ stacksolo deploy [options]
 |--------|-------------|
 | `--preview` | Show what would change |
 | `--skip-build` | Skip building container images |
+| `--skip-secrets` | Skip secret validation and auto-creation |
+| `--skip-preflight` | Skip pre-flight conflict detection |
 | `--tag <tag>` | Container image tag (default: `latest`) |
 | `--refresh` | Refresh Terraform state first |
 | `--force` | Force recreate conflicting resources |
+| `--import-conflicts` | Automatically import conflicting resources |
+| `--delete-conflicts` | Automatically delete conflicting resources |
+| `-v, --verbose` | Show real-time Terraform and Docker output |
 | `--helm` | Generate Helm chart (Kubernetes backend only) |
+| `-y, --yes` | Skip confirmation prompts |
+
+**Secret Auto-Creation:**
+
+When your config references secrets using `@secret/secret-name` in environment variables, the deploy command automatically:
+
+1. Scans your config for all `@secret/` references
+2. Checks which secrets exist in GCP Secret Manager
+3. For missing secrets:
+   - Checks `.env.production` for matching values
+   - Prompts you to confirm using values from `.env.production`
+   - Or prompts you to enter values manually
+
+```bash
+$ stacksolo deploy
+
+Checking secrets...
+✓ SECRET_API_KEY exists
+✗ OPENAI_API_KEY missing
+
+Found OPENAI_API_KEY in .env.production
+? Use this value? (Y/n)
+
+Creating secret 'openai-api-key'...
+✓ Secret created
+
+Deploying...
+```
+
+To skip secret checking: `stacksolo deploy --skip-secrets`
+
+**See also:** [Secrets Guide](/guides/secrets/)
 
 **Helm Output:**
 

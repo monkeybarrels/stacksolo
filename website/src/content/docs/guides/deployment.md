@@ -15,11 +15,12 @@ That's it. StackSolo handles everything else.
 
 ## What Happens During Deploy
 
-1. **Validation** - Config is validated
-2. **Code Generation** - CDKTF/Terraform code is generated
-3. **Build** - Container images are built (if any)
-4. **Apply** - Terraform applies the infrastructure
-5. **Output** - URLs and connection strings are displayed
+1. **Secrets Check** - Missing secrets are detected and optionally created
+2. **Validation** - Config is validated
+3. **Code Generation** - CDKTF/Terraform code is generated
+4. **Build** - Container images are built (if any)
+5. **Apply** - Terraform applies the infrastructure
+6. **Output** - URLs and connection strings are displayed
 
 ## Deploy Options
 
@@ -54,6 +55,56 @@ Force delete and recreate resources that are stuck:
 ```bash
 stacksolo deploy --force
 ```
+
+## Secrets Management
+
+StackSolo automatically handles secrets referenced with `@secret/secret-name` in your config.
+
+### Using .env.production
+
+Create a `.env.production` file with your secrets:
+
+```bash
+# .env.production (add to .gitignore!)
+OPENAI_API_KEY=sk-...
+STRIPE_SECRET_KEY=sk_live_...
+DATABASE_URL=postgres://...
+```
+
+Reference them in your config:
+
+```json
+{
+  "functions": [{
+    "name": "api",
+    "env": {
+      "OPENAI_API_KEY": "@secret/openai-api-key",
+      "STRIPE_SECRET_KEY": "@secret/stripe-secret-key"
+    }
+  }]
+}
+```
+
+During deploy, StackSolo will:
+1. Check which secrets exist in GCP Secret Manager
+2. Offer to create missing secrets from `.env.production`
+3. Prompt for any secrets not found in `.env.production`
+
+```bash
+$ stacksolo deploy
+
+[1/4] Checking secrets
+✓ database-url exists
+✗ openai-api-key missing
+
+Found OPENAI_API_KEY in .env.production
+? Use this value? (Y/n)
+
+Creating secret: openai-api-key...
+✓ Created: openai-api-key
+```
+
+See the full [Secrets Management Guide](/guides/secrets/) for more details.
 
 ## Generated Code
 

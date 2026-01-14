@@ -95,14 +95,11 @@ Each customer gets their own IAP config:
 
 ## Prerequisites
 
-### OAuth Consent Screen
+### Automatic OAuth Setup
 
-You must configure the OAuth consent screen in GCP Console first:
+StackSolo automatically creates the OAuth consent screen (brand) and OAuth client during deployment. No manual GCP Console configuration needed.
 
-1. Go to **APIs & Services** > **OAuth consent screen**
-2. Choose **Internal** (Google Workspace) or **External**
-3. Fill in app name and support email
-4. Save
+The `supportEmail` field in your config is used for the OAuth consent screen.
 
 ### Load Balancer
 
@@ -125,7 +122,7 @@ Internet → Load Balancer → Backend Service → Cloud Run/GCE/etc.
 
 ### One Brand Per Project
 
-Only one IAP Brand can exist per GCP project. If you already have one configured, you may need to remove the brand creation from the generated code.
+Only one IAP Brand (OAuth consent screen) can exist per GCP project. If you already have one configured manually in GCP Console, the deployment may fail. In that case, you can import the existing brand into Terraform state or remove the manual configuration.
 
 ### Headers Available to Your App
 

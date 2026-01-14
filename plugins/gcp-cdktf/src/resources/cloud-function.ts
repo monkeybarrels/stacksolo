@@ -5,6 +5,30 @@ function toVariableName(name: string): string {
   return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
 }
 
+/**
+ * Parse @secret/name references from env vars
+ * Returns { regularEnvVars, secretEnvVars }
+ */
+function parseSecretReferences(env: Record<string, string>): {
+  regularEnvVars: Record<string, string>;
+  secretEnvVars: Array<{ key: string; secretName: string }>;
+} {
+  const regularEnvVars: Record<string, string> = {};
+  const secretEnvVars: Array<{ key: string; secretName: string }> = [];
+
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === 'string' && value.startsWith('@secret/')) {
+      // Extract secret name from @secret/secret-name
+      const secretName = value.replace('@secret/', '');
+      secretEnvVars.push({ key, secretName });
+    } else {
+      regularEnvVars[key] = value;
+    }
+  }
+
+  return { regularEnvVars, secretEnvVars };
+}
+
 export const cloudFunction = defineResource({
   id: 'gcp-cdktf:cloud_function',
   provider: 'gcp-cdktf',
@@ -64,7 +88,7 @@ export const cloudFunction = defineResource({
         type: 'number',
         title: 'Max Instances',
         description: 'Maximum number of instances',
-        default: 100,
+        default: 10,
       },
       vpcConnector: {
         type: 'string',
@@ -103,7 +127,7 @@ export const cloudFunction = defineResource({
     memory: '256Mi',
     timeout: 60,
     minInstances: 0,
-    maxInstances: 100,
+    maxInstances: 10,  // Conservative default for cost optimization
     allowUnauthenticated: true,
   },
 
@@ -132,19 +156,23 @@ export const cloudFunction = defineResource({
     const memory = fnConfig.memory || '256Mi';
     const timeout = fnConfig.timeout || 60;
     const minInstances = fnConfig.minInstances ?? 0;
-    const maxInstances = fnConfig.maxInstances ?? 100;
+    const maxInstances = fnConfig.maxInstances ?? 10;
     const allowUnauthenticated = fnConfig.allowUnauthenticated ?? true;
     const projectId = fnConfig.projectId || '${var.project_id}';
     const projectName = fnConfig.projectName || '${var.project_name}';
     const gatewayUrl = fnConfig.gatewayUrl || '';
     // Build environment variables - user values override defaults
-    const envVars: Record<string, string> = {
+    const allEnvVars: Record<string, string> = {
       NODE_ENV: 'production',
       GCP_PROJECT_ID: projectId,
       ...(projectName ? { STACKSOLO_PROJECT_NAME: projectName } : {}),
       ...(gatewayUrl ? { GATEWAY_URL: gatewayUrl } : {}),
       ...(fnConfig.environmentVariables || {}),
     };
+
+    // Separate regular env vars from @secret/ references
+    const { regularEnvVars, secretEnvVars } = parseSecretReferences(allEnvVars);
+
     const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.CLOUD_FUNCTION);
 
     // Source bucket and zip (each function has its own source zip)
@@ -187,8 +215,15 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
     minInstanceCount: ${minInstances},
     ingressSettings: 'ALLOW_ALL',
     allTrafficOnLatestRevision: true,
-    environmentVariables: {${Object.entries(envVars).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}
-    },`;
+    environmentVariables: {${Object.entries(regularEnvVars).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}
+    },${secretEnvVars.length > 0 ? `
+    secretEnvironmentVariables: [${secretEnvVars.map(s => `
+      {
+        key: '${s.key}',
+        secret: '${s.secretName}',
+        version: 'latest',
+      },`).join('')}
+    ],` : ''}`;
 
     // Add VPC connector if specified
     if (fnConfig.vpcConnector) {
@@ -225,14 +260,33 @@ new CloudRunServiceIamMember(this, '${config.name}-run-invoker', {
 });`;
     }
 
+    // Add Secret Manager access if secrets are used
+    if (secretEnvVars.length > 0) {
+      code += `
+
+// Grant Secret Manager access to function's service account
+new ProjectIamMember(this, '${config.name}-secret-accessor', {
+  project: ${varName}Function.project,
+  role: 'roles/secretmanager.secretAccessor',
+  member: \`serviceAccount:\${${varName}Function.serviceConfig.serviceAccountEmail}\`,
+});`;
+    }
+
+    const imports = [
+      "import { Cloudfunctions2Function } from '@cdktf/provider-google/lib/cloudfunctions2-function';",
+      "import { Cloudfunctions2FunctionIamMember } from '@cdktf/provider-google/lib/cloudfunctions2-function-iam-member';",
+      "import { CloudRunServiceIamMember } from '@cdktf/provider-google/lib/cloud-run-service-iam-member';",
+      "import { StorageBucket } from '@cdktf/provider-google/lib/storage-bucket';",
+      "import { StorageBucketObject } from '@cdktf/provider-google/lib/storage-bucket-object';",
+    ];
+
+    // Add ProjectIamMember import if secrets are used
+    if (secretEnvVars.length > 0) {
+      imports.push("import { ProjectIamMember } from '@cdktf/provider-google/lib/project-iam-member';");
+    }
+
     return {
-      imports: [
-        "import { Cloudfunctions2Function } from '@cdktf/provider-google/lib/cloudfunctions2-function';",
-        "import { Cloudfunctions2FunctionIamMember } from '@cdktf/provider-google/lib/cloudfunctions2-function-iam-member';",
-        "import { CloudRunServiceIamMember } from '@cdktf/provider-google/lib/cloud-run-service-iam-member';",
-        "import { StorageBucket } from '@cdktf/provider-google/lib/storage-bucket';",
-        "import { StorageBucketObject } from '@cdktf/provider-google/lib/storage-bucket-object';",
-      ],
+      imports,
       code,
       outputs: [
         `export const ${varName}FunctionUrl = ${varName}Function.url;`,

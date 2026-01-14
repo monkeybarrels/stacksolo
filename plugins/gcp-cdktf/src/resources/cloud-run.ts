@@ -63,7 +63,7 @@ export const cloudRun = defineResource({
         type: 'number',
         title: 'Max Instances',
         description: 'Maximum number of instances',
-        default: 100,
+        default: 10,
       },
       concurrency: {
         type: 'number',
@@ -103,7 +103,7 @@ export const cloudRun = defineResource({
     memory: '512Mi',
     cpu: '1',
     minInstances: 0,
-    maxInstances: 100,
+    maxInstances: 10,  // Conservative default for cost optimization
     concurrency: 80,
     timeout: '300s',
     allowUnauthenticated: true,
@@ -136,7 +136,7 @@ export const cloudRun = defineResource({
     const memory = runConfig.memory || '512Mi';
     const cpu = runConfig.cpu || '1';
     const minInstances = runConfig.minInstances ?? 0;
-    const maxInstances = runConfig.maxInstances ?? 100;
+    const maxInstances = runConfig.maxInstances ?? 10;
     const concurrency = runConfig.concurrency ?? 80;
     const timeout = runConfig.timeout || '300s';
     const allowUnauthenticated = runConfig.allowUnauthenticated ?? true;

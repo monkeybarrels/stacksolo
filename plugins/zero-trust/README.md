@@ -185,7 +185,7 @@ For SaaS applications where each customer needs isolated access to their admin p
 
 2. **Terraform** installed
 
-3. **OAuth consent screen** configured in your GCP project (for web backends)
+**Note:** OAuth consent screen and client are automatically created during deployment - no manual GCP Console configuration needed.
 
 ## User Access (No StackSolo Required)
 

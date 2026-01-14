@@ -101,6 +101,10 @@
         "zeroTrustAuth": {
           "$ref": "#/$defs/ZeroTrustAuthConfig",
           "description": "Dynamic authorization for Zero Trust using Firestore (requires kernel and zeroTrust)"
+        },
+        "cloudflare": {
+          "$ref": "#/$defs/CloudflareConfig",
+          "description": "Cloudflare DNS configuration (requires @stacksolo/plugin-cloudflare)"
         }
       },
       "required": ["name", "region", "gcpProjectId"],
@@ -366,6 +370,10 @@
           "type": "boolean",
           "description": "Redirect all HTTP traffic to HTTPS. Recommended when enableHttps is true.",
           "default": false
+        },
+        "dns": {
+          "$ref": "#/$defs/DnsConfig",
+          "description": "Automatic DNS configuration (requires @stacksolo/plugin-cloudflare)"
         }
       },
       "required": ["name"],
@@ -646,6 +654,41 @@
         }
       },
       "required": ["name"],
+      "additionalProperties": false
+    },
+    "CloudflareConfig": {
+      "type": "object",
+      "description": "Cloudflare DNS configuration",
+      "properties": {
+        "zoneId": {
+          "type": "string",
+          "description": "Cloudflare Zone ID (found in Cloudflare dashboard Overview tab)"
+        },
+        "apiToken": {
+          "type": "string",
+          "description": "Cloudflare API token with 'Edit zone DNS' permission. Use @secret/ syntax for secure storage.",
+          "examples": ["@secret/cloudflare-api-token"]
+        }
+      },
+      "required": ["zoneId", "apiToken"],
+      "additionalProperties": false
+    },
+    "DnsConfig": {
+      "type": "object",
+      "description": "DNS configuration for load balancer",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["cloudflare"],
+          "description": "DNS provider"
+        },
+        "proxied": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Cloudflare proxy (CDN, DDoS protection)"
+        }
+      },
+      "required": ["provider"],
       "additionalProperties": false
     },
     "ZeroTrustConfig": {

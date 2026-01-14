@@ -878,6 +878,10 @@ function resolveCdktfConfig(
     if (kernelUrl) {
       containerEnv.KERNEL_URL = kernelUrl;
     }
+    // Auto-inject FIREBASE_PROJECT_ID if not set (prevents Firebase auth issues)
+    if (!containerEnv.FIREBASE_PROJECT_ID) {
+      containerEnv.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
+    }
 
     // Container depends on kernel if zeroTrustAuth is configured
     const containerDeps = [connectorId, registryId];
@@ -923,10 +927,14 @@ function resolveCdktfConfig(
 
     // Build environment variables
     // Auto-inject GOOGLE_CLOUD_PROJECT when gcpKernel is configured (required for Firebase/Firestore)
+    // Auto-inject FIREBASE_PROJECT_ID if not set (prevents Firebase auth token validation issues)
     const functionEnv: Record<string, string> = {
       ...(hasGcpKernel ? { GOOGLE_CLOUD_PROJECT: projectInfo.gcpProjectId } : {}),
       ...fn.env,
     };
+    if (!functionEnv.FIREBASE_PROJECT_ID) {
+      functionEnv.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
+    }
 
     resources.push({
       id: functionId,

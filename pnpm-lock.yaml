@@ -290,6 +290,31 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0(@types/node@20.19.27)
 
+  plugins/cloudflare:
+    dependencies:
+      '@cdktf/provider-cloudflare':
+        specifier: ^11.0.0
+        version: 11.30.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)
+      '@stacksolo/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      cdktf:
+        specifier: ^0.20.0
+        version: 0.20.12(constructs@10.4.4)
+      constructs:
+        specifier: ^10.0.0
+        version: 10.4.4
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.27
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@1.21.7)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+
   plugins/gcp-cdktf:
     dependencies:
       '@cdktf/provider-google':
@@ -484,6 +509,14 @@ packages:
   '@babel/runtime@7.28.4':
     resolution: {integrity: sha512-Q/N6JNWvIvPnLDvjlE1OUBLPQHH6l3CltCEsHIujp45zQUSSh8K+gHnaEX45yAT1nyngnINhvWtzN+Nb9D8RAQ==}
     engines: {node: '>=6.9.0'}
+
+  '@cdktf/provider-cloudflare@11.30.0':
+    resolution: {integrity: sha512-5i3LSaHROsBZsHL5KkfzZ0aM6e8gB6ZNN5eTD4V7OdPNYZEXpz+Bvm2NrC7uz/SQ4yJuz4TCdtc0VHLiQSZ6UQ==}
+    engines: {node: '>= 18.12.0'}
+    deprecated: See https://cdk.tf/imports for details on how to continue to use the cloudflare provider in your CDK for Terraform (CDKTF) projects by generating the bindings locally.
+    peerDependencies:
+      cdktf: ^0.20.0
+      constructs: ^10.3.0
 
   '@cdktf/provider-google@14.36.0':
     resolution: {integrity: sha512-LMmbgPRNhX30+JlEpiZQI/fIFSA/q168QjavHmZeucqn0ZsTgmfqFhlVgqKW2SVCh9jXBzKFQ3v7rggCPki4Cg==}
@@ -4119,6 +4152,11 @@ snapshots:
       '@jridgewell/trace-mapping': 0.3.31
 
   '@babel/runtime@7.28.4': {}
+
+  '@cdktf/provider-cloudflare@11.30.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)':
+    dependencies:
+      cdktf: 0.20.12(constructs@10.4.4)
+      constructs: 10.4.4
 
   '@cdktf/provider-google@14.36.0(cdktf@0.20.12(constructs@10.4.4))(constructs@10.4.4)':
     dependencies:

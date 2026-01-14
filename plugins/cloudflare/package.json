@@ -1,7 +1,7 @@
 {
-  "name": "@stacksolo/plugin-zero-trust",
-  "version": "0.1.1",
-  "description": "Zero Trust plugin for StackSolo - provides Identity-Aware Proxy (IAP) resources for secure access without VPNs",
+  "name": "@stacksolo/plugin-cloudflare",
+  "version": "0.1.0",
+  "description": "Cloudflare plugin for StackSolo - provides DNS and CDN resource definitions using CDK for Terraform",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,20 +24,19 @@
   "keywords": [
     "stacksolo",
     "plugin",
-    "gcp",
-    "zero-trust",
-    "iap",
-    "identity-aware-proxy",
-    "beyondcorp",
-    "security",
-    "vpn-alternative"
+    "cloudflare",
+    "dns",
+    "cdn",
+    "terraform",
+    "cdktf",
+    "infrastructure"
   ],
   "author": "MonkeyBarrels",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/monkeybarrels/stacksolo.git",
-    "directory": "plugins/zero-trust"
+    "directory": "plugins/cloudflare"
   },
   "bugs": {
     "url": "https://github.com/monkeybarrels/stacksolo/issues"
@@ -47,7 +46,7 @@
     "@stacksolo/core": "workspace:*",
     "cdktf": "^0.20.0",
     "constructs": "^10.0.0",
-    "@cdktf/provider-google": "^14.0.0"
+    "@cdktf/provider-cloudflare": "^11.0.0"
   },
   "peerDependencies": {
     "@stacksolo/core": "^0.1.0"

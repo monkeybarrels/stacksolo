@@ -30,10 +30,12 @@ domain:example.com         # Entire domain
 - `IapTunnelInstanceIamBinding` - Grants tunnel access to specified members
 
 ### IAP Web Backend generates:
-- `IapBrand` - OAuth consent screen config
-- `IapClient` - OAuth client for authentication
-- `IapWebBackendServiceIamBinding` - Grants web access to specified members
-- `IapWebBackendServiceIamPolicy` - Applies the IAM policy
+- `ProjectService` - Enables IAP API
+- `IapBrand` - OAuth consent screen (auto-created, no manual setup)
+- `IapClient` - OAuth client for authentication (auto-created)
+- `IapWebBackendServiceIamMember` - Grants `roles/iap.httpsResourceAccessor` to allowed members
+
+The OAuth credentials (clientId, clientSecret) are exported and referenced by the load balancer when creating backend services with IAP enabled.
 
 ## Common Patterns
 
@@ -68,8 +70,8 @@ domain:example.com         # Entire domain
 
 1. **No StackSolo CLI needed for end users** - They use `gcloud` or browser
 2. **IAP is free** - Only underlying resources (VMs, LB) have costs
-3. **One IAP Brand per project** - If user already has one, skip brand creation
-4. **Requires OAuth consent screen** - Must be configured in GCP console first
+3. **One IAP Brand per project** - Auto-created, but may conflict with existing manual config
+4. **OAuth auto-created** - No manual GCP Console configuration needed
 
 ## File Structure
 

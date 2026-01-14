@@ -51,8 +51,10 @@ After deployment:
 IAP requires HTTPS. You must configure `domain` and `enableHttps: true` in your load balancer configuration. The deployment will fail with an error if these are not set.
 :::
 
-:::note[Automatic Setup]
+:::note[Fully Automatic Setup]
 The deploy command automatically handles all IAP prerequisites:
+- **Creates OAuth consent screen (brand)** - No manual GCP Console configuration needed
+- **Creates OAuth client** - Used by the load balancer for IAP authentication
 - Provisions the IAP service agent
 - Grants the IAP service account Cloud Run Invoker role (for Cloud Run backends)
 - Enables IAP on backend services
@@ -301,6 +303,8 @@ Standard charges apply for underlying resources (VMs, Load Balancers).
 2. Terraform installed
 3. A custom domain for HTTPS (IAP requires HTTPS)
 4. Ability to manage DNS records for your domain
+
+**Note:** OAuth consent screen and client are automatically created - no manual GCP Console setup needed.
 
 ## HTTPS and DNS Setup
 
