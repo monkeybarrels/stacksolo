@@ -22,6 +22,7 @@ npm install -g stacksolo
 | `stacksolo init` | Initialize a new project |
 | `stacksolo clone` | Bootstrap from an existing project |
 | `stacksolo scaffold` | Generate local dev files |
+| `stacksolo add` | Add template resources to existing project |
 | `stacksolo deploy` | Deploy infrastructure |
 | `stacksolo destroy` | Destroy all resources |
 | `stacksolo merge` | Merge multiple projects into one |
@@ -171,6 +172,73 @@ stacksolo scaffold [options]
 | `--docker-only` | Only generate docker-compose.yml |
 | `--force` | Overwrite existing files |
 | `--dry-run` | Show what would be generated |
+
+### `stacksolo add`
+
+Add template resources to an existing StackSolo project without re-initializing.
+
+```bash
+stacksolo add <template> [options]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `template` | Template ID to add (e.g., `pdf-extractor`) |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <prefix>` | Prefix for added resource names (avoids conflicts) |
+| `--dry-run` | Preview changes without applying |
+| `--list` | List available templates |
+| `-y, --yes` | Skip confirmation prompts |
+
+**What it does:**
+1. Loads your existing `stacksolo.config.json`
+2. Fetches the template configuration from the remote repository
+3. Merges template resources (buckets, functions, etc.) into your config
+4. Copies source files to the appropriate directories
+5. Detects and warns about naming conflicts
+
+**Examples:**
+
+```bash
+# List available templates
+stacksolo add --list
+
+# Add PDF extractor to your project
+stacksolo add pdf-extractor
+
+# Add with a name prefix (creates "docs-uploads", "docs-processed", etc.)
+stacksolo add pdf-extractor --name docs
+
+# Preview changes without applying
+stacksolo add pdf-extractor --dry-run
+
+# Add without confirmation prompts
+stacksolo add pdf-extractor -y
+```
+
+**Using Name Prefix:**
+
+When adding a template to a project that already has resources with similar names, use `--name` to prefix all added resources:
+
+```bash
+# First PDF processor for invoices
+stacksolo add pdf-extractor --name invoice
+
+# Second PDF processor for contracts
+stacksolo add pdf-extractor --name contract
+```
+
+This creates separate buckets and functions for each use case:
+- `invoice-uploads`, `invoice-processed`, `invoice-pdf-processor`
+- `contract-uploads`, `contract-processed`, `contract-pdf-processor`
+
+**See also:** [Templates](/reference/templates/)
 
 ## Infrastructure Commands
 

@@ -12,6 +12,7 @@ import {
   initCommand,
   scaffoldCommand,
   cloneCommand,
+  addCommand,
   // Infrastructure commands
   deployCommand,
   destroyCommand,
@@ -52,6 +53,7 @@ program
 program.addCommand(initCommand);
 program.addCommand(scaffoldCommand);
 program.addCommand(cloneCommand);
+program.addCommand(addCommand);
 
 // Infrastructure commands
 program.addCommand(deployCommand);
