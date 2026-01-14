@@ -54,6 +54,29 @@ stacksolo scaffold --env-only  # Only generate .env files
 stacksolo scaffold --docker-only  # Only generate docker-compose.yml
 \`\`\`
 
+#### \`stacksolo add <template>\`
+Add template resources to an existing project without re-initializing.
+
+\`\`\`bash
+stacksolo add pdf-extractor                    # Add PDF extractor template
+stacksolo add pdf-extractor --name invoice     # Add with name prefix
+stacksolo add pdf-extractor --dry-run          # Preview changes
+stacksolo add --list                           # List available templates
+\`\`\`
+
+Options:
+- \`--name <prefix>\` - Prefix for added resource names (avoids conflicts)
+- \`--dry-run\` - Preview changes without applying
+- \`--list\` - List available templates
+- \`-y, --yes\` - Skip confirmation prompts
+
+What it does:
+1. Loads your existing \`stacksolo.config.json\`
+2. Fetches template config from remote repository
+3. Merges template resources (buckets, functions, etc.) into your config
+4. Copies source files to appropriate directories
+5. Detects and warns about naming conflicts
+
 ### Infrastructure Commands
 
 #### \`stacksolo deploy\`
