@@ -829,3 +829,332 @@ export async function ensureCloudFunctionsPrerequisites(
     errors,
   };
 }
+
+// =============================================================================
+// Storage Trigger Preflight Setup
+// =============================================================================
+
+export interface StorageTriggerPreflightResult {
+  success: boolean;
+  actionsPerformed: string[];
+  warnings: string[];
+  errors: string[];
+}
+
+/**
+ * Ensure all required APIs and IAM permissions are configured for storage-triggered functions.
+ * This runs proactively before deploy to avoid permission errors.
+ */
+export async function ensureStorageTriggerPrerequisites(
+  gcpProjectId: string,
+  region: string,
+  triggerBuckets: string[]
+): Promise<StorageTriggerPreflightResult> {
+  const actionsPerformed: string[] = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  if (triggerBuckets.length === 0) {
+    return { success: true, actionsPerformed, warnings, errors };
+  }
+
+  // 1. Get project number
+  let projectNumber: string;
+  try {
+    const { stdout } = await execAsync(
+      `gcloud projects describe ${gcpProjectId} --format="value(projectNumber)"`
+    );
+    projectNumber = stdout.trim();
+  } catch (error) {
+    errors.push(`Failed to get project number: ${error}`);
+    return { success: false, actionsPerformed, warnings, errors };
+  }
+
+  // 2. Enable Eventarc API
+  try {
+    await execAsync(
+      `gcloud services enable eventarc.googleapis.com --project=${gcpProjectId} --quiet`,
+      { timeout: 60000 }
+    );
+    actionsPerformed.push('Enabled API: eventarc.googleapis.com');
+  } catch {
+    // API might already be enabled
+  }
+
+  // 3. Service account references
+  const gcsSa = `service-${projectNumber}@gs-project-accounts.iam.gserviceaccount.com`;
+  const eventarcSa = `service-${projectNumber}@gcp-sa-eventarc.iam.gserviceaccount.com`;
+  const computeSa = `${projectNumber}-compute@developer.gserviceaccount.com`;
+
+  // 4. Grant GCS service account pubsub.publisher role
+  try {
+    await execAsync(
+      `gcloud projects add-iam-policy-binding ${gcpProjectId} ` +
+        `--member="serviceAccount:${gcsSa}" ` +
+        `--role="roles/pubsub.publisher" --condition=None --quiet`,
+      { timeout: 30000 }
+    );
+    actionsPerformed.push('Granted pubsub.publisher to GCS service account');
+  } catch {
+    // Role might already be granted
+  }
+
+  // 5. Grant Eventarc service agent eventReceiver role
+  try {
+    await execAsync(
+      `gcloud projects add-iam-policy-binding ${gcpProjectId} ` +
+        `--member="serviceAccount:${eventarcSa}" ` +
+        `--role="roles/eventarc.eventReceiver" --condition=None --quiet`,
+      { timeout: 30000 }
+    );
+    actionsPerformed.push('Granted eventarc.eventReceiver to Eventarc service agent');
+  } catch {
+    // Role might already be granted
+  }
+
+  // 6. Grant compute service account run.invoker (for Eventarc to invoke Cloud Run)
+  try {
+    await execAsync(
+      `gcloud projects add-iam-policy-binding ${gcpProjectId} ` +
+        `--member="serviceAccount:${computeSa}" ` +
+        `--role="roles/run.invoker" --condition=None --quiet`,
+      { timeout: 30000 }
+    );
+    actionsPerformed.push('Granted run.invoker to compute service account');
+  } catch {
+    // Role might already be granted
+  }
+
+  // 7. Verify trigger buckets exist (warning only)
+  for (const bucket of triggerBuckets) {
+    try {
+      await execAsync(
+        `gcloud storage buckets describe gs://${bucket} --project=${gcpProjectId}`,
+        { timeout: 15000 }
+      );
+    } catch {
+      warnings.push(`Trigger bucket '${bucket}' does not exist yet (will be created during deploy)`);
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    actionsPerformed,
+    warnings,
+    errors,
+  };
+}
+
+// =============================================================================
+// Gemini Model Validation
+// =============================================================================
+
+export interface GeminiModelInfo {
+  name: string;
+  displayName: string;
+  deprecated: boolean;
+  deprecationDate?: string;
+  replacement?: string;
+  supportedRegions: string[];
+}
+
+// Gemini model registry with deprecation and region info
+// Based on: https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini
+const GEMINI_MODELS: Record<string, GeminiModelInfo> = {
+  // Current models (as of Jan 2025)
+  'gemini-2.0-flash': {
+    name: 'gemini-2.0-flash',
+    displayName: 'Gemini 2.0 Flash',
+    deprecated: false,
+    supportedRegions: ['us-central1', 'us-east1', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1'],
+  },
+  'gemini-2.0-pro': {
+    name: 'gemini-2.0-pro',
+    displayName: 'Gemini 2.0 Pro',
+    deprecated: false,
+    supportedRegions: ['us-central1', 'us-east1', 'europe-west1', 'asia-northeast1'],
+  },
+  'gemini-2.0-flash-exp': {
+    name: 'gemini-2.0-flash-exp',
+    displayName: 'Gemini 2.0 Flash (Experimental)',
+    deprecated: false,
+    supportedRegions: ['us-central1'],
+  },
+
+  // Deprecated models
+  'gemini-1.5-flash': {
+    name: 'gemini-1.5-flash',
+    displayName: 'Gemini 1.5 Flash',
+    deprecated: true,
+    deprecationDate: '2025-01-01',
+    replacement: 'gemini-2.0-flash',
+    supportedRegions: ['us-central1', 'us-east1', 'us-west1', 'europe-west1', 'europe-west4', 'asia-northeast1', 'asia-southeast1'],
+  },
+  'gemini-1.5-pro': {
+    name: 'gemini-1.5-pro',
+    displayName: 'Gemini 1.5 Pro',
+    deprecated: true,
+    deprecationDate: '2025-01-01',
+    replacement: 'gemini-2.0-pro',
+    supportedRegions: ['us-central1', 'us-east1', 'europe-west1', 'asia-northeast1'],
+  },
+  'gemini-pro': {
+    name: 'gemini-pro',
+    displayName: 'Gemini Pro (Legacy)',
+    deprecated: true,
+    deprecationDate: '2024-06-01',
+    replacement: 'gemini-2.0-pro',
+    supportedRegions: ['us-central1'],
+  },
+  'gemini-pro-vision': {
+    name: 'gemini-pro-vision',
+    displayName: 'Gemini Pro Vision (Legacy)',
+    deprecated: true,
+    deprecationDate: '2024-06-01',
+    replacement: 'gemini-2.0-flash',
+    supportedRegions: ['us-central1'],
+  },
+};
+
+export interface GeminiValidationResult {
+  valid: boolean;
+  warnings: string[];
+  errors: string[];
+  models: Array<{
+    model: string;
+    region: string;
+    status: 'ok' | 'deprecated' | 'unavailable' | 'unknown';
+    message: string;
+    suggestion?: string;
+  }>;
+}
+
+/**
+ * Validate Gemini model references in function environment variables.
+ * Checks for deprecation and region availability.
+ */
+export function validateGeminiModels(
+  envVars: Array<{ functionName: string; model: string }>,
+  region: string
+): GeminiValidationResult {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  const models: GeminiValidationResult['models'] = [];
+
+  for (const { functionName, model } of envVars) {
+    const modelInfo = GEMINI_MODELS[model];
+
+    if (!modelInfo) {
+      // Unknown model - might be valid, just warn
+      models.push({
+        model,
+        region,
+        status: 'unknown',
+        message: `Unknown model '${model}' in function '${functionName}'`,
+        suggestion: 'Verify model name at https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini',
+      });
+      warnings.push(`Function '${functionName}' uses unknown Gemini model '${model}'`);
+      continue;
+    }
+
+    // Check if model is deprecated
+    if (modelInfo.deprecated) {
+      models.push({
+        model,
+        region,
+        status: 'deprecated',
+        message: `Model '${model}' is deprecated${modelInfo.deprecationDate ? ` (since ${modelInfo.deprecationDate})` : ''}`,
+        suggestion: modelInfo.replacement ? `Use '${modelInfo.replacement}' instead` : undefined,
+      });
+      warnings.push(
+        `Function '${functionName}' uses deprecated model '${model}'. ` +
+        `${modelInfo.replacement ? `Consider using '${modelInfo.replacement}' instead.` : ''}`
+      );
+      continue;
+    }
+
+    // Check if model is available in the region
+    if (!modelInfo.supportedRegions.includes(region)) {
+      models.push({
+        model,
+        region,
+        status: 'unavailable',
+        message: `Model '${model}' is not available in region '${region}'`,
+        suggestion: `Available regions: ${modelInfo.supportedRegions.join(', ')}`,
+      });
+      errors.push(
+        `Function '${functionName}' uses model '${model}' which is not available in region '${region}'. ` +
+        `Available regions: ${modelInfo.supportedRegions.join(', ')}`
+      );
+      continue;
+    }
+
+    // Model is valid and available
+    models.push({
+      model,
+      region,
+      status: 'ok',
+      message: `Model '${model}' is available in region '${region}'`,
+    });
+  }
+
+  return {
+    valid: errors.length === 0,
+    warnings,
+    errors,
+    models,
+  };
+}
+
+/**
+ * Extract Gemini model references from function configs
+ */
+export function extractGeminiModels(
+  functions: Array<{ name: string; env?: Record<string, string> }>
+): Array<{ functionName: string; model: string }> {
+  const models: Array<{ functionName: string; model: string }> = [];
+
+  for (const fn of functions) {
+    if (!fn.env) continue;
+
+    // Common env var names for Gemini models
+    const modelEnvVars = ['GEMINI_MODEL', 'MODEL', 'LLM_MODEL', 'AI_MODEL', 'VERTEX_MODEL'];
+
+    for (const envVar of modelEnvVars) {
+      if (fn.env[envVar] && fn.env[envVar].toLowerCase().includes('gemini')) {
+        models.push({
+          functionName: fn.name,
+          model: fn.env[envVar],
+        });
+      }
+    }
+  }
+
+  return models;
+}
+
+/**
+ * Display Gemini model validation results
+ */
+export function displayGeminiValidationResults(result: GeminiValidationResult): void {
+  if (result.models.length === 0) {
+    return; // No Gemini models to validate
+  }
+
+  console.log(chalk.cyan('\n  Gemini Model Validation:\n'));
+
+  for (const model of result.models) {
+    const icon = model.status === 'ok' ? chalk.green('✓') :
+                 model.status === 'deprecated' ? chalk.yellow('⚠') :
+                 model.status === 'unknown' ? chalk.gray('?') :
+                 chalk.red('✗');
+
+    console.log(`    ${icon} ${chalk.white(model.model)}: ${model.message}`);
+
+    if (model.suggestion) {
+      console.log(chalk.gray(`      → ${model.suggestion}`));
+    }
+  }
+
+  console.log();
+}

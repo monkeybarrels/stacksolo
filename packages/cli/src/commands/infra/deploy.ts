@@ -42,6 +42,10 @@ import {
   runKernelPreflightCheck,
   displayKernelPreflightResults,
   ensureCloudFunctionsPrerequisites,
+  ensureStorageTriggerPrerequisites,
+  extractGeminiModels,
+  validateGeminiModels,
+  displayGeminiValidationResults,
 } from '../../services/preflight.service';
 import { getPluginFormatter, loadPlugins } from '../../services/plugin-loader.service';
 import {
@@ -836,6 +840,91 @@ async function runDeploy(
     } catch (error) {
       cfSpinner.warn('Could not complete Cloud Functions setup (continuing anyway)');
       console.log(chalk.gray(`    ${error}\n`));
+    }
+  }
+
+  // Storage trigger preflight setup (only on first attempt, not destroy, not preview)
+  // Extract storage-triggered functions and their trigger buckets
+  const storageTriggerBuckets: string[] = [];
+  const functionsWithTriggers: Array<{ name: string; env?: Record<string, string> }> = [];
+
+  for (const network of config.project.networks || []) {
+    for (const fn of network.functions || []) {
+      functionsWithTriggers.push(fn);
+      if (fn.trigger?.type === 'storage' && fn.trigger.bucket) {
+        storageTriggerBuckets.push(fn.trigger.bucket);
+      }
+    }
+  }
+
+  if (storageTriggerBuckets.length > 0 && !options.destroy && !options.preview && !options.skipPreflight && retryCount === 0) {
+    console.log(progress.next());
+    const storageSpinner = ora('Setting up storage trigger prerequisites...').start();
+
+    try {
+      const storageResult = await ensureStorageTriggerPrerequisites(
+        config.project.gcpProjectId,
+        config.project.region,
+        storageTriggerBuckets
+      );
+
+      if (storageResult.success) {
+        if (storageResult.actionsPerformed.length > 0) {
+          storageSpinner.succeed(`Storage trigger setup complete (${storageResult.actionsPerformed.length} actions)`);
+        } else {
+          storageSpinner.succeed('Storage trigger prerequisites already configured');
+        }
+        // Show warnings if any
+        for (const warning of storageResult.warnings) {
+          console.log(chalk.yellow(`    ⚠ ${warning}`));
+        }
+      } else {
+        storageSpinner.warn('Some storage trigger setup steps had issues (continuing anyway)');
+        for (const error of storageResult.errors) {
+          console.log(chalk.yellow(`    - ${error}`));
+        }
+      }
+    } catch (error) {
+      storageSpinner.warn('Could not complete storage trigger setup (continuing anyway)');
+      console.log(chalk.gray(`    ${error}\n`));
+    }
+  }
+
+  // Gemini model validation (only on first attempt, not destroy, not preview)
+  if (functionsWithTriggers.length > 0 && !options.destroy && !options.preview && retryCount === 0) {
+    const geminiModels = extractGeminiModels(functionsWithTriggers);
+
+    if (geminiModels.length > 0) {
+      const geminiResult = validateGeminiModels(geminiModels, config.project.region);
+
+      // Display results
+      displayGeminiValidationResults(geminiResult);
+
+      // Fail if there are errors (model not available in region)
+      if (!geminiResult.valid) {
+        console.log(chalk.red('\n  Gemini model validation failed:'));
+        for (const error of geminiResult.errors) {
+          console.log(chalk.red(`    - ${error}`));
+        }
+        console.log(chalk.yellow('\n  Fix the model configuration and try again.\n'));
+
+        if (!options.yes) {
+          const inquirer = await import('inquirer');
+          const { continueAnyway } = await inquirer.default.prompt([
+            {
+              type: 'confirm',
+              name: 'continueAnyway',
+              message: 'Continue deployment anyway?',
+              default: false,
+            },
+          ]);
+
+          if (!continueAnyway) {
+            console.log(chalk.gray('\n  Cancelled.\n'));
+            return;
+          }
+        }
+      }
     }
   }
 
