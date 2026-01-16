@@ -1259,22 +1259,11 @@ const GCP_NAMING_RULES = {
   },
 };
 
-// Reserved names that can't be used
+// Reserved names that GCP actually blocks (very minimal list)
+// Note: We intentionally do NOT block common names like 'api', 'admin', 'www'
+// because these are legitimate and commonly used service names
 const RESERVED_NAMES = new Set([
-  'default',
-  'global',
-  'internal',
-  'external',
-  'private',
-  'public',
-  'system',
-  'admin',
-  'root',
-  'api',
-  'www',
-  'mail',
-  'ftp',
-  'localhost',
+  'default',  // GCP uses 'default' for default VPCs, subnets, etc.
 ]);
 
 // GCP reserved bucket name prefixes
@@ -1465,17 +1454,10 @@ function validateResourceName(
         });
       }
     }
-    // Bucket names must be globally unique - warn about common patterns
-    if (name.length < 10 && !name.includes('-')) {
-      conflicts.push({
-        type: 'invalid_name',
-        resourceType: type,
-        resourceName: name,
-        message: `Bucket '${name}' may not be globally unique`,
-        suggestion: `Add a project prefix like 'myproject-${name}' for uniqueness`,
-        severity: 'warning',
-      });
-    }
+    // Note: We don't warn about bucket uniqueness here because:
+    // 1. StackSolo often prefixes bucket names with project name automatically
+    // 2. GCP will give a clear error if the bucket already exists
+    // 3. False positives are annoying and block legitimate deployments
   }
 
   return conflicts;
