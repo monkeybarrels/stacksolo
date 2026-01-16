@@ -342,6 +342,11 @@
         "uis": {
           "type": "array",
           "items": { "$ref": "#/$defs/UIConfig" }
+        },
+        "storageBuckets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/BucketConfig" },
+          "description": "Cloud Storage buckets scoped to this network (can be used as function triggers)"
         }
       },
       "required": ["name"],
