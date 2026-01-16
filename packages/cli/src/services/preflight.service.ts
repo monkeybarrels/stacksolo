@@ -1158,3 +1158,537 @@ export function displayGeminiValidationResults(result: GeminiValidationResult): 
 
   console.log();
 }
+
+// =============================================================================
+// Resource Conflict Checking
+// =============================================================================
+
+export interface ResourceConflict {
+  type: 'duplicate_name' | 'invalid_name' | 'reserved_name' | 'length_exceeded' | 'gcp_conflict';
+  resourceType: string;
+  resourceName: string;
+  message: string;
+  suggestion?: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ResourceConflictResult {
+  valid: boolean;
+  conflicts: ResourceConflict[];
+  warnings: ResourceConflict[];
+}
+
+// GCP naming constraints
+const GCP_NAMING_RULES = {
+  // Cloud Functions: 1-63 chars, lowercase letters, numbers, hyphens
+  function: {
+    maxLength: 63,
+    minLength: 1,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/,
+    description: 'lowercase letters, numbers, hyphens; must start with letter',
+  },
+  // Cloud Run: 1-63 chars, lowercase letters, numbers, hyphens
+  container: {
+    maxLength: 63,
+    minLength: 1,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/,
+    description: 'lowercase letters, numbers, hyphens; must start with letter',
+  },
+  // Storage Buckets: 3-63 chars, lowercase letters, numbers, hyphens, underscores, dots
+  bucket: {
+    maxLength: 63,
+    minLength: 3,
+    pattern: /^[a-z0-9][a-z0-9._-]*[a-z0-9]$/,
+    description: 'lowercase letters, numbers, hyphens, underscores, dots',
+  },
+  // VPC Networks: 1-63 chars, lowercase letters, numbers, hyphens
+  network: {
+    maxLength: 63,
+    minLength: 1,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/,
+    description: 'lowercase letters, numbers, hyphens; must start with letter',
+  },
+  // Cloud SQL: 1-98 chars, lowercase letters, numbers, hyphens
+  database: {
+    maxLength: 98,
+    minLength: 1,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/,
+    description: 'lowercase letters, numbers, hyphens; must start with letter',
+  },
+  // Memorystore Redis: 1-40 chars, lowercase letters, numbers, hyphens
+  cache: {
+    maxLength: 40,
+    minLength: 1,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/,
+    description: 'lowercase letters, numbers, hyphens; must start with letter',
+  },
+  // Pub/Sub Topics: 3-255 chars, letters, numbers, hyphens, underscores
+  topic: {
+    maxLength: 255,
+    minLength: 3,
+    pattern: /^[a-zA-Z][a-zA-Z0-9-_]*$/,
+    description: 'letters, numbers, hyphens, underscores; must start with letter',
+  },
+  // Secrets: 1-255 chars, letters, numbers, hyphens, underscores
+  secret: {
+    maxLength: 255,
+    minLength: 1,
+    pattern: /^[a-zA-Z_][a-zA-Z0-9_-]*$/,
+    description: 'letters, numbers, hyphens, underscores; must start with letter or underscore',
+  },
+  // Service Accounts: 6-30 chars, lowercase letters, numbers, hyphens
+  serviceAccount: {
+    maxLength: 30,
+    minLength: 6,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$/,
+    description: 'lowercase letters, numbers, hyphens; 6-30 chars',
+  },
+  // Load Balancer: 1-63 chars
+  loadBalancer: {
+    maxLength: 63,
+    minLength: 1,
+    pattern: /^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$/,
+    description: 'lowercase letters, numbers, hyphens; must start with letter',
+  },
+  // Cloud Scheduler Jobs: 1-500 chars
+  cron: {
+    maxLength: 500,
+    minLength: 1,
+    pattern: /^[a-zA-Z0-9_-]+$/,
+    description: 'letters, numbers, hyphens, underscores',
+  },
+};
+
+// Reserved names that can't be used
+const RESERVED_NAMES = new Set([
+  'default',
+  'global',
+  'internal',
+  'external',
+  'private',
+  'public',
+  'system',
+  'admin',
+  'root',
+  'api',
+  'www',
+  'mail',
+  'ftp',
+  'localhost',
+]);
+
+// GCP reserved bucket name prefixes
+const RESERVED_BUCKET_PREFIXES = [
+  'goog',
+  'google',
+  'g00g',
+  'g00gle',
+];
+
+interface ConfigResource {
+  type: string;
+  name: string;
+  network?: string;
+}
+
+/**
+ * Extract all resources from the config for conflict checking
+ */
+function extractResources(config: {
+  project: {
+    name: string;
+    buckets?: Array<{ name: string }>;
+    topics?: Array<{ name: string }>;
+    secrets?: Array<{ name: string }>;
+    serviceAccounts?: Array<{ name: string }>;
+    crons?: Array<{ name: string }>;
+    networks?: Array<{
+      name: string;
+      functions?: Array<{ name: string }>;
+      containers?: Array<{ name: string }>;
+      databases?: Array<{ name: string }>;
+      caches?: Array<{ name: string }>;
+      uis?: Array<{ name: string }>;
+      storageBuckets?: Array<{ name: string }>;
+      loadBalancer?: { name: string };
+    }>;
+  };
+}): ConfigResource[] {
+  const resources: ConfigResource[] = [];
+  const project = config.project;
+
+  // Project-level resources
+  if (project.buckets) {
+    for (const bucket of project.buckets) {
+      resources.push({ type: 'bucket', name: bucket.name });
+    }
+  }
+  if (project.topics) {
+    for (const topic of project.topics) {
+      resources.push({ type: 'topic', name: topic.name });
+    }
+  }
+  if (project.secrets) {
+    for (const secret of project.secrets) {
+      resources.push({ type: 'secret', name: secret.name });
+    }
+  }
+  if (project.serviceAccounts) {
+    for (const sa of project.serviceAccounts) {
+      resources.push({ type: 'serviceAccount', name: sa.name });
+    }
+  }
+  if (project.crons) {
+    for (const cron of project.crons) {
+      resources.push({ type: 'cron', name: cron.name });
+    }
+  }
+
+  // Network-level resources
+  if (project.networks) {
+    for (const network of project.networks) {
+      resources.push({ type: 'network', name: network.name });
+
+      if (network.functions) {
+        for (const fn of network.functions) {
+          resources.push({ type: 'function', name: fn.name, network: network.name });
+        }
+      }
+      if (network.containers) {
+        for (const container of network.containers) {
+          resources.push({ type: 'container', name: container.name, network: network.name });
+        }
+      }
+      if (network.databases) {
+        for (const db of network.databases) {
+          resources.push({ type: 'database', name: db.name, network: network.name });
+        }
+      }
+      if (network.caches) {
+        for (const cache of network.caches) {
+          resources.push({ type: 'cache', name: cache.name, network: network.name });
+        }
+      }
+      if (network.uis) {
+        for (const ui of network.uis) {
+          resources.push({ type: 'bucket', name: ui.name, network: network.name }); // UIs create buckets
+        }
+      }
+      if (network.storageBuckets) {
+        for (const bucket of network.storageBuckets) {
+          resources.push({ type: 'bucket', name: bucket.name, network: network.name });
+        }
+      }
+      if (network.loadBalancer) {
+        resources.push({ type: 'loadBalancer', name: network.loadBalancer.name, network: network.name });
+      }
+    }
+  }
+
+  return resources;
+}
+
+/**
+ * Validate a single resource name against GCP naming rules
+ */
+function validateResourceName(
+  type: string,
+  name: string,
+  network?: string
+): ResourceConflict[] {
+  const conflicts: ResourceConflict[] = [];
+  const rules = GCP_NAMING_RULES[type as keyof typeof GCP_NAMING_RULES];
+
+  if (!rules) {
+    return conflicts; // Unknown type, skip validation
+  }
+
+  const location = network ? `in network '${network}'` : '';
+
+  // Check length
+  if (name.length < rules.minLength) {
+    conflicts.push({
+      type: 'length_exceeded',
+      resourceType: type,
+      resourceName: name,
+      message: `${type} '${name}' ${location} is too short (min ${rules.minLength} chars)`,
+      suggestion: `Use a name with at least ${rules.minLength} characters`,
+      severity: 'error',
+    });
+  }
+  if (name.length > rules.maxLength) {
+    conflicts.push({
+      type: 'length_exceeded',
+      resourceType: type,
+      resourceName: name,
+      message: `${type} '${name}' ${location} exceeds max length of ${rules.maxLength} chars (has ${name.length})`,
+      suggestion: `Shorten the name to ${rules.maxLength} characters or less`,
+      severity: 'error',
+    });
+  }
+
+  // Check pattern
+  if (!rules.pattern.test(name)) {
+    conflicts.push({
+      type: 'invalid_name',
+      resourceType: type,
+      resourceName: name,
+      message: `${type} '${name}' ${location} has invalid characters`,
+      suggestion: `Valid names: ${rules.description}`,
+      severity: 'error',
+    });
+  }
+
+  // Check reserved names
+  if (RESERVED_NAMES.has(name.toLowerCase())) {
+    conflicts.push({
+      type: 'reserved_name',
+      resourceType: type,
+      resourceName: name,
+      message: `${type} '${name}' ${location} uses a reserved name`,
+      suggestion: `Choose a different name; '${name}' is reserved`,
+      severity: 'error',
+    });
+  }
+
+  // Special bucket checks
+  if (type === 'bucket') {
+    for (const prefix of RESERVED_BUCKET_PREFIXES) {
+      if (name.toLowerCase().startsWith(prefix)) {
+        conflicts.push({
+          type: 'reserved_name',
+          resourceType: type,
+          resourceName: name,
+          message: `Bucket '${name}' cannot start with '${prefix}' (reserved by Google)`,
+          suggestion: `Choose a name that doesn't start with google-reserved prefixes`,
+          severity: 'error',
+        });
+      }
+    }
+    // Bucket names must be globally unique - warn about common patterns
+    if (name.length < 10 && !name.includes('-')) {
+      conflicts.push({
+        type: 'invalid_name',
+        resourceType: type,
+        resourceName: name,
+        message: `Bucket '${name}' may not be globally unique`,
+        suggestion: `Add a project prefix like 'myproject-${name}' for uniqueness`,
+        severity: 'warning',
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * Check for duplicate resource names within the same scope
+ */
+function checkDuplicates(resources: ConfigResource[]): ResourceConflict[] {
+  const conflicts: ResourceConflict[] = [];
+  const seen = new Map<string, ConfigResource>();
+
+  for (const resource of resources) {
+    // Create a unique key based on type and scope
+    // Some resources are global (buckets, topics), others are network-scoped
+    const isGlobal = ['bucket', 'topic', 'secret', 'serviceAccount', 'cron'].includes(resource.type);
+    const key = isGlobal
+      ? `${resource.type}:${resource.name}`
+      : `${resource.type}:${resource.network || 'default'}:${resource.name}`;
+
+    const existing = seen.get(key);
+    if (existing) {
+      const location = resource.network ? ` in network '${resource.network}'` : '';
+      conflicts.push({
+        type: 'duplicate_name',
+        resourceType: resource.type,
+        resourceName: resource.name,
+        message: `Duplicate ${resource.type} name '${resource.name}'${location}`,
+        suggestion: `Each ${resource.type} must have a unique name`,
+        severity: 'error',
+      });
+    } else {
+      seen.set(key, resource);
+    }
+  }
+
+  // Also check for cross-type conflicts that share GCP resources
+  // E.g., functions and containers both create Cloud Run services
+  const cloudRunServices = new Map<string, ConfigResource>();
+  for (const resource of resources) {
+    if (resource.type === 'function' || resource.type === 'container') {
+      const key = `cloudrun:${resource.name}`;
+      const existing = cloudRunServices.get(key);
+      if (existing && existing.type !== resource.type) {
+        conflicts.push({
+          type: 'duplicate_name',
+          resourceType: 'Cloud Run',
+          resourceName: resource.name,
+          message: `${resource.type} '${resource.name}' conflicts with ${existing.type} '${existing.name}' (both create Cloud Run services)`,
+          suggestion: `Use different names for functions and containers`,
+          severity: 'error',
+        });
+      } else {
+        cloudRunServices.set(key, resource);
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * Check if resources already exist in GCP (optional, requires gcloud)
+ */
+export async function checkGcpResourceConflicts(
+  gcpProjectId: string,
+  region: string,
+  resources: ConfigResource[]
+): Promise<ResourceConflict[]> {
+  const conflicts: ResourceConflict[] = [];
+
+  // Check buckets (they're globally unique)
+  const buckets = resources.filter(r => r.type === 'bucket');
+  for (const bucket of buckets) {
+    try {
+      const { stdout } = await execAsync(
+        `gcloud storage buckets describe gs://${bucket.name} --format="value(name)" 2>/dev/null`,
+        { timeout: 10000 }
+      );
+      if (stdout.trim()) {
+        // Bucket exists - check if it belongs to our project
+        const { stdout: projectStdout } = await execAsync(
+          `gcloud storage buckets describe gs://${bucket.name} --format="value(projectNumber)" 2>/dev/null`,
+          { timeout: 10000 }
+        );
+        const bucketProject = projectStdout.trim();
+
+        // Get our project number
+        const { stdout: ourProjectStdout } = await execAsync(
+          `gcloud projects describe ${gcpProjectId} --format="value(projectNumber)" 2>/dev/null`,
+          { timeout: 10000 }
+        );
+        const ourProject = ourProjectStdout.trim();
+
+        if (bucketProject !== ourProject) {
+          conflicts.push({
+            type: 'gcp_conflict',
+            resourceType: 'bucket',
+            resourceName: bucket.name,
+            message: `Bucket 'gs://${bucket.name}' already exists in a different GCP project`,
+            suggestion: `Choose a different bucket name; this one is globally taken`,
+            severity: 'error',
+          });
+        }
+      }
+    } catch {
+      // Bucket doesn't exist or gcloud error - that's fine
+    }
+  }
+
+  // Check Cloud SQL instances (takes a while, so limit checks)
+  const databases = resources.filter(r => r.type === 'database').slice(0, 3);
+  for (const db of databases) {
+    try {
+      const { stdout } = await execAsync(
+        `gcloud sql instances describe ${db.name} --project=${gcpProjectId} --format="value(name)" 2>/dev/null`,
+        { timeout: 15000 }
+      );
+      if (stdout.trim() === db.name) {
+        conflicts.push({
+          type: 'gcp_conflict',
+          resourceType: 'database',
+          resourceName: db.name,
+          message: `Cloud SQL instance '${db.name}' already exists in project`,
+          suggestion: `Either import the existing instance or choose a different name`,
+          severity: 'warning',
+        });
+      }
+    } catch {
+      // Instance doesn't exist - that's fine
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * Main entry point: validate all resources in config for conflicts
+ */
+export function validateResourceConflicts(
+  config: {
+    project: {
+      name: string;
+      buckets?: Array<{ name: string }>;
+      topics?: Array<{ name: string }>;
+      secrets?: Array<{ name: string }>;
+      serviceAccounts?: Array<{ name: string }>;
+      crons?: Array<{ name: string }>;
+      networks?: Array<{
+        name: string;
+        functions?: Array<{ name: string }>;
+        containers?: Array<{ name: string }>;
+        databases?: Array<{ name: string }>;
+        caches?: Array<{ name: string }>;
+        uis?: Array<{ name: string }>;
+        storageBuckets?: Array<{ name: string }>;
+        loadBalancer?: { name: string };
+      }>;
+    };
+  }
+): ResourceConflictResult {
+  const resources = extractResources(config);
+  const allConflicts: ResourceConflict[] = [];
+
+  // Validate each resource name
+  for (const resource of resources) {
+    const nameConflicts = validateResourceName(resource.type, resource.name, resource.network);
+    allConflicts.push(...nameConflicts);
+  }
+
+  // Check for duplicates
+  const duplicates = checkDuplicates(resources);
+  allConflicts.push(...duplicates);
+
+  // Separate errors from warnings
+  const errors = allConflicts.filter(c => c.severity === 'error');
+  const warnings = allConflicts.filter(c => c.severity === 'warning');
+
+  return {
+    valid: errors.length === 0,
+    conflicts: errors,
+    warnings,
+  };
+}
+
+/**
+ * Display resource conflict results in a formatted way
+ */
+export function displayResourceConflictResults(result: ResourceConflictResult): void {
+  if (result.conflicts.length === 0 && result.warnings.length === 0) {
+    console.log(chalk.green('  ✓ All resource names are valid\n'));
+    return;
+  }
+
+  if (result.conflicts.length > 0) {
+    console.log(chalk.red(`\n  ✗ Found ${result.conflicts.length} resource naming error(s):\n`));
+    for (const conflict of result.conflicts) {
+      console.log(chalk.red(`    ✗ ${conflict.message}`));
+      if (conflict.suggestion) {
+        console.log(chalk.gray(`      → ${conflict.suggestion}`));
+      }
+    }
+  }
+
+  if (result.warnings.length > 0) {
+    console.log(chalk.yellow(`\n  ⚠ Found ${result.warnings.length} resource naming warning(s):\n`));
+    for (const warning of result.warnings) {
+      console.log(chalk.yellow(`    ⚠ ${warning.message}`));
+      if (warning.suggestion) {
+        console.log(chalk.gray(`      → ${warning.suggestion}`));
+      }
+    }
+  }
+
+  console.log();
+}

@@ -46,6 +46,8 @@ import {
   extractGeminiModels,
   validateGeminiModels,
   displayGeminiValidationResults,
+  validateResourceConflicts,
+  displayResourceConflictResults,
 } from '../../services/preflight.service';
 import { getPluginFormatter, loadPlugins } from '../../services/plugin-loader.service';
 import {
@@ -450,6 +452,24 @@ async function runDeploy(
     console.log(chalk.cyan('  Project:'), config.project.name);
     console.log(chalk.cyan('  GCP Project:'), config.project.gcpProjectId);
     console.log(chalk.cyan('  Region:'), config.project.region);
+  }
+
+  // Resource conflict check (only on first attempt, not destroy)
+  if (retryCount === 0 && !options.destroy) {
+    const conflictResult = validateResourceConflicts(config);
+
+    if (!conflictResult.valid) {
+      console.log(chalk.red('\n  Resource Naming Validation Failed\n'));
+      displayResourceConflictResults(conflictResult);
+      console.log(chalk.red('  Fix the naming errors above before deploying.\n'));
+      if (sessionId) await endSession(sessionId, 1);
+      return;
+    }
+
+    if (conflictResult.warnings.length > 0) {
+      console.log(chalk.yellow('\n  Resource Naming Warnings\n'));
+      displayResourceConflictResults(conflictResult);
+    }
   }
 
   // Resolve and show resources
