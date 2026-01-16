@@ -1,0 +1,37 @@
+name: Track npm Downloads
+
+on:
+  schedule:
+    # Run every Monday at 9am UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  track-downloads:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install tsx
+        run: npm install -g tsx
+
+      - name: Track downloads
+        run: npx tsx scripts/track-downloads.ts --save --report
+
+      - name: Commit history update
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          if [ -f .download-history.json ]; then
+            git add .download-history.json
+            git diff --staged --quiet || git commit -m "chore: update download statistics [skip ci]"
+            git push
+          fi

@@ -1,5 +1,9 @@
 # StackSolo
 
+[![npm version](https://img.shields.io/npm/v/@stacksolo/cli.svg)](https://www.npmjs.com/package/@stacksolo/cli)
+[![npm downloads](https://img.shields.io/npm/dm/@stacksolo/cli.svg)](https://www.npmjs.com/package/@stacksolo/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **A CLI tool that helps solo developers scaffold and deploy cloud infrastructure using CDKTF (Terraform).**
 
 > A [MonkeyBarrels](https://monkeybarrels.com) open source project

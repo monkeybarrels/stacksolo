@@ -23,7 +23,9 @@
     "lint": "pnpm run -r lint",
     "clean": "pnpm run -r clean && rm -rf node_modules",
     "cli:link": "pnpm --filter @stacksolo/cli build && cd packages/cli && npm link",
-    "cli:unlink": "cd packages/cli && npm unlink -g @stacksolo/cli"
+    "cli:unlink": "cd packages/cli && npm unlink -g @stacksolo/cli",
+    "stats": "npx tsx scripts/track-downloads.ts",
+    "stats:save": "npx tsx scripts/track-downloads.ts --save --report"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"
