@@ -323,6 +323,9 @@ export interface NetworkConfig {
   // Firewall rules
   firewallRules?: FirewallRuleConfig[];
 
+  // Storage buckets (alternative to project.buckets for network-scoped resources)
+  storageBuckets?: BucketConfig[];
+
   // Resources within this network
   containers?: ContainerConfig[];
   functions?: FunctionConfig[];

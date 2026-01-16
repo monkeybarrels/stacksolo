@@ -312,6 +312,29 @@ function resolveNetwork(network: NetworkConfig, defaultRegion: string): Resolved
     }
   }
 
+  // Create storage buckets defined at network level
+  if (network.storageBuckets) {
+    for (const bucket of network.storageBuckets) {
+      resources.push({
+        id: `bucket-${bucket.name}`,
+        type: 'gcp:storage_bucket',
+        name: bucket.name,
+        config: {
+          name: bucket.name,
+          location: bucket.location || defaultRegion,
+          storageClass: bucket.storageClass || 'STANDARD',
+          versioning: bucket.versioning ?? false,
+          uniformBucketLevelAccess: bucket.uniformBucketLevelAccess ?? true,
+          publicAccess: bucket.publicAccess ?? false,
+          cors: bucket.cors,
+          lifecycle: bucket.lifecycle,
+        },
+        dependsOn: [],
+        network: network.name,
+      });
+    }
+  }
+
   return resources;
 }
 
@@ -739,6 +762,29 @@ function resolveCdktfConfig(
     });
   }
 
+  // 3b. Storage Buckets (from network.storageBuckets)
+  // These are created before functions/containers so they can be used as trigger sources
+  const storageBuckets = network.storageBuckets || [];
+  for (const bucket of storageBuckets) {
+    const bucketId = `bucket-${bucket.name}`;
+    resources.push({
+      id: bucketId,
+      type: 'gcp-cdktf:storage_bucket',
+      name: bucket.name,
+      config: {
+        name: bucket.name,
+        location: bucket.location || projectInfo.region,
+        storageClass: bucket.storageClass || 'STANDARD',
+        uniformBucketLevelAccess: bucket.uniformBucketLevelAccess ?? true,
+        versioning: bucket.versioning ?? false,
+        projectId: projectInfo.gcpProjectId,
+        projectName: projectInfo.name,
+      },
+      dependsOn: [],
+      network: network.name,
+    });
+  }
+
   // 4. Kernel (special container at project level)
   const kernelIds: string[] = [];
   const kernelNames: string[] = [];
@@ -936,6 +982,18 @@ function resolveCdktfConfig(
       functionEnv.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
     }
 
+    // Build dependencies - include trigger bucket/topic if present
+    const functionDeps = [connectorId];
+    if (fn.trigger?.type === 'storage' && fn.trigger.bucket) {
+      // Check if this bucket is in storageBuckets (network-scoped)
+      const storageBuckets = network.storageBuckets || [];
+      if (storageBuckets.some(b => b.name === fn.trigger!.bucket)) {
+        functionDeps.push(`bucket-${fn.trigger.bucket}`);
+      }
+    } else if (fn.trigger?.type === 'pubsub' && fn.trigger.topic) {
+      functionDeps.push(`topic-${fn.trigger.topic}`);
+    }
+
     resources.push({
       id: functionId,
       type: 'gcp-cdktf:cloud_function',
@@ -955,8 +1013,9 @@ function resolveCdktfConfig(
         projectId: projectInfo.gcpProjectId,
         projectName: projectInfo.name,
         environmentVariables: Object.keys(functionEnv).length > 0 ? functionEnv : undefined,
+        trigger: fn.trigger,
       },
-      dependsOn: [connectorId],
+      dependsOn: functionDeps,
       network: network.name,
     });
   }

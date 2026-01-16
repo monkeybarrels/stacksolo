@@ -236,6 +236,7 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
     secretEnvironmentVariables: [${secretEnvVars.map(s => `
       {
         key: '${s.key}',
+        projectId: '${projectId}',
         secret: '${s.secretName}',
         version: 'latest',
       },`).join('')}
@@ -321,8 +322,11 @@ new ProjectIamMember(this, '${config.name}-secret-accessor', {
     }
 
     // Add Eventarc permissions for storage triggers
-    // GCS events require the Cloud Storage service account to have pubsub.publisher role
-    // and the function service account needs eventarc.eventReceiver
+    // GCS events require:
+    // 1. GCS service account needs pubsub.publisher role
+    // 2. Function service account needs eventarc.eventReceiver
+    // 3. Compute service account needs run.invoker on the Cloud Run service
+    // 4. Eventarc service agent needs storage.objectViewer on the trigger bucket
     if (trigger?.type === 'storage') {
       code += `
 
@@ -345,6 +349,24 @@ new ProjectIamMember(this, '${config.name}-gcs-pubsub', {
   project: ${varName}Function.project,
   role: 'roles/pubsub.publisher',
   member: \`serviceAccount:service-\${dataGoogleProjectProject.number}@gs-project-accounts.iam.gserviceaccount.com\`,
+});
+
+// Grant the default compute service account run.invoker on this function
+// Required for Eventarc to invoke the Cloud Run service backing the function
+new CloudRunServiceIamMember(this, '${config.name}-eventarc-invoker', {
+  project: ${varName}Function.project,
+  location: ${varName}Function.location,
+  service: ${varName}Function.name,
+  role: 'roles/run.invoker',
+  member: \`serviceAccount:\${dataGoogleProjectProject.number}-compute@developer.gserviceaccount.com\`,
+});
+
+// Grant the Eventarc service agent read access to the trigger bucket
+// This allows Eventarc to monitor the bucket for events
+new StorageBucketIamMember(this, '${config.name}-eventarc-bucket-access', {
+  bucket: '${trigger.bucket}',
+  role: 'roles/storage.objectViewer',
+  member: \`serviceAccount:service-\${dataGoogleProjectProject.number}@gcp-sa-eventarc.iam.gserviceaccount.com\`,
 });`;
     }
 
@@ -361,10 +383,11 @@ new ProjectIamMember(this, '${config.name}-gcs-pubsub', {
       imports.push("import { ProjectIamMember } from '@cdktf/provider-google/lib/project-iam-member';");
     }
 
-    // Add ProjectService and DataGoogleProject imports for storage triggers
+    // Add imports for storage triggers
     if (trigger?.type === 'storage') {
       imports.push("import { ProjectService } from '@cdktf/provider-google/lib/project-service';");
       imports.push("import { DataGoogleProject } from '@cdktf/provider-google/lib/data-google-project';");
+      imports.push("import { StorageBucketIamMember } from '@cdktf/provider-google/lib/storage-bucket-iam-member';");
     }
 
     return {
