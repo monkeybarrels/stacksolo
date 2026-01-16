@@ -23,10 +23,102 @@ The `@stacksolo/plugin-gcp-cdktf` is the core plugin that generates Terraform CD
 
 | Config | GCP Resource |
 |--------|-------------|
+| `storageBuckets` | Cloud Storage |
 | `functions` | Cloud Functions Gen2 |
 | `uis` | Firebase Hosting |
 | `containers` | Cloud Run |
 | `loadBalancer` | HTTP(S) Load Balancer |
+
+---
+
+## Storage Buckets
+
+Create Cloud Storage buckets within a network. These can be used as trigger sources for functions.
+
+```json
+{
+  "networks": [{
+    "name": "main",
+    "storageBuckets": [
+      { "name": "myapp-uploads" },
+      { "name": "myapp-processed" }
+    ]
+  }]
+}
+```
+
+### Bucket Options
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `name` | `string` | - | Bucket name (required, globally unique) |
+| `location` | `string` | region | Bucket location |
+| `storageClass` | `string` | `STANDARD` | `STANDARD`, `NEARLINE`, `COLDLINE`, `ARCHIVE` |
+| `versioning` | `boolean` | `false` | Enable object versioning |
+| `uniformBucketLevelAccess` | `boolean` | `true` | Use uniform IAM access |
+
+---
+
+## Cloud Functions
+
+Deploy Cloud Functions Gen2 with HTTP or event triggers.
+
+### HTTP Function
+
+```json
+{
+  "functions": [{
+    "name": "api",
+    "entryPoint": "handler",
+    "allowUnauthenticated": true
+  }]
+}
+```
+
+### Storage-Triggered Function
+
+Process files automatically when uploaded to a bucket:
+
+```json
+{
+  "networks": [{
+    "name": "main",
+    "storageBuckets": [
+      { "name": "myapp-uploads" },
+      { "name": "myapp-processed" }
+    ],
+    "functions": [{
+      "name": "processor",
+      "entryPoint": "handler",
+      "memory": "1Gi",
+      "timeout": 300,
+      "trigger": {
+        "type": "storage",
+        "bucket": "myapp-uploads",
+        "event": "finalize"
+      },
+      "env": {
+        "OUTPUT_BUCKET": "myapp-processed"
+      }
+    }]
+  }]
+}
+```
+
+**Storage trigger events:**
+
+| Event | When triggered |
+|-------|---------------|
+| `finalize` | File created or overwritten (default) |
+| `delete` | File deleted |
+| `archive` | File archived (versioned buckets) |
+| `metadataUpdate` | File metadata changed |
+
+The plugin automatically:
+- Enables Eventarc API
+- Grants IAM permissions for GCS to publish events
+- Grants the function permission to receive events
+- Configures the Eventarc trigger
 
 ---
 
@@ -124,6 +216,7 @@ These GCP APIs are enabled automatically:
 - Cloud Run
 - Cloud Storage
 - Compute Engine
+- Eventarc (for storage/pubsub triggers)
 
 ## Learn More
 

@@ -35,6 +35,10 @@ The `stacksolo.config.json` file (located in `.stacksolo/`) defines your entire 
 
     "networks": [{
       "name": "string",
+      "storageBuckets": [{
+        "name": "string",
+        "location": "string"
+      }],
       "functions": [{
         "name": "string",
         "runtime": "nodejs20",
@@ -42,7 +46,12 @@ The `stacksolo.config.json` file (located in `.stacksolo/`) defines your entire 
         "memory": "256MB",
         "timeout": 60,
         "allowUnauthenticated": true,
-        "sourceDir": "string"
+        "sourceDir": "string",
+        "trigger": {
+          "type": "http | storage | pubsub",
+          "bucket": "string",
+          "event": "finalize"
+        }
       }],
       "uis": [{
         "name": "string",
@@ -225,6 +234,42 @@ Networks group related services together.
 **Type:** `string` (required)
 
 Network identifier.
+
+### network.storageBuckets
+**Type:** `BucketConfig[]` (optional)
+
+Cloud Storage buckets scoped to this network. Useful for function triggers.
+
+```json
+{
+  "networks": [{
+    "name": "main",
+    "storageBuckets": [
+      { "name": "uploads", "location": "us-central1" },
+      { "name": "processed" }
+    ],
+    "functions": [{
+      "name": "processor",
+      "trigger": {
+        "type": "storage",
+        "bucket": "uploads",
+        "event": "finalize"
+      }
+    }]
+  }]
+}
+```
+
+Each bucket supports these properties:
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `name` | `string` | - | Bucket name (required) |
+| `location` | `string` | region | Bucket location |
+| `storageClass` | `string` | `STANDARD` | Storage class |
+| `versioning` | `boolean` | `false` | Enable versioning |
+| `uniformBucketLevelAccess` | `boolean` | `true` | Uniform IAM access |
+| `publicAccess` | `boolean` | `false` | Allow public access |
 
 ---
 
