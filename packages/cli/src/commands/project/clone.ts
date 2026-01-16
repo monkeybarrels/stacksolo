@@ -220,27 +220,34 @@ async function cloneStack(
 
     cloneSpinner.succeed('Stack cloned successfully');
 
-    // Apply variable substitutions to config
-    const configPath = path.join(outputDir, 'infrastructure', 'config.json');
-    try {
-      let configContent = await fs.readFile(configPath, 'utf-8');
-
-      // Replace {{variable}} placeholders
-      for (const [key, value] of Object.entries(variables)) {
-        const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
-        configContent = configContent.replace(placeholder, value);
+    // Apply variable substitutions across all files in the project
+    if (Object.keys(variables).length > 0) {
+      const varSpinner = ora('Applying variable substitutions...').start();
+      try {
+        await substituteVariablesInDirectory(outputDir, variables);
+        varSpinner.succeed('Variables substituted in all files');
+      } catch (err) {
+        varSpinner.warn(`Could not substitute all variables: ${err}`);
       }
+    }
 
-      await fs.writeFile(configPath, configContent);
-
-      // Also copy to .stacksolo/stacksolo.config.json for CLI compatibility
-      const stacksoloDir = path.join(outputDir, '.stacksolo');
-      await fs.mkdir(stacksoloDir, { recursive: true });
-      await fs.writeFile(path.join(stacksoloDir, 'stacksolo.config.json'), configContent);
-
-      console.log(chalk.green('  ✓ Configuration applied'));
+    // Ensure .stacksolo directory has the config
+    const stacksoloConfigPath = path.join(outputDir, '.stacksolo', 'stacksolo.config.json');
+    try {
+      await fs.access(stacksoloConfigPath);
+      console.log(chalk.green('  ✓ Configuration ready'));
     } catch {
-      console.log(chalk.yellow('  ⚠ Could not apply configuration (apply manually)'));
+      // Try legacy path
+      const legacyPath = path.join(outputDir, 'infrastructure', 'config.json');
+      try {
+        const configContent = await fs.readFile(legacyPath, 'utf-8');
+        const stacksoloDir = path.join(outputDir, '.stacksolo');
+        await fs.mkdir(stacksoloDir, { recursive: true });
+        await fs.writeFile(stacksoloConfigPath, configContent);
+        console.log(chalk.green('  ✓ Configuration migrated to .stacksolo/'));
+      } catch {
+        console.log(chalk.yellow('  ⚠ No config found (create .stacksolo/stacksolo.config.json manually)'));
+      }
     }
 
     // Summary

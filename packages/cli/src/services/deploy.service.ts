@@ -776,20 +776,51 @@ terraform {
           continue;
         }
 
-        // Upload to GCS using gsutil
-        log(`Uploading ${uiName} to gs://${bucketName}...`);
-        await execAsync(`gsutil -m rsync -r -d "${distPath}" gs://${bucketName}`, { timeout: 300000 });
+        // Check if this UI has a path prefix from load balancer routes
+        // When a UI is served under a path (e.g., /admin/*), we need to upload files
+        // to a matching subfolder so the load balancer can find them
+        let uploadPath = '';
+        for (const network of config.project.networks || []) {
+          const lb = network.loadBalancer;
+          if (lb?.routes) {
+            for (const route of lb.routes) {
+              if (route.backend === uiName && route.path) {
+                // Extract path prefix (e.g., "/admin/*" -> "admin")
+                const pathMatch = route.path.match(/^\/([^/*]+)/);
+                if (pathMatch) {
+                  uploadPath = pathMatch[1];
+                  log(`UI ${uiName} is served at path /${uploadPath}, uploading to subfolder`);
+                }
+              }
+            }
+          }
+        }
+
+        // Upload to GCS using gcloud storage cp (gsutil rsync has issues with subfolder paths)
+        const targetPath = uploadPath ? `gs://${bucketName}/${uploadPath}/` : `gs://${bucketName}/`;
+        log(`Uploading ${uiName} to ${targetPath}...`);
+
+        // Clear existing files first (equivalent to rsync -d)
+        try {
+          await execAsync(`gcloud storage rm -r "${targetPath}**" 2>/dev/null || true`, { timeout: 60000 });
+        } catch {
+          // Ignore if bucket is empty
+        }
+
+        // Copy files to the target path
+        await execAsync(`gcloud storage cp -r "${distPath}"/* ${targetPath}`, { timeout: 300000 });
 
         // SPA routing fix: Copy index.html to common route paths
         // This ensures direct navigation to client-side routes doesn't 404
         // (GCS bucket 404 handling doesn't work through the load balancer)
         const spaRoutes = ['app', 'login', 'dashboard', 'admin', 'settings', 'profile', 'home'];
         const indexPath = path.join(distPath, 'index.html');
+        const bucketPrefix = uploadPath ? `gs://${bucketName}/${uploadPath}` : `gs://${bucketName}`;
         try {
           await fs.access(indexPath);
           for (const route of spaRoutes) {
             try {
-              await execAsync(`gsutil cp gs://${bucketName}/index.html gs://${bucketName}/${route}`, { timeout: 30000 });
+              await execAsync(`gsutil cp ${bucketPrefix}/index.html ${bucketPrefix}/${route}`, { timeout: 30000 });
             } catch {
               // Ignore errors - route may not be needed
             }
@@ -799,7 +830,7 @@ terraform {
           // No index.html - not a SPA
         }
 
-        log(`UI ${uiName} deployed to gs://${bucketName}`);
+        log(`UI ${uiName} deployed to ${targetPath}`);
       }
     }
 
