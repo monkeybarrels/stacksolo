@@ -366,6 +366,9 @@ See `packages/cli/src/generators/k8s/ui.ts` and `function.ts` for implementation
 - `plugins/gcp-cdktf/src/provider.ts` - GCP CDKTF provider definition
 - `plugins/gcp-cdktf/src/resources/` - GCP CDKTF resource type definitions
 - `plugins/helm/src/formatter.ts` - Helm chart OutputFormatter implementation
+- `packages/cli/src/services/terraform-state.service.ts` - Terraform state parsing and resource lookup
+- `packages/cli/src/services/terraform-import.service.ts` - Terraform import commands for state reconciliation
+- `packages/cli/src/services/gcp-scanner.service.ts` - GCP resource scanning for state drift detection
 
 ## OutputFormatter Plugin Capability
 
@@ -788,6 +791,21 @@ Importance Score: 75
 - Output mapping system
 - Environment variable handling
 Importance Score: 80
+
+3. Terraform State Reconciliation (packages/cli/src/commands/infra/refresh.ts)
+- `stacksolo refresh` command reconciles Terraform state with actual GCP resources
+- Uses `gcp-scanner.service.ts` to scan GCP for resources matching project pattern
+- Uses `terraform-state.service.ts` to parse local Terraform state
+- Uses `terraform-import.service.ts` to run `terraform import` for missing resources
+- Removes orphaned state entries via `terraform state rm`
+
+### State Drift Recovery
+When Terraform state becomes out of sync with GCP (failed deploys, manual deletions):
+```bash
+stacksolo refresh --dry-run  # Preview drift
+stacksolo refresh            # Apply fixes (import/remove)
+stacksolo deploy             # Complete the deployment
+```
 
 The architecture emphasizes secure infrastructure deployment with robust dependency management and state tracking, specifically designed for complex cloud resource orchestration.
 

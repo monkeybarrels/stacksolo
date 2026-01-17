@@ -25,6 +25,7 @@ export {
   inventoryCommand,
   doctorCommand,
   mergeCommand,
+  refreshCommand,
 } from './infra';
 
 // Development commands

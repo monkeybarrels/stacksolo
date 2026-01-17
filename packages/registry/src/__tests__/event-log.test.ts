@@ -207,18 +207,19 @@ describe('Event Log', () => {
 
     it('should find events by project', async () => {
       const session = await sessionRepo.create({ command: 'deploy' });
+      const uniqueProjectName = `unique-project-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       await eventRepo.create({
         sessionId: session.id,
-        project: 'unique-project-name',
+        project: uniqueProjectName,
         category: 'internal',
         eventType: 'session_start',
         data: {},
       });
 
-      const events = await eventRepo.findByProject('unique-project-name');
+      const events = await eventRepo.findByProject(uniqueProjectName);
       expect(events.length).toBe(1);
-      expect(events[0].project).toBe('unique-project-name');
+      expect(events[0].project).toBe(uniqueProjectName);
     });
 
     it('should count events for a session', async () => {

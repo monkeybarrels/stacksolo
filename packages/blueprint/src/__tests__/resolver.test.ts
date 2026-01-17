@@ -139,7 +139,7 @@ describe('resolveConfig', () => {
       const container = findResource(resolved, 'container-api');
 
       expect(container).toBeDefined();
-      expect(container?.type).toBe('gcp:cloud_run');
+      expect(container?.type).toBe('gcp-cdktf:cloud_run');
       expect(container?.config.image).toBe('gcr.io/project/api:latest');
       expect(container?.config.memory).toBe('1Gi');
       expect(container?.network).toBe('main');

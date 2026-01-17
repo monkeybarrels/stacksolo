@@ -160,6 +160,23 @@
           "type": "boolean",
           "default": false,
           "description": "Reference an existing Cloud Storage bucket instead of creating a new one"
+        },
+        "website": {
+          "type": "object",
+          "description": "Website configuration for static hosting. Useful for SPAs behind a load balancer.",
+          "properties": {
+            "mainPageSuffix": {
+              "type": "string",
+              "default": "index.html",
+              "description": "Page served for directory requests (e.g., /admin/ -> /admin/index.html)"
+            },
+            "notFoundPage": {
+              "type": "string",
+              "default": "index.html",
+              "description": "Page served for 404 errors. Set to index.html for SPA routing."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": ["name"],

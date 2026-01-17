@@ -251,7 +251,7 @@ describe('config resources', () => {
     const resolved = resolveConfig(config);
 
     expect(resolved.resources.some((r) => r.type === 'gcp:vpc_network')).toBe(true);
-    expect(resolved.resources.some((r) => r.type === 'gcp:cloud_run')).toBe(true);
+    expect(resolved.resources.some((r) => r.type === 'gcp-cdktf:cloud_run')).toBe(true);
     expect(resolved.resources.some((r) => r.type === 'gcp:cloud_sql')).toBe(true);
   });
 

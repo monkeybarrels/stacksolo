@@ -411,6 +411,95 @@ Connects your Cloud Functions to a VPC network. This is how functions access dat
 
 ---
 
+### 6. Storage Bucket
+
+Cloud Storage buckets for storing files. Can be used for uploads, data processing, or static hosting.
+
+**When to use:**
+- Storing uploaded files
+- Triggering functions on file uploads
+- Static file hosting behind a load balancer
+
+**Basic config:**
+
+```json
+{
+  "storageBuckets": [{
+    "name": "uploads",
+    "location": "us-central1"
+  }]
+}
+```
+
+| Field | Required | Default | What it does |
+|-------|----------|---------|--------------|
+| `name` | Yes | - | Bucket name |
+| `location` | No | `US` | Storage location |
+| `storageClass` | No | `STANDARD` | Storage class (`STANDARD`, `NEARLINE`, `COLDLINE`, `ARCHIVE`) |
+| `versioning` | No | `false` | Enable object versioning |
+| `uniformBucketLevelAccess` | No | `true` | Uniform IAM access |
+| `existing` | No | `false` | Reference an existing bucket |
+| `website` | No | - | Website configuration (see below) |
+| `cors` | No | - | CORS configuration |
+
+**With website configuration (for SPAs):**
+
+```json
+{
+  "storageBuckets": [{
+    "name": "admin-ui",
+    "website": {
+      "mainPageSuffix": "index.html",
+      "notFoundPage": "index.html"
+    }
+  }]
+}
+```
+
+The `website` config makes the bucket work as a static website:
+- `mainPageSuffix` - Page served for directory requests (e.g., `/admin/` → `/admin/index.html`)
+- `notFoundPage` - Page served for 404 errors. Set to `index.html` for SPA routing.
+
+**With CORS (for browser uploads):**
+
+```json
+{
+  "storageBuckets": [{
+    "name": "uploads",
+    "cors": [{
+      "origin": ["https://app.example.com"],
+      "method": ["GET", "PUT", "POST"],
+      "responseHeader": ["Content-Type"],
+      "maxAgeSeconds": 3600
+    }]
+  }]
+}
+```
+
+**Using as a function trigger:**
+
+```json
+{
+  "storageBuckets": [
+    { "name": "uploads" },
+    { "name": "processed" }
+  ],
+  "functions": [{
+    "name": "processor",
+    "trigger": {
+      "type": "storage",
+      "bucket": "uploads",
+      "event": "finalize"
+    },
+    "env": {
+      "OUTPUT_BUCKET": "processed"
+    }
+  }]
+}
+```
+
+---
+
 ## Complete Examples
 
 ### Example 1: Simple API
@@ -823,6 +912,40 @@ Check your route order. More specific paths should come first:
   ]
 }
 ```
+
+### Path prefixes are not stripped (GCP behavior)
+
+GCP load balancers forward the **full path** to backends. This is different from Kubernetes ingress which strips path prefixes.
+
+| Route | Request URL | Backend receives |
+|-------|-------------|-----------------|
+| `/api/*` → function | `/api/users` | `/api/users` |
+| `/admin/*` → bucket | `/admin/app.js` | `/admin/app.js` |
+
+**For functions:** Your code receives the full path including the prefix:
+
+```typescript
+// Route: /api/* → api function
+app.get('/api/users', (req, res) => {  // ✅ Include /api prefix
+  res.json({ users: [] });
+});
+
+app.get('/users', (req, res) => {      // ❌ Won't match
+  res.json({ users: [] });
+});
+```
+
+**For storage buckets:** Upload files at the full path:
+
+```bash
+# Route: /admin/* → admin-ui bucket
+# Files must be at bucket/admin/...
+gsutil -m cp -r dist/* gs://my-bucket/admin/
+```
+
+This means:
+- `https://example.com/admin/` → served from `gs://my-bucket/admin/index.html`
+- `https://example.com/admin/app.js` → served from `gs://my-bucket/admin/app.js`
 
 ### Frontend routes return 404
 

@@ -29,6 +29,7 @@ npm install -g stacksolo
 | `stacksolo status` | Show deployment status |
 | `stacksolo events` | View deploy event logs |
 | `stacksolo inventory` | Scan and manage GCP resources |
+| `stacksolo refresh` | Reconcile Terraform state with GCP |
 | `stacksolo dev` | Start local development |
 | `stacksolo logs` | View deployment logs |
 | `stacksolo output` | Show resource outputs |
@@ -513,6 +514,69 @@ stacksolo inventory share "VPC Network" my-vpc second-project third-project
 - **Unmanaged** - GCP resources without StackSolo labels
 
 **See also:** [Resource Sharing Guide](/guides/resource-sharing/)
+
+### `stacksolo refresh`
+
+Reconcile Terraform state with actual GCP resources. Use this when state becomes out of sync after failed deploys, manual deletions, or imports from another environment.
+
+```bash
+stacksolo refresh [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Preview changes without applying |
+| `-y, --yes` | Skip confirmation prompts |
+
+**What it does:**
+
+1. **Scans GCP** for resources matching your project's naming pattern
+2. **Reads Terraform state** from `.stacksolo/cdktf/cdktf.out/stacks/main/terraform.tfstate`
+3. **Finds drift** by comparing GCP resources with state:
+   - Resources in GCP but not in state → need import
+   - Resources in state but not in GCP → need removal
+4. **Applies fixes** by running `terraform import` and `terraform state rm`
+
+**Examples:**
+
+```bash
+# Preview what would change
+stacksolo refresh --dry-run
+
+# Apply changes with confirmation
+stacksolo refresh
+
+# Apply changes without prompts
+stacksolo refresh -y
+```
+
+**Example output:**
+
+```
+  Refresh Plan:
+
+  Resources to import (exist in GCP, not in state):
+    + storage: my-app-uploads
+    + cloudfunctions: my-app-processor
+
+  Resources to remove from state (in state, not in GCP):
+    - google_storage_bucket.my-app-old-bucket
+
+? Apply 2 imports and 1 removals? (Y/n)
+```
+
+**When to use:**
+
+| Scenario | Solution |
+|----------|----------|
+| Deploy failed partway, some resources created | `stacksolo refresh` then `stacksolo deploy` |
+| Manually deleted a resource in GCP Console | `stacksolo refresh` to remove from state |
+| Imported project from different machine | `stacksolo refresh` to sync state |
+| "Resource already exists" errors | `stacksolo refresh --dry-run` to see drift |
+
+**See also:** [Deployment Troubleshooting](/guides/deployment/#troubleshooting)
 
 ## Development Commands
 

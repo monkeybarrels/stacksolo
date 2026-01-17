@@ -368,10 +368,50 @@ Each bucket supports these properties:
 |----------|------|---------|-------------|
 | `name` | `string` | - | Bucket name (required) |
 | `location` | `string` | region | Bucket location |
-| `storageClass` | `string` | `STANDARD` | Storage class |
+| `storageClass` | `string` | `STANDARD` | Storage class (`STANDARD`, `NEARLINE`, `COLDLINE`, `ARCHIVE`) |
 | `versioning` | `boolean` | `false` | Enable versioning |
 | `uniformBucketLevelAccess` | `boolean` | `true` | Uniform IAM access |
 | `publicAccess` | `boolean` | `false` | Allow public access |
+| `existing` | `boolean` | `false` | Reference an existing bucket instead of creating new |
+| `website` | `object` | - | Website configuration for static hosting (see below) |
+| `cors` | `array` | - | CORS configuration rules |
+
+#### Website Configuration
+
+Configure a bucket for static website hosting. Useful for SPAs behind a load balancer.
+
+```json
+{
+  "storageBuckets": [{
+    "name": "my-static-site",
+    "website": {
+      "mainPageSuffix": "index.html",
+      "notFoundPage": "index.html"
+    }
+  }]
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `mainPageSuffix` | `string` | `index.html` | Page served for directory requests (e.g., `/admin/` → `/admin/index.html`) |
+| `notFoundPage` | `string` | `index.html` | Page served for 404 errors. Set to `index.html` for SPA routing. |
+
+#### CORS Configuration
+
+```json
+{
+  "storageBuckets": [{
+    "name": "api-uploads",
+    "cors": [{
+      "origin": ["https://app.example.com"],
+      "method": ["GET", "PUT", "POST"],
+      "responseHeader": ["Content-Type"],
+      "maxAgeSeconds": 3600
+    }]
+  }]
+}
+```
 
 ---
 

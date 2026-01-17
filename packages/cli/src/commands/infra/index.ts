@@ -15,3 +15,4 @@ export { eventsCommand } from './events';
 export { inventoryCommand } from './inventory';
 export { doctorCommand } from './doctor';
 export { mergeCommand } from './merge';
+export { refreshCommand } from './refresh';

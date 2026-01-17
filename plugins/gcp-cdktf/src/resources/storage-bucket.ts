@@ -74,6 +74,25 @@ export const storageBucket = defineResource({
         description: 'Reference an existing Cloud Storage bucket instead of creating a new one.',
         default: false,
       },
+      website: {
+        type: 'object',
+        title: 'Website Configuration',
+        description: 'Configure the bucket as a static website. Useful when serving static files via load balancer.',
+        properties: {
+          mainPageSuffix: {
+            type: 'string',
+            title: 'Main Page Suffix',
+            description: 'The page to serve when a directory is requested (e.g., index.html)',
+            default: 'index.html',
+          },
+          notFoundPage: {
+            type: 'string',
+            title: 'Not Found Page',
+            description: 'The page to serve for 404 errors. For SPAs, set to index.html.',
+            default: 'index.html',
+          },
+        },
+      },
     },
     required: ['name'],
   },
@@ -97,6 +116,10 @@ export const storageBucket = defineResource({
       existing?: boolean;
       projectId?: string;
       projectName?: string;
+      website?: {
+        mainPageSuffix?: string;
+        notFoundPage?: string;
+      };
     };
 
     // If using an existing bucket, use a data source lookup
@@ -142,6 +165,18 @@ const ${varName}Bucket = new DataGoogleStorageBucket(this, '${varName}-bucket', 
   ],`;
     }
 
+    // Website configuration (for static site hosting / SPA support)
+    let websiteBlock = '';
+    if (bucketConfig.website) {
+      const mainPageSuffix = bucketConfig.website.mainPageSuffix || 'index.html';
+      const notFoundPage = bucketConfig.website.notFoundPage || 'index.html';
+      websiteBlock = `
+  website: {
+    mainPageSuffix: '${mainPageSuffix}',
+    notFoundPage: '${notFoundPage}',
+  },`;
+    }
+
     const code = `// GCS bucket: ${config.name}
 const ${varName}Bucket = new StorageBucket(this, '${varName}-bucket', {
   name: '${config.name}',
@@ -151,7 +186,7 @@ const ${varName}Bucket = new StorageBucket(this, '${varName}-bucket', {
   uniformBucketLevelAccess: ${uniformBucketLevelAccess},
   versioning: {
     enabled: ${versioning},
-  },${corsBlock}
+  },${corsBlock}${websiteBlock}
   forceDestroy: true,
   ${labelsCode}
 });`;

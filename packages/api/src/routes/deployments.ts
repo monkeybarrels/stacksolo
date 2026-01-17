@@ -6,7 +6,6 @@ import type {
   ResourceRepository,
   DeploymentRepository,
 } from '../repositories/interfaces.js';
-import { PulumiService } from '../services/pulumi.service.js';
 import { CodegenService } from '../services/codegen.service.js';
 import { BuildService } from '../services/build.service.js';
 import { ConfigService } from '../services/config.service.js';
@@ -18,7 +17,6 @@ export function createDeploymentRouter(
   resourceRepo: ResourceRepository,
   deploymentRepo: DeploymentRepository
 ) {
-  const pulumiService = new PulumiService(deploymentRepo);
   const codegenService = new CodegenService();
   const buildService = new BuildService(deploymentRepo);
   const configService = new ConfigService();
@@ -125,10 +123,8 @@ export function createDeploymentRouter(
         // Create deployment record
         const deployment = await deploymentRepo.create(input.projectId);
 
-        // Run deployment in background
-        pulumiService.deploy(project, resources, deployment).catch((err) => {
-          console.error('Deployment error:', err);
-        });
+        // TODO: Legacy API - use CLI `stacksolo deploy` instead
+        throw new Error('API deployment is deprecated. Use CLI: stacksolo deploy');
 
         return deployment;
       }),
@@ -137,27 +133,16 @@ export function createDeploymentRouter(
     preview: t.procedure
       .input(z.object({ projectId: z.string() }))
       .mutation(async ({ input }) => {
-        const project = await projectRepo.findById(input.projectId);
-        if (!project) {
-          throw new Error('Project not found');
-        }
-
-        const resources = await resourceRepo.findByProjectId(input.projectId);
-        return pulumiService.preview(project, resources);
+        // TODO: Legacy API - use CLI `stacksolo deploy --preview` instead
+        throw new Error('API preview is deprecated. Use CLI: stacksolo deploy --preview');
       }),
 
     // Destroy deployed resources
     destroy: t.procedure
       .input(z.object({ projectId: z.string() }))
       .mutation(async ({ input }) => {
-        const project = await projectRepo.findById(input.projectId);
-        if (!project) {
-          throw new Error('Project not found');
-        }
-
-        const resources = await resourceRepo.findByProjectId(input.projectId);
-        await pulumiService.destroy(project, resources);
-        return { success: true };
+        // TODO: Legacy API - use CLI `stacksolo destroy` instead
+        throw new Error('API destroy is deprecated. Use CLI: stacksolo destroy');
       }),
 
     // Build Docker image for app pattern

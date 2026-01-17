@@ -374,12 +374,100 @@ The resource may have been created outside of StackSolo. Options:
 
 ### State out of sync
 
-Reset and reimport:
+Use the refresh command to reconcile Terraform state with GCP:
+
+```bash
+# Preview what needs to sync
+stacksolo refresh --dry-run
+
+# Apply sync (imports missing, removes orphaned)
+stacksolo refresh
+
+# Then deploy normally
+stacksolo deploy
+```
+
+For a complete reset (deletes local state, requires fresh deploy):
 
 ```bash
 stacksolo reset
-stacksolo deploy --refresh
+stacksolo deploy
 ```
+
+### Workspace protocol errors (pnpm monorepos)
+
+If you see errors like `Invalid dependency version: workspace:*`, you're using pnpm workspaces. StackSolo dev containers use npm and don't understand the `workspace:*` protocol.
+
+**Solution: Pre-build mode**
+
+1. Configure your project for pnpm:
+
+```json
+{
+  "project": {
+    "packageManager": "pnpm"
+  }
+}
+```
+
+2. Bundle workspace dependencies at build time using `tsup` or Vite:
+
+```typescript
+// tsup.config.ts
+export default defineConfig({
+  noExternal: ['@your-org/shared-utils']  // Bundle workspace packages
+});
+```
+
+3. Move workspace packages to `devDependencies`:
+
+```json
+{
+  "devDependencies": {
+    "@your-org/shared-utils": "workspace:*"
+  }
+}
+```
+
+4. Build before running StackSolo dev:
+
+```bash
+pnpm build
+stacksolo dev
+```
+
+When StackSolo detects a `dist/` folder, it serves the pre-built artifacts without needing to resolve workspace dependencies.
+
+### Manual deployment translation
+
+When deploying manually with `gcloud`, translate StackSolo secret references:
+
+| StackSolo Config | gcloud Equivalent |
+|------------------|-------------------|
+| `"API_KEY": "@secret/api-key"` | `--set-secrets="API_KEY=api-key:latest"` |
+| `"DB_URL": "@secret/database-url"` | `--set-secrets="DB_URL=database-url:latest"` |
+
+**Naming convention:**
+- Environment variable: `SCREAMING_SNAKE_CASE` (e.g., `OPENAI_API_KEY`)
+- Secret name: `kebab-case` (e.g., `openai-api-key`)
+
+### Load balancer path routing
+
+GCP load balancers do NOT strip path prefixes from requests. If you route `/admin/*` to a bucket backend:
+
+| Route | File Location | URL Accessed |
+|-------|--------------|--------------|
+| `/admin/*` | `bucket/admin/index.html` | `https://example.com/admin/` |
+| `/admin/*` | `bucket/admin/app.js` | `https://example.com/admin/app.js` |
+
+**Important:** Files must be stored at the exact path the load balancer routes to. For example:
+
+```bash
+# For route /admin/* pointing to my-bucket
+gsutil -m cp -r dist/* gs://my-bucket/admin/
+```
+
+This differs from Kubernetes nginx ingress, which strips path prefixes by default.
 
 ## Next Steps
 

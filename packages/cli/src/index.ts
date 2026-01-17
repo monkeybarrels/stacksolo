@@ -26,6 +26,7 @@ import {
   inventoryCommand,
   doctorCommand,
   mergeCommand,
+  refreshCommand,
   // Development commands
   buildCommand,
   devCommand,
@@ -68,6 +69,7 @@ program.addCommand(eventsCommand);
 program.addCommand(inventoryCommand);
 program.addCommand(doctorCommand);
 program.addCommand(mergeCommand);
+program.addCommand(refreshCommand);
 
 // Development commands
 program.addCommand(buildCommand);
