@@ -698,6 +698,72 @@ function resolveCdktfConfig(
   const networkName = useExistingNetwork ? network.name : `${projectInfo.name}-${network.name}`;
   const connectorName = `${projectInfo.name}-connector`;
 
+  // =========================================================================
+  // Build lookup maps for resolving @function/ and @container/ references
+  // These allow env vars like "@function/mcp.url" to resolve to CDKTF code refs
+  // =========================================================================
+  function toVariableName(name: string): string {
+    return name.replace(/[^a-zA-Z0-9]/g, '_').replace(/^(\d)/, '_$1');
+  }
+
+  // Map short function name (e.g., "mcp") to CDKTF expression (e.g., "claimready_mcpFunction.url")
+  const functionUrlRefs = new Map<string, string>();
+  for (const fn of functions) {
+    const fullName = `${projectInfo.name}-${fn.name}`;
+    const varName = toVariableName(fullName);
+    functionUrlRefs.set(fn.name, `${varName}Function.url`);
+  }
+
+  // Map short container name to CDKTF expression
+  const containerUrlRefs = new Map<string, string>();
+  for (const container of containers) {
+    const fullName = `${projectInfo.name}-${container.name}`;
+    const varName = toVariableName(fullName);
+    containerUrlRefs.set(container.name, `${varName}Service.status.get(0).url`);
+  }
+
+  /**
+   * Resolve @function/ and @container/ references in env vars to CDKTF interpolation strings.
+   * This allows cross-resource references at deploy time.
+   *
+   * Examples:
+   *   "@function/mcp.url" -> "${claimready_mcpFunction.url}"
+   *   "@function/mcp" -> "${claimready_mcpFunction.url}" (url is default)
+   *   "@container/api.url" -> "${claimready_apiService.status.get(0).url}"
+   */
+  function resolveCdktfEnvReferences(env: Record<string, string> | undefined): Record<string, string> {
+    if (!env) return {};
+    const resolved: Record<string, string> = {};
+    for (const [key, value] of Object.entries(env)) {
+      if (typeof value === 'string' && value.startsWith('@function/')) {
+        // Match @function/name or @function/name.url
+        const match = value.match(/^@function\/([a-z0-9-]+)(?:\.url)?$/);
+        if (match) {
+          const fnName = match[1];
+          const cdktfRef = functionUrlRefs.get(fnName);
+          if (cdktfRef) {
+            // Wrap in ${} for CDKTF interpolation - resource generators will unwrap it
+            resolved[key] = `\${${cdktfRef}}`;
+            continue;
+          }
+        }
+      }
+      if (typeof value === 'string' && value.startsWith('@container/')) {
+        const match = value.match(/^@container\/([a-z0-9-]+)(?:\.url)?$/);
+        if (match) {
+          const containerName = match[1];
+          const cdktfRef = containerUrlRefs.get(containerName);
+          if (cdktfRef) {
+            resolved[key] = `\${${cdktfRef}}`;
+            continue;
+          }
+        }
+      }
+      resolved[key] = value;
+    }
+    return resolved;
+  }
+
   const networkId = `network-${network.name}`;
   const connectorId = `connector-${network.name}`;
   // Use centralized naming for load balancer
@@ -920,14 +986,17 @@ function resolveCdktfConfig(
       `${projectInfo.region}-docker.pkg.dev/${projectInfo.gcpProjectId}/${registryName}/${container.name}:latest`;
 
     // Merge container env with kernel URL if zeroTrustAuth is configured
-    const containerEnv = { ...container.env };
+    // Then resolve @function/ and @container/ references to CDKTF interpolations
+    const containerEnvRaw = { ...container.env };
     if (kernelUrl) {
-      containerEnv.KERNEL_URL = kernelUrl;
+      containerEnvRaw.KERNEL_URL = kernelUrl;
     }
     // Auto-inject FIREBASE_PROJECT_ID if not set (prevents Firebase auth issues)
-    if (!containerEnv.FIREBASE_PROJECT_ID) {
-      containerEnv.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
+    if (!containerEnvRaw.FIREBASE_PROJECT_ID) {
+      containerEnvRaw.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
     }
+    // Resolve @function/ and @container/ references to CDKTF code references
+    const containerEnv = resolveCdktfEnvReferences(containerEnvRaw);
 
     // Container depends on kernel if zeroTrustAuth is configured
     const containerDeps = [connectorId, registryId];
@@ -974,13 +1043,16 @@ function resolveCdktfConfig(
     // Build environment variables
     // Auto-inject GOOGLE_CLOUD_PROJECT when gcpKernel is configured (required for Firebase/Firestore)
     // Auto-inject FIREBASE_PROJECT_ID if not set (prevents Firebase auth token validation issues)
-    const functionEnv: Record<string, string> = {
+    // Then resolve @function/ and @container/ references to CDKTF interpolations
+    const functionEnvRaw: Record<string, string> = {
       ...(hasGcpKernel ? { GOOGLE_CLOUD_PROJECT: projectInfo.gcpProjectId } : {}),
       ...fn.env,
     };
-    if (!functionEnv.FIREBASE_PROJECT_ID) {
-      functionEnv.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
+    if (!functionEnvRaw.FIREBASE_PROJECT_ID) {
+      functionEnvRaw.FIREBASE_PROJECT_ID = projectInfo.gcpProjectId;
     }
+    // Resolve @function/ and @container/ references to CDKTF code references
+    const functionEnv = resolveCdktfEnvReferences(functionEnvRaw);
 
     // Build dependencies - include trigger bucket/topic if present
     const functionDeps = [connectorId];

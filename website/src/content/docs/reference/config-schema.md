@@ -133,6 +133,108 @@ List of plugins to load. Plugins are npm packages.
 
 ---
 
+## Cross-Resource References
+
+StackSolo supports referencing outputs from other resources in environment variables. This enables service-to-service communication without hardcoding URLs.
+
+### Reference Syntax
+
+References use the `@type/name.property` format:
+
+| Syntax | Description | Resolves To |
+|--------|-------------|-------------|
+| `@function/name` | Function URL (default) | Cloud Function HTTPS URL |
+| `@function/name.url` | Function URL (explicit) | Cloud Function HTTPS URL |
+| `@container/name` | Container URL (default) | Cloud Run service URL |
+| `@container/name.url` | Container URL (explicit) | Cloud Run service URL |
+| `@secret/name` | Secret value | Secret Manager secret (latest version) |
+
+### Example: Container calling a Function
+
+```json
+{
+  "networks": [{
+    "name": "main",
+    "functions": [{
+      "name": "mcp",
+      "entryPoint": "handler",
+      "allowUnauthenticated": true
+    }],
+    "containers": [{
+      "name": "api",
+      "env": {
+        "MCP_URL": "@function/mcp.url"
+      }
+    }]
+  }]
+}
+```
+
+At deploy time, `@function/mcp.url` is resolved to the actual Cloud Function URL. The container receives the real URL as an environment variable.
+
+### Example: Function calling another Function
+
+```json
+{
+  "functions": [
+    { "name": "processor", "entryPoint": "handler" },
+    {
+      "name": "orchestrator",
+      "entryPoint": "handler",
+      "env": {
+        "PROCESSOR_URL": "@function/processor.url"
+      }
+    }
+  ]
+}
+```
+
+### Example: Multiple cross-references
+
+```json
+{
+  "networks": [{
+    "name": "main",
+    "functions": [
+      { "name": "auth", "entryPoint": "handler" },
+      { "name": "payments", "entryPoint": "handler" }
+    ],
+    "containers": [{
+      "name": "api",
+      "env": {
+        "AUTH_SERVICE_URL": "@function/auth.url",
+        "PAYMENTS_SERVICE_URL": "@function/payments.url",
+        "DATABASE_PASSWORD": "@secret/db-password"
+      }
+    }]
+  }]
+}
+```
+
+### How It Works
+
+1. During deployment, StackSolo builds a dependency graph from references
+2. Referenced resources are deployed first
+3. References are resolved to CDKTF code references (e.g., `${authFunction.url}`)
+4. Terraform substitutes actual URLs at apply time
+
+This means you don't need to know URLs in advance—they're injected automatically.
+
+### Supported Reference Types
+
+| Type | Properties | Default Property |
+|------|------------|------------------|
+| `function` | `url`, `name` | `url` |
+| `container` | `url`, `name` | `url` |
+| `secret` | (value) | (value) |
+| `bucket` | `name`, `url`, `selfLink` | `name` |
+| `database` | `connectionString`, `privateIp`, `publicIp`, `instanceName`, `name` | `connectionString` |
+| `cache` | `host`, `port`, `connectionString`, `authString` | `host` |
+| `topic` | `name`, `id` | `name` |
+| `queue` | `name`, `id` | `name` |
+
+---
+
 ## Cloudflare
 
 Configuration for Cloudflare DNS integration. Requires `@stacksolo/plugin-cloudflare`.

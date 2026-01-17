@@ -6,27 +6,36 @@ function toVariableName(name: string): string {
 }
 
 /**
- * Parse @secret/name references from env vars
- * Returns { regularEnvVars, secretEnvVars }
+ * Parse env vars into three categories:
+ * - regularEnvVars: Plain string values
+ * - secretEnvVars: @secret/name references (become secretEnvironmentVariables)
+ * - cdktfRefEnvVars: ${...} CDKTF code references (become unquoted code)
  */
-function parseSecretReferences(env: Record<string, string>): {
+function parseEnvVars(env: Record<string, string>): {
   regularEnvVars: Record<string, string>;
   secretEnvVars: Array<{ key: string; secretName: string }>;
+  cdktfRefEnvVars: Array<{ key: string; cdktfRef: string }>;
 } {
   const regularEnvVars: Record<string, string> = {};
   const secretEnvVars: Array<{ key: string; secretName: string }> = [];
+  const cdktfRefEnvVars: Array<{ key: string; cdktfRef: string }> = [];
 
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === 'string' && value.startsWith('@secret/')) {
       // Extract secret name from @secret/secret-name
       const secretName = value.replace('@secret/', '');
       secretEnvVars.push({ key, secretName });
+    } else if (typeof value === 'string' && value.startsWith('${') && value.endsWith('}')) {
+      // CDKTF reference like ${claimready_mcpFunction.url}
+      // Extract the code reference without ${} wrapper
+      const cdktfRef = value.slice(2, -1);
+      cdktfRefEnvVars.push({ key, cdktfRef });
     } else {
       regularEnvVars[key] = value;
     }
   }
 
-  return { regularEnvVars, secretEnvVars };
+  return { regularEnvVars, secretEnvVars, cdktfRefEnvVars };
 }
 
 export const cloudFunction = defineResource({
@@ -176,8 +185,8 @@ export const cloudFunction = defineResource({
       ...(fnConfig.environmentVariables || {}),
     };
 
-    // Separate regular env vars from @secret/ references
-    const { regularEnvVars, secretEnvVars } = parseSecretReferences(allEnvVars);
+    // Separate regular env vars from @secret/ and ${...} CDKTF references
+    const { regularEnvVars, secretEnvVars, cdktfRefEnvVars } = parseEnvVars(allEnvVars);
 
     const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.CLOUD_FUNCTION);
     const trigger = fnConfig.trigger;
@@ -231,9 +240,9 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
     minInstanceCount: ${minInstances},
     ingressSettings: 'ALLOW_ALL',
     allTrafficOnLatestRevision: true,
-    environmentVariables: {${Object.entries(regularEnvVars).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}
+    environmentVariables: {${Object.entries(regularEnvVars).map(([k, v]) => `\n      ${k}: '${v}',`).join('')}${cdktfRefEnvVars.map((r: { key: string; cdktfRef: string }) => `\n      ${r.key}: ${r.cdktfRef},`).join('')}
     },${secretEnvVars.length > 0 ? `
-    secretEnvironmentVariables: [${secretEnvVars.map(s => `
+    secretEnvironmentVariables: [${secretEnvVars.map((s: { key: string; secretName: string }) => `
       {
         key: '${s.key}',
         projectId: '${projectId}',
@@ -266,6 +275,7 @@ const ${varName}Function = new Cloudfunctions2Function(this, '${config.name}', {
   eventTrigger: {
     eventType: '${eventType}',
     triggerRegion: '${location}',
+    serviceAccountEmail: \`\${dataGoogleProjectProject.number}-compute@developer.gserviceaccount.com\`,
     eventFilters: [{
       attribute: 'bucket',
       value: '${trigger.bucket}',
@@ -363,10 +373,12 @@ new CloudRunServiceIamMember(this, '${config.name}-eventarc-invoker', {
 
 // Grant the Eventarc service agent read access to the trigger bucket
 // This allows Eventarc to monitor the bucket for events
-new StorageBucketIamMember(this, '${config.name}-eventarc-bucket-access', {
+// Note: The Eventarc service agent is created when the API is enabled, so we depend on it
+const ${varName}EventarcBucketAccess = new StorageBucketIamMember(this, '${config.name}-eventarc-bucket-access', {
   bucket: '${trigger.bucket}',
   role: 'roles/storage.objectViewer',
   member: \`serviceAccount:service-\${dataGoogleProjectProject.number}@gcp-sa-eventarc.iam.gserviceaccount.com\`,
+  dependsOn: [${varName}EventarcApi],
 });`;
     }
 
