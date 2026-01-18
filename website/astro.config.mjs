@@ -25,6 +25,20 @@ export default defineConfig({
 					],
 				},
 				{
+					label: 'Templates',
+					items: [
+						{ label: 'Overview', slug: 'templates/index' },
+						{ label: 'SaaS Starter', slug: 'templates/saas-starter' },
+						{ label: 'AI Chat', slug: 'templates/ai-chat' },
+						{ label: 'API Gateway', slug: 'templates/api-gateway' },
+						{ label: 'E-commerce', slug: 'templates/ecommerce' },
+						{ label: 'Firebase App', slug: 'templates/firebase-app' },
+						{ label: 'Firebase + PostgreSQL', slug: 'templates/firebase-postgres' },
+						{ label: 'API Starter', slug: 'templates/api-starter' },
+						{ label: 'Static Site', slug: 'templates/static-site' },
+					],
+				},
+				{
 					label: 'Guides',
 					items: [
 						{ label: 'Configuration', slug: 'guides/configuration' },
