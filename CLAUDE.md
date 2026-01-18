@@ -398,6 +398,131 @@ export const plugin: Plugin = {
 
 The `--helm` flag on `stacksolo deploy` uses this capability for Kubernetes backend projects.
 
+## Templates and Micro-Templates System
+
+StackSolo has two types of reusable code assets stored in the `stacksolo-architectures` repository:
+
+### Full Templates
+Complete project scaffolds with multiple resources (functions, UIs, databases, etc.)
+- Location: `stacksolo-architectures/templates/`
+- Manifest: `stacksolo-architectures/templates.json`
+- Used via: `stacksolo init --template <template-id>` or `stacksolo add <template-id>`
+
+### Micro-Templates
+Single-purpose components that can be mixed and matched into existing projects.
+- Location: `stacksolo-architectures/micro-templates/`
+- Manifest: `stacksolo-architectures/micro-templates.json`
+- Used via: `stacksolo add <micro-template-id>`
+
+**Micro-template types:**
+| Type | Description | Source Location |
+|------|-------------|-----------------|
+| `function` | Single Cloud Function | `micro-templates/<id>/files/functions/<name>/` |
+| `ui` | Single Vue/React app | `micro-templates/<id>/files/apps/<name>/` |
+
+### Micro-Template Structure
+
+Each micro-template contains:
+```
+micro-templates/<id>/
+├── template.json      # Metadata, config fragment, dependencies
+├── README.md          # Usage instructions
+└── files/             # Source files to copy
+    ├── functions/     # For function types
+    │   └── <name>/
+    └── apps/          # For UI types
+        └── <name>/
+```
+
+### template.json Schema
+
+```json
+{
+  "id": "stripe-webhook",
+  "name": "Stripe Webhook Handler",
+  "type": "function",
+  "description": "Handle Stripe webhook events",
+  "variables": [],
+  "secrets": ["stripe-secret-key", "stripe-webhook-secret"],
+  "dependencies": { "stripe": "^14.0.0" },
+  "config": {
+    "function": {
+      "name": "webhooks",
+      "runtime": "nodejs20",
+      "entryPoint": "handler",
+      "memory": "256Mi",
+      "sourceDir": "./functions/webhooks"
+    }
+  }
+}
+```
+
+### Creating a New Micro-Template
+
+1. Add entry to `micro-templates.json`:
+```json
+{
+  "id": "my-template",
+  "name": "My Template",
+  "type": "function",
+  "description": "What it does",
+  "tags": ["tag1", "tag2"],
+  "path": "micro-templates/my-template"
+}
+```
+
+2. Create `micro-templates/my-template/template.json` with full metadata
+
+3. Create source files in `micro-templates/my-template/files/`
+
+4. Create `README.md` with usage instructions
+
+### stacksolo add Command
+
+The `add` command supports both templates and micro-templates:
+
+```bash
+# List all available
+stacksolo add --list
+
+# Add a micro-template
+stacksolo add stripe-webhook
+
+# Add with name prefix (avoids conflicts)
+stacksolo add auth-pages --name admin
+
+# Preview without applying
+stacksolo add chat-api --dry-run
+```
+
+**Key files:**
+| File | Purpose |
+|------|---------|
+| `packages/cli/src/commands/project/add.ts` | Main add command logic |
+| `packages/cli/src/services/template.service.ts` | Full template fetching |
+| `packages/cli/src/services/micro-template.service.ts` | Micro-template fetching |
+
+### How Add Works
+
+1. Fetches manifest from GitHub (templates.json or micro-templates.json)
+2. Downloads template files to temp directory
+3. Applies variable substitutions (projectName, gcpProjectId, region)
+4. Copies files to appropriate locations (functions/, apps/)
+5. Merges config fragment into existing stacksolo.config.json
+6. Shows required secrets and next steps
+
+### Current Micro-Templates
+
+| ID | Type | Description |
+|----|------|-------------|
+| `stripe-webhook` | function | Stripe webhook handler with signature verification |
+| `stripe-checkout` | function | Create checkout sessions and customer portal |
+| `firebase-auth-api` | function | Auth middleware + profile endpoint |
+| `chat-api` | function | AI chat with Vertex AI streaming (SSE) |
+| `landing-page` | ui | Marketing page with hero, features, pricing |
+| `auth-pages` | ui | Login/signup with Firebase Auth |
+| `dashboard-layout` | ui | Sidebar + header dashboard layout |
+
 ## Helm Plugin
 
 The `@stacksolo/plugin-helm` generates Helm charts from K8s resources:

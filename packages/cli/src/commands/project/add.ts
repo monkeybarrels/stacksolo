@@ -1,8 +1,11 @@
 /**
  * stacksolo add
  *
- * Add template resources to an existing StackSolo project.
- * Merges template config and copies source files without re-initializing the project.
+ * Add template or micro-template resources to an existing StackSolo project.
+ * - Templates: Full feature sets (e.g., pdf-extractor adds multiple resources)
+ * - Micro-templates: Single-purpose components (e.g., stripe-webhook, auth-pages)
+ *
+ * Merges config and copies source files without re-initializing the project.
  */
 
 import { Command } from 'commander';
@@ -12,7 +15,7 @@ import ora from 'ora';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
-import type { StackSoloConfig, NetworkConfig, FunctionConfig } from '@stacksolo/blueprint';
+import type { StackSoloConfig, NetworkConfig, FunctionConfig, UiConfig } from '@stacksolo/blueprint';
 import {
   listTemplates,
   getTemplateMetadata,
@@ -20,6 +23,13 @@ import {
   type TemplateInfo,
   type TemplateVariables,
 } from '../../services/template.service';
+import {
+  listMicroTemplates,
+  getMicroTemplateMetadata,
+  applyMicroTemplate,
+  type MicroTemplateInfo,
+  type MicroTemplateConfig,
+} from '../../services/micro-template.service';
 import {
   downloadDirectory,
   substituteVariables,
@@ -216,6 +226,110 @@ function mergeTemplateIntoConfig(
 }
 
 /**
+ * Merge micro-template config fragment into existing config
+ */
+function mergeMicroTemplateIntoConfig(
+  existingConfig: StackSoloConfig,
+  microConfig: MicroTemplateConfig,
+  namePrefix?: string
+): MergeResult {
+  // Deep clone existing config
+  const result: StackSoloConfig = JSON.parse(JSON.stringify(existingConfig));
+  const addedResources: string[] = [];
+  const conflicts: string[] = [];
+
+  // Ensure networks array exists
+  if (!result.project.networks) {
+    result.project.networks = [];
+  }
+
+  // Get target network (first one, or create 'main')
+  let targetNetwork: NetworkConfig;
+  if (result.project.networks.length === 0) {
+    targetNetwork = { name: 'main' };
+    result.project.networks.push(targetNetwork);
+  } else {
+    targetNetwork = result.project.networks[0];
+  }
+
+  // Add function if present
+  if (microConfig.function) {
+    if (!targetNetwork.functions) {
+      targetNetwork.functions = [];
+    }
+
+    const fnConfig = microConfig.function;
+    const fnName = namePrefix ? `${namePrefix}-${fnConfig.name}` : fnConfig.name;
+    const existingFn = targetNetwork.functions.find((f) => f.name === fnName);
+
+    if (existingFn) {
+      conflicts.push(`Function "${fnName}" already exists`);
+    } else {
+      const newFn: FunctionConfig = {
+        name: fnName,
+        runtime: fnConfig.runtime as FunctionConfig['runtime'],
+        entryPoint: fnConfig.entryPoint,
+        memory: fnConfig.memory as FunctionConfig['memory'],
+        sourceDir: fnConfig.sourceDir
+          ? namePrefix
+            ? fnConfig.sourceDir.replace(fnConfig.name, fnName)
+            : fnConfig.sourceDir
+          : `./functions/${fnName}`,
+      };
+
+      if (fnConfig.env) {
+        newFn.env = fnConfig.env;
+      }
+
+      if (fnConfig.trigger) {
+        newFn.trigger = fnConfig.trigger as FunctionConfig['trigger'];
+      }
+
+      targetNetwork.functions.push(newFn);
+
+      // Determine trigger type for display
+      let triggerInfo = 'HTTP';
+      if (fnConfig.trigger?.type === 'storage') {
+        triggerInfo = `GCS trigger: ${fnConfig.trigger.bucket}`;
+      } else if (fnConfig.trigger?.type === 'pubsub') {
+        triggerInfo = `Pub/Sub: ${fnConfig.trigger.topic}`;
+      }
+      addedResources.push(`function: ${fnName} (${triggerInfo})`);
+    }
+  }
+
+  // Add UI if present
+  if (microConfig.ui) {
+    if (!targetNetwork.uis) {
+      targetNetwork.uis = [];
+    }
+
+    const uiConfig = microConfig.ui;
+    const uiName = namePrefix ? `${namePrefix}-${uiConfig.name}` : uiConfig.name;
+    const existingUi = targetNetwork.uis.find((u) => u.name === uiName);
+
+    if (existingUi) {
+      conflicts.push(`UI "${uiName}" already exists`);
+    } else {
+      const newUi: UiConfig = {
+        name: uiName,
+        framework: uiConfig.framework as UiConfig['framework'],
+        sourceDir: uiConfig.sourceDir
+          ? namePrefix
+            ? uiConfig.sourceDir.replace(uiConfig.name, uiName)
+            : uiConfig.sourceDir
+          : `./apps/${uiName}`,
+      };
+
+      targetNetwork.uis.push(newUi);
+      addedResources.push(`ui: ${uiName}`);
+    }
+  }
+
+  return { config: result, addedResources, conflicts };
+}
+
+/**
  * Apply name prefix if provided
  */
 function applyPrefix(name: string, prefix?: string): string {
@@ -375,33 +489,68 @@ async function copyDirectoryRecursive(src: string, dest: string): Promise<void> 
 }
 
 /**
- * Display available templates
+ * Display available templates and micro-templates
  */
-async function displayTemplates(templates: TemplateInfo[]): Promise<void> {
-  console.log(chalk.cyan('\nAvailable templates:\n'));
+async function displayAllTemplates(
+  templates: TemplateInfo[],
+  microTemplates: MicroTemplateInfo[]
+): Promise<void> {
+  // Display full templates
+  if (templates.length > 0) {
+    console.log(chalk.cyan('\nFull Templates (multi-resource):\n'));
 
-  for (const template of templates) {
-    const difficultyColor =
-      template.difficulty === 'beginner'
-        ? chalk.green
-        : template.difficulty === 'intermediate'
-          ? chalk.yellow
-          : chalk.red;
+    for (const template of templates) {
+      const difficultyColor =
+        template.difficulty === 'beginner'
+          ? chalk.green
+          : template.difficulty === 'intermediate'
+            ? chalk.yellow
+            : chalk.red;
 
-    console.log(`  ${chalk.white(template.id)}`);
-    console.log(`    ${chalk.gray(template.description)}`);
-    console.log(`    ${difficultyColor(template.difficulty)} | ${chalk.gray(template.tags.join(', '))}`);
-    console.log();
+      console.log(`  ${chalk.white(template.id)}`);
+      console.log(`    ${chalk.gray(template.description)}`);
+      console.log(`    ${difficultyColor(template.difficulty)} | ${chalk.gray(template.tags.join(', '))}`);
+      console.log();
+    }
+  }
+
+  // Display micro-templates
+  if (microTemplates.length > 0) {
+    console.log(chalk.cyan('\nMicro-Templates (single component):\n'));
+
+    // Group by type
+    const functions = microTemplates.filter((t) => t.type === 'function');
+    const uis = microTemplates.filter((t) => t.type === 'ui');
+
+    if (functions.length > 0) {
+      console.log(chalk.white('  Functions:'));
+      for (const mt of functions) {
+        console.log(`    ${chalk.green(mt.id)}`);
+        console.log(`      ${chalk.gray(mt.description)}`);
+        console.log(`      ${chalk.gray(mt.tags.join(', '))}`);
+        console.log();
+      }
+    }
+
+    if (uis.length > 0) {
+      console.log(chalk.white('  UIs:'));
+      for (const mt of uis) {
+        console.log(`    ${chalk.blue(mt.id)}`);
+        console.log(`      ${chalk.gray(mt.description)}`);
+        console.log(`      ${chalk.gray(mt.tags.join(', '))}`);
+        console.log();
+      }
+    }
   }
 }
 
 export const addCommand = new Command('add')
-  .description('Add template resources to an existing project')
-  .argument('[template]', 'Template ID to add (e.g., pdf-extractor)')
+  .description('Add template or micro-template resources to an existing project')
+  .argument('[template]', 'Template or micro-template ID to add (e.g., stripe-webhook, auth-pages)')
   .option('--name <prefix>', 'Prefix for added resource names (avoids conflicts)')
   .option('--dry-run', 'Preview changes without applying')
   .option('-y, --yes', 'Skip confirmation prompts')
-  .option('--list', 'List available templates')
+  .option('--list', 'List available templates and micro-templates')
   .action(async (templateId: string | undefined, options) => {
     const cwd = process.cwd();
     const spinner = ora();
@@ -410,15 +559,15 @@ export const addCommand = new Command('add')
       // List templates if requested or no template specified
       if (options.list || !templateId) {
         spinner.start('Fetching available templates...');
-        const templates = await listTemplates();
+        const [templates, microTemplates] = await Promise.all([listTemplates(), listMicroTemplates()]);
         spinner.stop();
 
-        if (templates.length === 0) {
+        if (templates.length === 0 && microTemplates.length === 0) {
           console.log(chalk.yellow('No templates available.'));
           return;
         }
 
-        await displayTemplates(templates);
+        await displayAllTemplates(templates, microTemplates);
 
         if (!templateId) {
           console.log(chalk.gray('Usage: stacksolo add <template-id> [--name <prefix>]\n'));
@@ -439,141 +588,277 @@ export const addCommand = new Command('add')
 
       const { config: existingConfig, configPath } = existing;
 
-      // Fetch template
-      spinner.start(`Fetching template: ${templateId}...`);
-      const templates = await listTemplates();
-      const template = templates.find((t) => t.id === templateId);
+      // Check if it's a micro-template first
+      spinner.start(`Looking up: ${templateId}...`);
+      const [templates, microTemplates] = await Promise.all([listTemplates(), listMicroTemplates()]);
 
-      if (!template) {
+      const microTemplate = microTemplates.find((t) => t.id === templateId);
+      const fullTemplate = templates.find((t) => t.id === templateId);
+
+      if (microTemplate) {
+        // Handle micro-template
+        spinner.succeed(`Found micro-template: ${microTemplate.name}`);
+        await handleMicroTemplate(microTemplate, existingConfig, configPath, cwd, options, spinner);
+      } else if (fullTemplate) {
+        // Handle full template
+        spinner.succeed(`Found template: ${fullTemplate.name}`);
+        await handleFullTemplate(fullTemplate, existingConfig, configPath, cwd, options, spinner);
+      } else {
         spinner.fail(`Template not found: ${templateId}`);
         console.log(chalk.gray('\n  Run `stacksolo add --list` to see available templates.\n'));
         process.exit(1);
       }
-
-      const templateConfig = await getTemplateConfig(templateId);
-      if (!templateConfig) {
-        spinner.fail(`Could not fetch template configuration`);
-        process.exit(1);
-      }
-
-      spinner.succeed(`Found template: ${template.name}`);
-
-      // Get variables from existing config
-      const variables: TemplateVariables = {
-        projectName: existingConfig.project.name,
-        gcpProjectId: existingConfig.project.gcpProjectId,
-        region: existingConfig.project.region,
-      };
-
-      // Apply variable substitutions to template config
-      const templateConfigStr = substituteVariables(JSON.stringify(templateConfig), variables);
-      const processedTemplateConfig = JSON.parse(templateConfigStr) as StackSoloConfig;
-
-      // Merge configs
-      const namePrefix = options.name;
-      const mergeResult = mergeTemplateIntoConfig(existingConfig, processedTemplateConfig, namePrefix);
-
-      // Display what will be added
-      console.log(chalk.cyan(`\nAdding template: ${template.name}`));
-      console.log(chalk.gray('━'.repeat(50)));
-
-      if (mergeResult.addedResources.length > 0) {
-        console.log(chalk.white('\nResources to add:'));
-        for (const resource of mergeResult.addedResources) {
-          console.log(chalk.green(`  + ${resource}`));
-        }
-      }
-
-      if (mergeResult.conflicts.length > 0) {
-        console.log(chalk.yellow('\nConflicts detected:'));
-        for (const conflict of mergeResult.conflicts) {
-          console.log(chalk.yellow(`  ⚠ ${conflict}`));
-        }
-      }
-
-      // Determine which files will be copied
-      const templateMetadata = await getTemplateMetadata(templateId);
-      console.log(chalk.white('\nSource files to copy:'));
-
-      // Preview files from template network
-      const templateNetwork = processedTemplateConfig.project?.networks?.[0];
-      if (templateNetwork?.functions) {
-        for (const fn of templateNetwork.functions) {
-          const fnName = applyPrefix(fn.name, namePrefix);
-          console.log(chalk.green(`  + functions/${fnName}/`));
-        }
-      }
-      if (templateNetwork?.containers) {
-        for (const container of templateNetwork.containers) {
-          const containerName = applyPrefix(container.name, namePrefix);
-          console.log(chalk.green(`  + containers/${containerName}/`));
-        }
-      }
-      if (templateNetwork?.uis) {
-        for (const ui of templateNetwork.uis) {
-          const uiName = applyPrefix(ui.name, namePrefix);
-          console.log(chalk.green(`  + apps/${uiName}/`));
-        }
-      }
-
-      // Dry run mode
-      if (options.dryRun) {
-        console.log(chalk.yellow('\n[Dry run] No changes applied.\n'));
-        return;
-      }
-
-      // Confirm unless --yes
-      if (!options.yes) {
-        console.log();
-        const { proceed } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'proceed',
-            message: 'Proceed with adding these resources?',
-            default: true,
-          },
-        ]);
-
-        if (!proceed) {
-          console.log(chalk.gray('\nCancelled.\n'));
-          return;
-        }
-      }
-
-      // Copy source files
-      console.log();
-      const addedFiles = await copyTemplateFiles(templateId, cwd, variables, namePrefix, (msg) => {
-        spinner.text = msg;
-        spinner.start();
-      });
-      spinner.stop();
-
-      // Write updated config
-      spinner.start('Updating configuration...');
-      await fs.writeFile(configPath, JSON.stringify(mergeResult.config, null, 2) + '\n');
-      spinner.succeed('Updated stacksolo.config.json');
-
-      // Success message
-      console.log(chalk.green('\n✓ Template added successfully!\n'));
-
-      // Show next steps
-      console.log(chalk.white('Next steps:'));
-
-      // Template-specific hints
-      if (templateId === 'pdf-extractor') {
-        const fnName = applyPrefix('pdf-processor', namePrefix);
-        console.log(chalk.gray(`  1. Edit functions/${fnName}/extraction.prompt to customize extraction`));
-        console.log(chalk.gray('  2. Run: stacksolo deploy'));
-      } else {
-        if (addedFiles.length > 0) {
-          console.log(chalk.gray(`  1. Review the added files in ${addedFiles.map((f) => f.path).join(', ')}`));
-        }
-        console.log(chalk.gray('  2. Run: stacksolo deploy'));
-      }
-      console.log();
     } catch (error) {
       spinner.fail('Error adding template');
       console.error(chalk.red(`\n${(error as Error).message}\n`));
       process.exit(1);
     }
   });
+
+/**
+ * Handle adding a micro-template
+ */
+async function handleMicroTemplate(
+  microTemplate: MicroTemplateInfo,
+  existingConfig: StackSoloConfig,
+  configPath: string,
+  cwd: string,
+  options: { name?: string; dryRun?: boolean; yes?: boolean },
+  spinner: ReturnType<typeof ora>
+): Promise<void> {
+  const metadata = await getMicroTemplateMetadata(microTemplate.id);
+  if (!metadata) {
+    throw new Error(`Could not fetch micro-template metadata`);
+  }
+
+  // Get variables from existing config
+  const variables: Record<string, string> = {
+    projectName: existingConfig.project.name,
+    gcpProjectId: existingConfig.project.gcpProjectId,
+    region: existingConfig.project.region,
+  };
+
+  // Merge config
+  const namePrefix = options.name;
+  const mergeResult = mergeMicroTemplateIntoConfig(existingConfig, metadata.config, namePrefix);
+
+  // Display what will be added
+  console.log(chalk.cyan(`\nAdding micro-template: ${microTemplate.name}`));
+  console.log(chalk.gray('━'.repeat(50)));
+
+  if (mergeResult.addedResources.length > 0) {
+    console.log(chalk.white('\nResources to add:'));
+    for (const resource of mergeResult.addedResources) {
+      console.log(chalk.green(`  + ${resource}`));
+    }
+  }
+
+  if (mergeResult.conflicts.length > 0) {
+    console.log(chalk.yellow('\nConflicts detected:'));
+    for (const conflict of mergeResult.conflicts) {
+      console.log(chalk.yellow(`  ⚠ ${conflict}`));
+    }
+  }
+
+  // Show files to copy
+  console.log(chalk.white('\nSource files to copy:'));
+  if (metadata.config.function) {
+    const fnName = namePrefix ? `${namePrefix}-${metadata.config.function.name}` : metadata.config.function.name;
+    console.log(chalk.green(`  + functions/${fnName}/`));
+  }
+  if (metadata.config.ui) {
+    const uiName = namePrefix ? `${namePrefix}-${metadata.config.ui.name}` : metadata.config.ui.name;
+    console.log(chalk.green(`  + apps/${uiName}/`));
+  }
+
+  // Show required secrets
+  if (metadata.secrets && metadata.secrets.length > 0) {
+    console.log(chalk.white('\nRequired secrets:'));
+    for (const secret of metadata.secrets) {
+      console.log(chalk.yellow(`  • ${secret}`));
+    }
+  }
+
+  // Dry run mode
+  if (options.dryRun) {
+    console.log(chalk.yellow('\n[Dry run] No changes applied.\n'));
+    return;
+  }
+
+  // Confirm unless --yes
+  if (!options.yes) {
+    console.log();
+    const { proceed } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'proceed',
+        message: 'Proceed with adding this micro-template?',
+        default: true,
+      },
+    ]);
+
+    if (!proceed) {
+      console.log(chalk.gray('\nCancelled.\n'));
+      return;
+    }
+  }
+
+  // Apply micro-template (download and copy files)
+  console.log();
+  const { filesAdded } = await applyMicroTemplate(microTemplate.id, cwd, variables, namePrefix, (msg) => {
+    spinner.text = msg;
+    spinner.start();
+  });
+  spinner.stop();
+
+  // Write updated config
+  spinner.start('Updating configuration...');
+  await fs.writeFile(configPath, JSON.stringify(mergeResult.config, null, 2) + '\n');
+  spinner.succeed('Updated stacksolo.config.json');
+
+  // Success message
+  console.log(chalk.green('\n✓ Micro-template added successfully!\n'));
+
+  // Show next steps
+  console.log(chalk.white('Next steps:'));
+  if (filesAdded.length > 0) {
+    console.log(chalk.gray(`  1. Review the added files in ${filesAdded.join(', ')}`));
+  }
+  if (metadata.secrets && metadata.secrets.length > 0) {
+    console.log(chalk.gray(`  2. Set up required secrets: ${metadata.secrets.join(', ')}`));
+    console.log(chalk.gray('  3. Run: stacksolo deploy'));
+  } else {
+    console.log(chalk.gray('  2. Run: stacksolo deploy'));
+  }
+  console.log();
+}
+
+/**
+ * Handle adding a full template
+ */
+async function handleFullTemplate(
+  template: TemplateInfo,
+  existingConfig: StackSoloConfig,
+  configPath: string,
+  cwd: string,
+  options: { name?: string; dryRun?: boolean; yes?: boolean },
+  spinner: ReturnType<typeof ora>
+): Promise<void> {
+  const templateConfig = await getTemplateConfig(template.id);
+  if (!templateConfig) {
+    throw new Error(`Could not fetch template configuration`);
+  }
+
+  // Get variables from existing config
+  const variables: TemplateVariables = {
+    projectName: existingConfig.project.name,
+    gcpProjectId: existingConfig.project.gcpProjectId,
+    region: existingConfig.project.region,
+  };
+
+  // Apply variable substitutions to template config
+  const templateConfigStr = substituteVariables(JSON.stringify(templateConfig), variables);
+  const processedTemplateConfig = JSON.parse(templateConfigStr) as StackSoloConfig;
+
+  // Merge configs
+  const namePrefix = options.name;
+  const mergeResult = mergeTemplateIntoConfig(existingConfig, processedTemplateConfig, namePrefix);
+
+  // Display what will be added
+  console.log(chalk.cyan(`\nAdding template: ${template.name}`));
+  console.log(chalk.gray('━'.repeat(50)));
+
+  if (mergeResult.addedResources.length > 0) {
+    console.log(chalk.white('\nResources to add:'));
+    for (const resource of mergeResult.addedResources) {
+      console.log(chalk.green(`  + ${resource}`));
+    }
+  }
+
+  if (mergeResult.conflicts.length > 0) {
+    console.log(chalk.yellow('\nConflicts detected:'));
+    for (const conflict of mergeResult.conflicts) {
+      console.log(chalk.yellow(`  ⚠ ${conflict}`));
+    }
+  }
+
+  // Determine which files will be copied
+  console.log(chalk.white('\nSource files to copy:'));
+
+  // Preview files from template network
+  const templateNetwork = processedTemplateConfig.project?.networks?.[0];
+  if (templateNetwork?.functions) {
+    for (const fn of templateNetwork.functions) {
+      const fnName = applyPrefix(fn.name, namePrefix);
+      console.log(chalk.green(`  + functions/${fnName}/`));
+    }
+  }
+  if (templateNetwork?.containers) {
+    for (const container of templateNetwork.containers) {
+      const containerName = applyPrefix(container.name, namePrefix);
+      console.log(chalk.green(`  + containers/${containerName}/`));
+    }
+  }
+  if (templateNetwork?.uis) {
+    for (const ui of templateNetwork.uis) {
+      const uiName = applyPrefix(ui.name, namePrefix);
+      console.log(chalk.green(`  + apps/${uiName}/`));
+    }
+  }
+
+  // Dry run mode
+  if (options.dryRun) {
+    console.log(chalk.yellow('\n[Dry run] No changes applied.\n'));
+    return;
+  }
+
+  // Confirm unless --yes
+  if (!options.yes) {
+    console.log();
+    const { proceed } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'proceed',
+        message: 'Proceed with adding these resources?',
+        default: true,
+      },
+    ]);
+
+    if (!proceed) {
+      console.log(chalk.gray('\nCancelled.\n'));
+      return;
+    }
+  }
+
+  // Copy source files
+  console.log();
+  const addedFiles = await copyTemplateFiles(template.id, cwd, variables, namePrefix, (msg) => {
+    spinner.text = msg;
+    spinner.start();
+  });
+  spinner.stop();
+
+  // Write updated config
+  spinner.start('Updating configuration...');
+  await fs.writeFile(configPath, JSON.stringify(mergeResult.config, null, 2) + '\n');
+  spinner.succeed('Updated stacksolo.config.json');
+
+  // Success message
+  console.log(chalk.green('\n✓ Template added successfully!\n'));
+
+  // Show next steps
+  console.log(chalk.white('Next steps:'));
+
+  // Template-specific hints
+  if (template.id === 'pdf-extractor') {
+    const fnName = applyPrefix('pdf-processor', namePrefix);
+    console.log(chalk.gray(`  1. Edit functions/${fnName}/extraction.prompt to customize extraction`));
+    console.log(chalk.gray('  2. Run: stacksolo deploy'));
+  } else {
+    if (addedFiles.length > 0) {
+      console.log(chalk.gray(`  1. Review the added files in ${addedFiles.map((f) => f.path).join(', ')}`));
+    }
+    console.log(chalk.gray('  2. Run: stacksolo deploy'));
+  }
+  console.log();
+}
