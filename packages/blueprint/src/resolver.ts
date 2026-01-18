@@ -1110,6 +1110,7 @@ function resolveCdktfConfig(
       name: uiName,
       config: {
         name: uiName,
+        originalName: ui.name, // Short name for route matching
         location: 'US', // Multi-region for CDN
         sourceDir: ui.sourceDir || `apps/${ui.name}`,
         framework: ui.framework,

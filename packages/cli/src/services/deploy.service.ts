@@ -702,7 +702,9 @@ terraform {
 
       for (const uiResource of uiResources) {
         const uiName = uiResource.config.name as string;
-        const sourceDir = path.resolve(process.cwd(), uiResource.config.sourceDir as string || `apps/${uiName}`);
+        // Original short name is used for route matching (e.g., "admin-panel" vs "myapp-admin-panel")
+        const uiOriginalName = (uiResource.config.originalName as string) || uiName;
+        const sourceDir = path.resolve(process.cwd(), uiResource.config.sourceDir as string || `apps/${uiOriginalName}`);
         const framework = uiResource.config.framework as string | undefined;
         const buildCommand = uiResource.config.buildCommand as string || 'npm run build';
         const buildOutputDir = uiResource.config.buildOutputDir as string;
@@ -784,7 +786,8 @@ terraform {
           const lb = network.loadBalancer;
           if (lb?.routes) {
             for (const route of lb.routes) {
-              if (route.backend === uiName && route.path) {
+              // Match against original short name (e.g., "admin-panel") not prefixed name
+              if (route.backend === uiOriginalName && route.path) {
                 // Extract path prefix (e.g., "/admin/*" -> "admin")
                 const pathMatch = route.path.match(/^\/([^/*]+)/);
                 if (pathMatch) {
