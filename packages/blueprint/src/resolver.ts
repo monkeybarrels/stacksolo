@@ -87,7 +87,7 @@ export function resolveConfig(config: StackSoloConfig): ResolvedConfig {
   // Resolve networks and their resources
   if (project.networks) {
     for (const network of project.networks) {
-      resources.push(...resolveNetwork(network, projectInfo.region));
+      resources.push(...resolveNetwork(network, projectInfo));
     }
   }
 
@@ -230,10 +230,11 @@ function resolveCron(cron: CronConfig, defaultRegion: string): ResolvedResource 
 // Network Resources
 // =============================================================================
 
-function resolveNetwork(network: NetworkConfig, defaultRegion: string): ResolvedResource[] {
+function resolveNetwork(network: NetworkConfig, projectInfo: { name: string; region: string; gcpProjectId: string }): ResolvedResource[] {
   const resources: ResolvedResource[] = [];
   const networkId = `network-${network.name}`;
   const registryId = `registry-${network.name}`;
+  const defaultRegion = projectInfo.region;
 
   // Create the VPC network
   resources.push({
@@ -287,14 +288,14 @@ function resolveNetwork(network: NetworkConfig, defaultRegion: string): Resolved
   // Create containers (Cloud Run) - depend on registry if it exists
   if (network.containers) {
     for (const container of network.containers) {
-      resources.push(resolveContainer(container, network.name, defaultRegion, networkId, registryId));
+      resources.push(resolveContainer(container, network.name, defaultRegion, networkId, registryId, projectInfo));
     }
   }
 
   // Create functions - depend on registry if it exists
   if (network.functions) {
     for (const fn of network.functions) {
-      resources.push(resolveFunction(fn, network.name, defaultRegion, networkId, registryId));
+      resources.push(resolveFunction(fn, network.name, defaultRegion, networkId, registryId, projectInfo));
     }
   }
 
@@ -393,7 +394,8 @@ function resolveContainer(
   networkName: string,
   defaultRegion: string,
   networkId: string,
-  registryId?: string
+  registryId?: string,
+  projectInfo?: { name: string; region: string; gcpProjectId: string }
 ): ResolvedResource {
   const dependsOn = [networkId];
 
@@ -443,6 +445,8 @@ function resolveContainer(
       vpcConnector: container.vpcConnector,
       labels: container.labels,
       location: defaultRegion,
+      projectId: projectInfo?.gcpProjectId,
+      projectName: projectInfo?.name,
     },
     dependsOn: [...new Set(dependsOn)], // Deduplicate
     network: networkName,
@@ -454,7 +458,8 @@ function resolveFunction(
   networkName: string,
   defaultRegion: string,
   networkId: string,
-  registryId?: string
+  registryId?: string,
+  projectInfo?: { name: string; region: string; gcpProjectId: string }
 ): ResolvedResource {
   const dependsOn = [networkId];
 
@@ -514,6 +519,8 @@ function resolveFunction(
       labels: fn.labels,
       location: defaultRegion,
       trigger: fn.trigger,
+      projectId: projectInfo?.gcpProjectId,
+      projectName: projectInfo?.name,
     },
     dependsOn: [...new Set(dependsOn)],
     network: networkName,
