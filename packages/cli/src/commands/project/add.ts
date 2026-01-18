@@ -43,6 +43,33 @@ const STACKSOLO_DIR = '.stacksolo';
 const CONFIG_FILENAME = 'stacksolo.config.json';
 const REPO = parseRepo('monkeybarrels/stacksolo-architectures', 'main');
 
+/**
+ * Detect the framework used by the shell package.
+ * Checks dependencies in packages/shell/package.json for 'react' or 'vue'.
+ * Returns 'vue' as default for backward compatibility.
+ */
+async function detectShellFramework(projectDir: string): Promise<'vue' | 'react'> {
+  const shellPackageJsonPath = path.join(projectDir, 'packages/shell/package.json');
+
+  if (!existsSync(shellPackageJsonPath)) {
+    // Not an app-shell monorepo, default to vue
+    return 'vue';
+  }
+
+  try {
+    const pkg = JSON.parse(await fs.readFile(shellPackageJsonPath, 'utf-8'));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+    if (deps.react) return 'react';
+    if (deps.vue) return 'vue';
+
+    // Default to vue for backward compatibility
+    return 'vue';
+  } catch {
+    return 'vue';
+  }
+}
+
 interface MergeResult {
   config: StackSoloConfig;
   addedResources: string[];
@@ -575,6 +602,8 @@ export const addCommand = new Command('add')
   .option('--dry-run', 'Preview changes without applying')
   .option('-y, --yes', 'Skip confirmation prompts')
   .option('--list', 'List available templates and micro-templates')
+  .option('--react', 'Use React framework for feature templates')
+  .option('--vue', 'Use Vue framework for feature templates')
   .action(async (templateId: string | undefined, options) => {
     const cwd = process.cwd();
     const spinner = ora();
@@ -927,7 +956,7 @@ async function handleFeatureTemplate(
   microTemplate: MicroTemplateInfo,
   metadata: MicroTemplateMetadata,
   cwd: string,
-  options: { name?: string; dryRun?: boolean; yes?: boolean },
+  options: { name?: string; dryRun?: boolean; yes?: boolean; react?: boolean; vue?: boolean },
   spinner: ReturnType<typeof ora>
 ): Promise<void> {
   // Feature templates require --name option
@@ -940,6 +969,17 @@ async function handleFeatureTemplate(
 
   const featureName = options.name;
   const FeatureName = featureName.charAt(0).toUpperCase() + featureName.slice(1);
+
+  // Detect framework from shell or use explicit flag
+  let framework: 'vue' | 'react';
+  if (options.react) {
+    framework = 'react';
+  } else if (options.vue) {
+    framework = 'vue';
+  } else {
+    // Auto-detect from shell package.json
+    framework = await detectShellFramework(cwd);
+  }
 
   // Build variables
   const variables: Record<string, string> = {
@@ -964,7 +1004,7 @@ async function handleFeatureTemplate(
   }
 
   // Display what will be added
-  console.log(chalk.cyan(`\nAdding feature: ${FeatureName}`));
+  console.log(chalk.cyan(`\nAdding feature: ${FeatureName} (${framework})`));
   console.log(chalk.gray('━'.repeat(50)));
 
   const targetDir = `packages/feature-${featureName}`;
@@ -995,7 +1035,7 @@ async function handleFeatureTemplate(
       {
         type: 'confirm',
         name: 'proceed',
-        message: `Create feature package ${featureName}?`,
+        message: `Create ${framework} feature package ${featureName}?`,
         default: true,
       },
     ]);
@@ -1008,12 +1048,13 @@ async function handleFeatureTemplate(
 
   // Apply feature template
   console.log();
-  spinner.start('Creating feature package...');
+  spinner.start(`Creating ${framework} feature package...`);
 
   const { filesAdded, shellUpdated } = await applyFeatureTemplate(
     cwd,
     microTemplate.id,
     variables,
+    framework,
     (msg) => {
       spinner.text = msg;
     }

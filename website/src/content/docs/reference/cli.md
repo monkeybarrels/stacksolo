@@ -52,6 +52,8 @@ stacksolo init [options]
 | `--project-id <id>` | GCP project ID |
 | `-r, --region <region>` | Region |
 | `-t, --template <template>` | Project template (firebase-app, app-shell, etc.) |
+| `--react` | Use React framework for shell templates |
+| `--vue` | Use Vue framework for shell templates (default) |
 | `-y, --yes` | Skip prompts and use defaults |
 | `--create-project` | Create a new GCP + Firebase project |
 | `--list-templates` | List available remote templates |
@@ -70,13 +72,23 @@ stacksolo init [options]
 Use `--template app-shell` to create a modular monorepo foundation:
 
 ```bash
-# Create modular app with feature-based architecture
+# Create modular app with Vue (default)
 stacksolo init --template app-shell --name myorg
+
+# Create modular app with React
+stacksolo init --template app-shell --name myorg --react
 ```
 
+**Framework variants:**
+
+| Flag | Framework | State Management | Routing |
+|------|-----------|------------------|---------|
+| `--vue` (default) | Vue 3 | Pinia | Vue Router |
+| `--react` | React 18 | Zustand | React Router |
+
 This creates a pnpm monorepo with:
-- **packages/shell/** - Core Vue 3 app with Firebase Auth and routing
-- **packages/shared/** - Shared components and Pinia stores
+- **packages/shell/** - Core app with Firebase Auth and routing
+- **packages/shared/** - Shared components and stores
 - **packages/feature-dashboard/** - Default feature package
 
 Shell templates don't create a `stacksolo.config.json` - they're pure frontend monorepos. Add features with `stacksolo add feature-module`.
@@ -213,6 +225,8 @@ stacksolo add <template> [options]
 | `--name <prefix>` | Prefix for added resource names (avoids conflicts) |
 | `--dry-run` | Preview changes without applying |
 | `--list` | List available templates and micro-templates |
+| `--react` | Use React framework for feature templates |
+| `--vue` | Use Vue framework for feature templates |
 | `-y, --yes` | Skip confirmation prompts |
 
 **What it does:**
@@ -277,8 +291,23 @@ stacksolo add feature-module --name inventory
 stacksolo add feature-module --name reports
 ```
 
+**Framework auto-detection:**
+
+The CLI automatically detects whether your shell uses Vue or React by checking `packages/shell/package.json`. Features are created in the matching framework.
+
+```bash
+# In a Vue shell → creates Vue feature
+cd my-vue-app && stacksolo add feature-module --name inventory
+
+# In a React shell → creates React feature
+cd my-react-app && stacksolo add feature-module --name inventory
+
+# Override auto-detection (rarely needed)
+stacksolo add feature-module --name inventory --react
+```
+
 **What it does:**
-1. Creates `packages/feature-<name>/` with Vue pages, components, and Pinia store
+1. Creates `packages/feature-<name>/` with pages, components, and store
 2. Adds `@myorg/feature-<name>: workspace:*` to shell's `package.json`
 3. Updates shell's router to import and register the feature's routes
 

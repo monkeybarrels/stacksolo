@@ -650,11 +650,14 @@ async function handleShellTemplate(
     template: string;
     name?: string;
     yes?: boolean;
+    framework?: 'vue' | 'react';
   }
 ): Promise<void> {
+  const framework = options.framework || 'vue';
+
   // Print banner
   console.log(chalk.cyan(BANNER));
-  console.log(chalk.bold(`  Initializing shell: ${shellTemplate.name}\n`));
+  console.log(chalk.bold(`  Initializing shell: ${shellTemplate.name} (${framework})\n`));
   console.log(chalk.gray('─'.repeat(75)));
   console.log(chalk.gray(`  ${shellTemplate.description}\n`));
 
@@ -692,11 +695,12 @@ async function handleShellTemplate(
   }
 
   // Download template files
-  spinner.start('Downloading template files...');
+  spinner.start(`Downloading ${framework} template files...`);
 
   try {
-    // Download the files directory
-    const filesPath = `${shellTemplate.path}/files`;
+    // Download the framework-specific files directory
+    // Structure: micro-templates/app-shell/files/vue/ or micro-templates/app-shell/files/react/
+    const filesPath = `${shellTemplate.path}/files/${framework}`;
     await downloadDirectory(filesPath, cwd, SHELL_REPO, {
       overwrite: false,
       exclude: [],
@@ -711,7 +715,7 @@ async function handleShellTemplate(
 
     // Show success message
     console.log(chalk.gray('\n─'.repeat(75)));
-    console.log(chalk.green.bold('\n  ✓ Shell monorepo created!\n'));
+    console.log(chalk.green.bold(`\n  ✓ ${framework === 'react' ? 'React' : 'Vue'} shell monorepo created!\n`));
 
     console.log(chalk.white('Next steps:'));
     console.log(chalk.gray('  1. Run: ') + chalk.cyan('pnpm install'));
@@ -1016,6 +1020,8 @@ export const initCommand = new Command('init')
   .option('--skip-apis', 'Skip enabling GCP APIs')
   .option('--list-templates', 'List available remote templates')
   .option('--create-project', 'Create a new GCP + Firebase project')
+  .option('--react', 'Use React framework for shell templates')
+  .option('--vue', 'Use Vue framework for shell templates (default)')
   .action(async (options) => {
     const cwd = process.cwd();
 
@@ -1091,7 +1097,9 @@ export const initCommand = new Command('init')
       );
 
       if (shellTemplate) {
-        return await handleShellTemplate(cwd, shellTemplate, options);
+        // Determine framework: --react flag, --vue flag, or default to 'vue'
+        const framework: 'vue' | 'react' = options.react ? 'react' : 'vue';
+        return await handleShellTemplate(cwd, shellTemplate, { ...options, framework });
       }
     }
 

@@ -3,6 +3,8 @@ title: Micro-Templates
 description: Build modular applications with shells, features, and single-purpose components
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 Micro-templates let you build applications piece by piece. Instead of starting with a monolithic template, you can compose exactly what you need.
 
 ## Why Modular Architecture?
@@ -25,13 +27,31 @@ As applications grow, managing code in a single codebase becomes challenging:
 | **Function** | Backend function (Stripe, AI, etc.) | `stacksolo add stripe-webhook` |
 | **UI** | Frontend pages or layouts | `stacksolo add auth-pages` |
 
+## Framework Support
+
+Shell and feature templates support both **Vue** and **React**:
+
+| Flag | Framework | State Management | Routing |
+|------|-----------|------------------|---------|
+| `--vue` (default) | Vue 3 | Pinia | Vue Router |
+| `--react` | React 18 | Zustand | React Router |
+
+Both frameworks include:
+- Firebase Authentication
+- Tailwind CSS
+- TypeScript
+- Vite build
+
 ## Quick Start: Build a Modular App
 
 ### Step 1: Create the Shell
 
 ```bash
-# Create a new monorepo with shell foundation
+# Create with Vue (default)
 stacksolo init --template app-shell --name myorg
+
+# Or create with React
+stacksolo init --template app-shell --name myorg --react
 
 # You'll be prompted for:
 # - Project name (e.g., "my-app")
@@ -43,7 +63,7 @@ This creates:
 ```
 my-app/
 ├── packages/
-│   ├── shell/              # Core Vue 3 app with auth and routing
+│   ├── shell/              # Core app with auth and routing
 │   ├── shared/             # Shared components and stores
 │   └── feature-dashboard/  # Default feature package
 ├── pnpm-workspace.yaml     # Monorepo configuration
@@ -77,9 +97,11 @@ stacksolo add feature-module --name settings
 ```
 
 Each command automatically:
-1. Creates `packages/feature-<name>/` with Vue components and Pinia store
+1. Creates `packages/feature-<name>/` with components and store (Vue or React, auto-detected from shell)
 2. Adds `@myorg/feature-<name>: workspace:*` to shell's dependencies
 3. Updates shell's router to import and register the feature's routes
+
+**Framework auto-detection:** The CLI detects your shell's framework from `packages/shell/package.json` and creates matching features.
 
 ### Step 4: Verify It Works
 
@@ -101,8 +123,10 @@ All features appear in the sidebar automatically.
 
 ### What You Get
 
-The `app-shell` template creates a production-ready monorepo:
+The `app-shell` template creates a production-ready monorepo. The structure is similar for both Vue and React:
 
+<Tabs>
+<TabItem label="Vue">
 ```
 packages/
 ├── shell/                        # Main application shell
@@ -148,21 +172,70 @@ packages/
     │   └── index.ts             # Exports routes
     └── package.json             # @myorg/feature-dashboard
 ```
+</TabItem>
+<TabItem label="React">
+```
+packages/
+├── shell/                        # Main application shell
+│   ├── src/
+│   │   ├── App.tsx              # Root component
+│   │   ├── main.tsx             # Entry point
+│   │   ├── core/
+│   │   │   ├── router/
+│   │   │   │   └── index.tsx    # Feature route registration
+│   │   │   ├── stores/
+│   │   │   │   ├── auth.ts      # Firebase auth state (Zustand)
+│   │   │   │   └── shell.ts     # Navigation, theme
+│   │   │   ├── layouts/
+│   │   │   │   └── ShellLayout.tsx  # Sidebar + header
+│   │   │   └── lib/
+│   │   │       └── firebase.ts  # Firebase configuration
+│   │   └── pages/
+│   │       └── Login.tsx        # Login page
+│   ├── package.json             # @myorg/shell
+│   ├── vite.config.ts
+│   └── tailwind.config.js
+│
+├── shared/                       # Shared code across features
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Button.tsx
+│   │   │   ├── Card.tsx
+│   │   │   └── LoadingSpinner.tsx
+│   │   ├── hooks/
+│   │   │   └── useCurrentUser.ts
+│   │   └── stores/
+│   │       └── notifications.ts
+│   └── package.json             # @myorg/shared
+│
+└── feature-dashboard/           # Default feature (example)
+    ├── src/
+    │   ├── pages/
+    │   │   └── DashboardPage.tsx
+    │   ├── components/
+    │   │   └── StatsCard.tsx
+    │   ├── stores/
+    │   │   └── dashboard.ts
+    │   └── index.ts             # Exports routes
+    └── package.json             # @myorg/feature-dashboard
+```
+</TabItem>
+</Tabs>
 
 ### Router Integration
 
-The shell router dynamically imports feature routes:
+The shell router dynamically imports feature routes. The pattern is the same for both frameworks:
 
+<Tabs>
+<TabItem label="Vue">
 ```typescript
 // packages/shell/src/core/router/index.ts
 import { routes as dashboardRoutes } from '@myorg/feature-dashboard';
 import { routes as inventoryRoutes } from '@myorg/feature-inventory';
-import { routes as reportsRoutes } from '@myorg/feature-reports';
 
 const featureRoutes = [
   ...dashboardRoutes,
   ...inventoryRoutes,
-  ...reportsRoutes,
 ];
 
 const routes = [
@@ -175,6 +248,29 @@ const routes = [
   },
 ];
 ```
+</TabItem>
+<TabItem label="React">
+```typescript
+// packages/shell/src/core/router/index.tsx
+import { routes as dashboardRoutes } from '@myorg/feature-dashboard';
+import { routes as inventoryRoutes } from '@myorg/feature-inventory';
+
+const featureRoutes = [
+  ...dashboardRoutes,
+  ...inventoryRoutes,
+];
+
+const router = createBrowserRouter([
+  { path: '/login', element: <Login /> },
+  {
+    path: '/',
+    element: <ShellLayout />,
+    children: featureRoutes,
+  },
+]);
+```
+</TabItem>
+</Tabs>
 
 When you run `stacksolo add feature-module --name xyz`, the CLI automatically adds the import and spread.
 
@@ -207,6 +303,8 @@ const firebaseConfig = {
 
 When you run `stacksolo add feature-module --name inventory`:
 
+<Tabs>
+<TabItem label="Vue">
 ```
 packages/feature-inventory/
 ├── src/
@@ -219,11 +317,29 @@ packages/feature-inventory/
 │   └── index.ts                 # Public exports (routes, components)
 └── package.json                 # @myorg/feature-inventory
 ```
+</TabItem>
+<TabItem label="React">
+```
+packages/feature-inventory/
+├── src/
+│   ├── pages/
+│   │   └── InventoryPage.tsx    # Main page component
+│   ├── components/
+│   │   └── InventoryCard.tsx    # Feature-specific component
+│   ├── stores/
+│   │   └── inventory.ts         # Zustand store for feature state
+│   └── index.ts                 # Public exports (routes, components)
+└── package.json                 # @myorg/feature-inventory
+```
+</TabItem>
+</Tabs>
 
 ### Feature Exports
 
 Each feature must export its routes:
 
+<Tabs>
+<TabItem label="Vue">
 ```typescript
 // packages/feature-inventory/src/index.ts
 import type { RouteRecordRaw } from 'vue-router';
@@ -246,6 +362,35 @@ export { InventoryPage };
 export { InventoryCard } from './components/InventoryCard.vue';
 export { useInventoryStore } from './stores/inventory';
 ```
+</TabItem>
+<TabItem label="React">
+```typescript
+// packages/feature-inventory/src/index.ts
+import type { RouteObject } from 'react-router-dom';
+
+export const routes: RouteObject[] = [
+  {
+    path: '/inventory',
+    lazy: async () => {
+      const { InventoryPage } = await import('./pages/InventoryPage');
+      return { Component: InventoryPage };
+    },
+  },
+];
+
+// Feature metadata for sidebar
+export const meta = {
+  title: 'Inventory',
+  icon: 'package',
+};
+
+// Optionally export components for cross-feature use
+export { InventoryPage } from './pages/InventoryPage';
+export { InventoryCard } from './components/InventoryCard';
+export { useInventoryStore } from './stores/inventory';
+```
+</TabItem>
+</Tabs>
 
 ### Shell Updates
 
@@ -276,8 +421,10 @@ const featureRoutes = [
 
 Features should be loosely coupled. Communicate through the shared package:
 
-### Shared Pinia Stores
+### Shared Stores
 
+<Tabs>
+<TabItem label="Vue (Pinia)">
 ```typescript
 // packages/shared/src/stores/notifications.ts
 import { defineStore } from 'pinia';
@@ -294,8 +441,35 @@ export const useNotificationStore = defineStore('notifications', {
   },
 });
 ```
+</TabItem>
+<TabItem label="React (Zustand)">
+```typescript
+// packages/shared/src/stores/notifications.ts
+import { create } from 'zustand';
+
+interface NotificationState {
+  items: Array<{ id: number; message: string; type: string }>;
+  show: (message: string, type?: 'success' | 'error' | 'info') => void;
+}
+
+export const useNotificationStore = create<NotificationState>((set) => ({
+  items: [],
+  show: (message, type = 'info') => {
+    const id = Date.now();
+    set((state) => ({ items: [...state.items, { id, message, type }] }));
+    setTimeout(() => {
+      set((state) => ({ items: state.items.filter((i) => i.id !== id) }));
+    }, 5000);
+  },
+}));
+```
+</TabItem>
+</Tabs>
 
 **Usage in any feature:**
+
+<Tabs>
+<TabItem label="Vue">
 ```vue
 <script setup lang="ts">
 import { useNotificationStore } from '@myorg/shared';
@@ -308,9 +482,29 @@ function handleSave() {
 }
 </script>
 ```
+</TabItem>
+<TabItem label="React">
+```tsx
+import { useNotificationStore } from '@myorg/shared';
+
+function MyComponent() {
+  const { show } = useNotificationStore();
+
+  function handleSave() {
+    // Save logic...
+    show('Item saved!', 'success');
+  }
+
+  return <button onClick={handleSave}>Save</button>;
+}
+```
+</TabItem>
+</Tabs>
 
 ### Shared Components
 
+<Tabs>
+<TabItem label="Vue">
 ```vue
 <script setup lang="ts">
 import { Card, Button, LoadingSpinner } from '@myorg/shared';
@@ -323,6 +517,22 @@ import { Card, Button, LoadingSpinner } from '@myorg/shared';
   </Card>
 </template>
 ```
+</TabItem>
+<TabItem label="React">
+```tsx
+import { Card, Button, LoadingSpinner } from '@myorg/shared';
+
+function MyFeature() {
+  return (
+    <Card>
+      <h2>My Feature</h2>
+      <Button onClick={save}>Save</Button>
+    </Card>
+  );
+}
+```
+</TabItem>
+</Tabs>
 
 ### Event Bus (Advanced)
 

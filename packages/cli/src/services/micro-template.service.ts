@@ -278,11 +278,18 @@ async function copyDirectoryRecursive(src: string, dest: string): Promise<void> 
  * 1. Copy feature package to packages/feature-{name}/
  * 2. Update shell's package.json with the new dependency
  * 3. Update shell's router to import and spread the feature routes
+ *
+ * @param targetDir - Project root directory
+ * @param microTemplateId - Template ID (e.g., 'feature-module')
+ * @param variables - Variables for substitution (name, Name, org)
+ * @param framework - Framework to use ('vue' | 'react'), defaults to 'vue'
+ * @param onProgress - Progress callback
  */
 export async function applyFeatureTemplate(
   targetDir: string,
   microTemplateId: string,
   variables: Record<string, string>,
+  framework: 'vue' | 'react' = 'vue',
   onProgress?: (message: string) => void
 ): Promise<{ filesAdded: string[]; shellUpdated: boolean }> {
   const log = onProgress || (() => {});
@@ -315,8 +322,9 @@ export async function applyFeatureTemplate(
   const tempDir = path.join(targetDir, '.stacksolo-feature-temp-' + Date.now());
 
   try {
-    log('Downloading feature template files...');
-    await downloadDirectory(`${template.path}/files`, tempDir, REPO, {
+    log(`Downloading ${framework} feature template files...`);
+    // Download from framework-specific subdirectory: micro-templates/feature-module/files/vue/ or /react/
+    await downloadDirectory(`${template.path}/files/${framework}`, tempDir, REPO, {
       onProgress: log,
     });
 
@@ -356,8 +364,15 @@ export async function applyFeatureTemplate(
       }
     }
 
-    // Update shell router
-    const shellRouterPath = path.join(targetDir, 'packages/shell/src/core/router/index.ts');
+    // Update shell router (try .tsx for React, .ts for Vue)
+    const routerExtension = framework === 'react' ? 'tsx' : 'ts';
+    let shellRouterPath = path.join(targetDir, `packages/shell/src/core/router/index.${routerExtension}`);
+
+    // Fallback to .ts if .tsx doesn't exist (for backward compatibility)
+    if (!existsSync(shellRouterPath)) {
+      shellRouterPath = path.join(targetDir, 'packages/shell/src/core/router/index.ts');
+    }
+
     if (existsSync(shellRouterPath)) {
       log('Updating shell router...');
       const updated = await updateShellRouter(
