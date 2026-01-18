@@ -287,8 +287,51 @@ export async function deployConfig(
         // Clean up staging
         await fs.rm(stagingDir, { recursive: true, force: true });
       } else {
-        // Plain JS project - zip everything except node_modules
-        await execAsync(`cd "${sourceDir}" && zip -r "${sourceZipPath}" . -x "*.git*" -x "node_modules/*"`, { timeout: 60000 });
+        // Plain JS project - need to filter workspace:* dependencies before zipping
+        const stagingDir = path.join(workDir, `staging-${fnName}`);
+        await fs.mkdir(stagingDir, { recursive: true });
+
+        // Copy everything except node_modules and git
+        await execAsync(`rsync -a --exclude='node_modules' --exclude='.git' "${sourceDir}/" "${stagingDir}/"`, { timeout: 30000 });
+
+        // Filter workspace:* dependencies from package.json if it exists
+        const stagingPkgPath = path.join(stagingDir, 'package.json');
+        try {
+          const pkgContent = await fs.readFile(stagingPkgPath, 'utf-8');
+          const pkg = JSON.parse(pkgContent);
+          let modified = false;
+
+          if (pkg.dependencies) {
+            for (const [name, version] of Object.entries(pkg.dependencies)) {
+              if (typeof version === 'string' && version.startsWith('workspace:')) {
+                delete pkg.dependencies[name];
+                log(`Removed workspace dependency: ${name}@${version}`);
+                modified = true;
+              }
+            }
+          }
+          if (pkg.devDependencies) {
+            for (const [name, version] of Object.entries(pkg.devDependencies)) {
+              if (typeof version === 'string' && version.startsWith('workspace:')) {
+                delete pkg.devDependencies[name];
+                log(`Removed workspace devDependency: ${name}@${version}`);
+                modified = true;
+              }
+            }
+          }
+
+          if (modified) {
+            await fs.writeFile(stagingPkgPath, JSON.stringify(pkg, null, 2));
+          }
+        } catch {
+          // No package.json - continue
+        }
+
+        // Create zip from staging
+        await execAsync(`cd "${stagingDir}" && zip -r "${sourceZipPath}" . -x "*.git*"`, { timeout: 60000 });
+
+        // Clean up staging
+        await fs.rm(stagingDir, { recursive: true, force: true });
       }
 
       sourceZips.push({ name: fnName, zipPath: sourceZipPath });
