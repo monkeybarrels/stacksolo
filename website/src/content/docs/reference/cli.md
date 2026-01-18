@@ -51,7 +51,7 @@ stacksolo init [options]
 | `-n, --name <name>` | Project name |
 | `--project-id <id>` | GCP project ID |
 | `-r, --region <region>` | Region |
-| `-t, --template <template>` | Project template (function-api, ui-api, etc.) |
+| `-t, --template <template>` | Project template (firebase-app, app-shell, etc.) |
 | `-y, --yes` | Skip prompts and use defaults |
 | `--create-project` | Create a new GCP + Firebase project |
 | `--list-templates` | List available remote templates |
@@ -64,6 +64,24 @@ stacksolo init [options]
 3. Enables required APIs
 4. Asks what type of app you're building
 5. Generates `.stacksolo/stacksolo.config.json`
+
+#### Shell Templates (Modular Monorepos)
+
+Use `--template app-shell` to create a modular monorepo foundation:
+
+```bash
+# Create modular app with feature-based architecture
+stacksolo init --template app-shell --name myorg
+```
+
+This creates a pnpm monorepo with:
+- **packages/shell/** - Core Vue 3 app with Firebase Auth and routing
+- **packages/shared/** - Shared components and Pinia stores
+- **packages/feature-dashboard/** - Default feature package
+
+Shell templates don't create a `stacksolo.config.json` - they're pure frontend monorepos. Add features with `stacksolo add feature-module`.
+
+**See also:** [Micro-Templates Guide](/guides/micro-templates/)
 
 #### Create Project Mode (`--create-project`)
 
@@ -237,6 +255,8 @@ stacksolo add stripe-webhook --dry-run
 
 | ID | Type | Description |
 |----|------|-------------|
+| `app-shell` | shell | Monorepo foundation (use with `init --template`) |
+| `feature-module` | feature | Add feature package to app-shell monorepo |
 | `stripe-webhook` | function | Stripe webhook handler |
 | `stripe-checkout` | function | Checkout sessions and portal |
 | `firebase-auth-api` | function | Auth middleware + profile |
@@ -244,6 +264,29 @@ stacksolo add stripe-webhook --dry-run
 | `landing-page` | ui | Marketing landing page |
 | `auth-pages` | ui | Login/signup pages |
 | `dashboard-layout` | ui | Dashboard with sidebar |
+
+#### Feature Templates (Add to Modular Apps)
+
+Use `feature-module` to add new feature packages to an app-shell monorepo:
+
+```bash
+# Add inventory feature to existing shell monorepo
+stacksolo add feature-module --name inventory
+
+# Add reports feature
+stacksolo add feature-module --name reports
+```
+
+**What it does:**
+1. Creates `packages/feature-<name>/` with Vue pages, components, and Pinia store
+2. Adds `@myorg/feature-<name>: workspace:*` to shell's `package.json`
+3. Updates shell's router to import and register the feature's routes
+
+**Requirements:**
+- Must be run from root of an app-shell monorepo (has `packages/shell/`)
+- Requires `--name` flag to specify feature name
+
+**See also:** [Micro-Templates Guide](/guides/micro-templates/)
 
 **Using Name Prefix:**
 
