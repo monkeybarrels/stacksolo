@@ -419,6 +419,8 @@ Single-purpose components that can be mixed and matched into existing projects.
 |------|-------------|-----------------|
 | `function` | Single Cloud Function | `micro-templates/<id>/files/functions/<name>/` |
 | `ui` | Single Vue/React app | `micro-templates/<id>/files/apps/<name>/` |
+| `shell` | Monorepo foundation with feature packages | `micro-templates/<id>/files/packages/` |
+| `feature` | Feature package for app-shell monorepos | `micro-templates/<id>/files/packages/feature-template/` |
 
 ### Micro-Template Structure
 
@@ -515,6 +517,8 @@ stacksolo add chat-api --dry-run
 
 | ID | Type | Description |
 |----|------|-------------|
+| `app-shell` | shell | Monorepo foundation with Firebase Auth, Pinia stores |
+| `feature-module` | feature | Add feature package to existing app-shell monorepo |
 | `stripe-webhook` | function | Stripe webhook handler with signature verification |
 | `stripe-checkout` | function | Create checkout sessions and customer portal |
 | `firebase-auth-api` | function | Auth middleware + profile endpoint |
@@ -522,6 +526,81 @@ stacksolo add chat-api --dry-run
 | `landing-page` | ui | Marketing page with hero, features, pricing |
 | `auth-pages` | ui | Login/signup with Firebase Auth |
 | `dashboard-layout` | ui | Sidebar + header dashboard layout |
+
+### Shell and Feature Templates
+
+Shell templates create monorepo foundations for modular Vue 3 applications. Feature templates add new feature packages to existing shells.
+
+**Commands:**
+```bash
+# Initialize a new shell monorepo
+stacksolo init --template app-shell --name <org>
+
+# Add feature packages
+stacksolo add feature-module --name inventory
+stacksolo add feature-module --name reports
+```
+
+**Shell structure:**
+```
+packages/
+├── shell/                    # Core Vue 3 app
+│   ├── src/
+│   │   ├── core/
+│   │   │   ├── router/       # Dynamic feature route registration
+│   │   │   ├── stores/       # Auth, navigation stores
+│   │   │   └── layouts/      # ShellLayout.vue
+│   │   └── pages/Login.vue
+│   └── package.json          # @org/shell
+├── shared/                   # Shared components/stores
+│   └── package.json          # @org/shared
+└── feature-*/                # Feature packages
+    └── package.json          # @org/feature-*
+```
+
+**Feature template exports:**
+```typescript
+// packages/feature-inventory/src/index.ts
+export const routes: RouteRecordRaw[] = [
+  {
+    path: '/inventory',
+    name: 'inventory',
+    component: InventoryPage,
+    meta: { title: 'Inventory', icon: 'package' }
+  }
+];
+```
+
+**Key files for shell/feature support:**
+| File | Purpose |
+|------|---------|
+| `packages/cli/src/services/micro-template.service.ts` | `applyFeatureTemplate()`, router/package.json updates |
+| `packages/cli/src/commands/project/add.ts` | `handleFeatureTemplate()` |
+| `packages/cli/src/commands/project/init.ts` | `handleShellTemplate()` |
+| `stacksolo-architectures/micro-templates/app-shell/` | Shell template source |
+| `stacksolo-architectures/micro-templates/feature-module/` | Feature template source |
+
+**Variable substitution:**
+Shell and feature templates use `{{variableName}}` syntax:
+- `{{org}}` - npm organization scope (e.g., `myorg`)
+- `{{name}}` - feature name lowercase (e.g., `inventory`)
+- `{{Name}}` - feature name PascalCase (e.g., `Inventory`)
+
+**Feature template config (template.json):**
+```json
+{
+  "type": "feature",
+  "feature": {
+    "sourceDir": "packages/feature-template",
+    "targetDir": "packages/feature-{{name}}",
+    "shellUpdates": {
+      "packageJson": "@{{org}}/feature-{{name}}: workspace:*",
+      "routerImport": "import { routes as {{name}}Routes } from '@{{org}}/feature-{{name}}';",
+      "routerSpread": "...{{name}}Routes,"
+    }
+  }
+}
+```
 
 ## Helm Plugin
 

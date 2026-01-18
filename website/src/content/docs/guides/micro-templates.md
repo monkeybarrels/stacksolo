@@ -20,6 +20,18 @@ stacksolo add auth-pages --name admin
 
 ## Available Micro-Templates
 
+### Shells (Monorepo Foundations)
+
+| ID | Description |
+|----|-------------|
+| `app-shell` | Monorepo foundation with Firebase Auth, Pinia stores, and feature-based architecture |
+
+### Features (Add to Existing Shell)
+
+| ID | Description |
+|----|-------------|
+| `feature-module` | Add a new feature package to an existing app-shell monorepo |
+
 ### Functions
 
 | ID | Description |
@@ -37,7 +49,138 @@ stacksolo add auth-pages --name admin
 | `auth-pages` | Login and signup pages with Firebase Authentication |
 | `dashboard-layout` | Sidebar + header layout for authenticated dashboards |
 
-## How It Works
+## Shell Templates (Modular Apps)
+
+Shell templates create monorepo foundations for larger applications with feature-driven development.
+
+### Creating a Shell
+
+```bash
+# Initialize a new shell monorepo
+stacksolo init --template app-shell --name myorg
+
+# Install dependencies
+cd my-app
+pnpm install
+
+# Run locally
+pnpm --filter shell dev
+```
+
+### Shell Structure
+
+```
+packages/
+├── shell/                    # Core Vue 3 app
+│   ├── src/
+│   │   ├── App.vue
+│   │   ├── core/
+│   │   │   ├── router/       # Dynamic feature route registration
+│   │   │   ├── stores/       # Auth, navigation stores
+│   │   │   └── layouts/      # ShellLayout.vue
+│   │   └── pages/
+│   │       └── Login.vue
+│   └── package.json          # @myorg/shell
+│
+├── shared/                   # Shared components/stores
+│   ├── src/
+│   │   ├── components/       # Button, Card, LoadingSpinner
+│   │   ├── composables/      # useCurrentUser
+│   │   └── stores/           # notifications
+│   └── package.json          # @myorg/shared
+│
+└── feature-dashboard/        # Default feature
+    ├── src/
+    │   ├── pages/
+    │   ├── components/
+    │   └── index.ts          # Exports routes + components
+    └── package.json          # @myorg/feature-dashboard
+```
+
+### Adding Features
+
+Use `stacksolo add feature-module` to add new feature packages:
+
+```bash
+# Add inventory feature
+stacksolo add feature-module --name inventory
+
+# Add reports feature
+stacksolo add feature-module --name reports
+
+# Add settings feature
+stacksolo add feature-module --name settings
+```
+
+Each feature is automatically:
+1. Created at `packages/feature-<name>/`
+2. Added as a dependency in shell's `package.json`
+3. Imported and registered in shell's router
+
+### Feature Package Exports
+
+Each feature exports routes for shell registration:
+
+```typescript
+// packages/feature-inventory/src/index.ts
+import type { RouteRecordRaw } from 'vue-router';
+import InventoryPage from './pages/InventoryPage.vue';
+
+export const routes: RouteRecordRaw[] = [
+  {
+    path: '/inventory',
+    name: 'inventory',
+    component: InventoryPage,
+    meta: {
+      title: 'Inventory',
+      icon: 'package',
+    },
+  },
+];
+
+export { InventoryPage };
+export { useInventoryStore } from './stores/inventory';
+```
+
+### Cross-Feature Communication
+
+Features communicate via the shared package:
+
+```vue
+<script setup lang="ts">
+import { Card, Button, useNotificationStore } from '@myorg/shared';
+
+const notifications = useNotificationStore();
+
+function handleSave() {
+  // Save logic...
+  notifications.show('Item saved!', 'success');
+}
+</script>
+```
+
+### Firebase Auth
+
+The shell includes Firebase Authentication:
+- Google sign-in
+- Email/password
+- Auth state persistence
+- Protected routes
+
+Configure in `packages/shell/src/core/lib/firebase.ts`:
+
+```typescript
+const firebaseConfig = {
+  apiKey: "your-api-key",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project-id",
+  // ...
+};
+```
+
+## Function & UI Micro-Templates
+
+### How It Works
 
 When you run `stacksolo add <micro-template-id>`:
 
@@ -46,7 +189,7 @@ When you run `stacksolo add <micro-template-id>`:
 3. **Merges** the config fragment into your `stacksolo.config.json`
 4. **Shows** any required secrets you need to set up
 
-## Example: Adding Stripe Payments
+### Example: Adding Stripe Payments
 
 ```bash
 # Start with a basic project
@@ -66,7 +209,7 @@ echo "whsec_xxx" | gcloud secrets create stripe-webhook-secret --data-file=-
 stacksolo deploy
 ```
 
-## Example: Building a Dashboard
+### Example: Building a Dashboard
 
 ```bash
 # Start with a basic project
@@ -82,7 +225,7 @@ stacksolo add dashboard-layout
 stacksolo deploy
 ```
 
-## Name Prefixes
+### Name Prefixes
 
 Use `--name` to add a prefix when you need multiple instances or want to avoid conflicts:
 
@@ -94,7 +237,7 @@ stacksolo add auth-pages --name admin
 stacksolo add auth-pages --name user
 ```
 
-## Preview Changes
+### Preview Changes
 
 Use `--dry-run` to see what would be added without making changes:
 
@@ -121,11 +264,13 @@ micro-templates/<id>/
 └── files/
     ├── functions/     # For function types
     │   └── <name>/
-    └── apps/          # For UI types
+    ├── apps/          # For UI types
+    │   └── <name>/
+    └── packages/      # For shell/feature types
         └── <name>/
 ```
 
-### template.json
+### Function Template
 
 ```json
 {
@@ -145,6 +290,31 @@ micro-templates/<id>/
       "entryPoint": "handler",
       "memory": "256Mi",
       "sourceDir": "./functions/my-fn"
+    }
+  }
+}
+```
+
+### Feature Template
+
+```json
+{
+  "id": "feature-module",
+  "name": "Feature Module",
+  "type": "feature",
+  "description": "Add a new feature package to an app-shell monorepo",
+  "variables": [
+    { "name": "name", "description": "Feature name (lowercase)", "required": true },
+    { "name": "Name", "description": "Feature name (PascalCase)", "required": true },
+    { "name": "org", "description": "npm organization scope", "default": "myorg" }
+  ],
+  "feature": {
+    "sourceDir": "packages/feature-template",
+    "targetDir": "packages/feature-{{name}}",
+    "shellUpdates": {
+      "packageJson": "@{{org}}/feature-{{name}}: workspace:*",
+      "routerImport": "import { routes as {{name}}Routes } from '@{{org}}/feature-{{name}}';",
+      "routerSpread": "...{{name}}Routes,"
     }
   }
 }

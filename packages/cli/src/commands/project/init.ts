@@ -57,6 +57,17 @@ import {
   type TemplateInfo,
   type TemplateVariables,
 } from '../../services/template.service';
+import {
+  listMicroTemplates,
+  getMicroTemplateMetadata,
+  type MicroTemplateInfo,
+  type MicroTemplateMetadata,
+} from '../../services/micro-template.service';
+import {
+  downloadDirectory,
+  substituteVariablesInDirectory,
+  parseRepo,
+} from '../../services/github.service';
 
 const BANNER = `
   ███████╗████████╗ █████╗  ██████╗██╗  ██╗███████╗ ██████╗ ██╗      ██████╗
@@ -626,6 +637,94 @@ async function handleCreateProject(
   console.log('');
 }
 
+const SHELL_REPO = parseRepo('monkeybarrels/stacksolo-architectures', 'main');
+
+/**
+ * Handle shell micro-template initialization (e.g., app-shell monorepo)
+ * These create monorepo foundations without requiring GCP setup
+ */
+async function handleShellTemplate(
+  cwd: string,
+  shellTemplate: MicroTemplateInfo,
+  options: {
+    template: string;
+    name?: string;
+    yes?: boolean;
+  }
+): Promise<void> {
+  // Print banner
+  console.log(chalk.cyan(BANNER));
+  console.log(chalk.bold(`  Initializing shell: ${shellTemplate.name}\n`));
+  console.log(chalk.gray('─'.repeat(75)));
+  console.log(chalk.gray(`  ${shellTemplate.description}\n`));
+
+  const spinner = ora('Fetching template metadata...').start();
+
+  const metadata = await getMicroTemplateMetadata(shellTemplate.id);
+  if (!metadata) {
+    spinner.fail('Could not fetch template metadata');
+    return;
+  }
+
+  spinner.succeed('Template metadata loaded');
+
+  // Collect variables from user
+  const variables: Record<string, string> = {};
+
+  // Get org name (required for package scoping)
+  if (!options.yes) {
+    const { org } = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'org',
+        message: 'npm organization scope (without @):',
+        default: 'myorg',
+        validate: (input: string) => {
+          if (!input) return 'Required';
+          if (!/^[a-z0-9-]+$/.test(input)) return 'Must be lowercase letters, numbers, and hyphens';
+          return true;
+        },
+      },
+    ]);
+    variables.org = org;
+  } else {
+    variables.org = options.name || 'myorg';
+  }
+
+  // Download template files
+  spinner.start('Downloading template files...');
+
+  try {
+    // Download the files directory
+    const filesPath = `${shellTemplate.path}/files`;
+    await downloadDirectory(filesPath, cwd, SHELL_REPO, {
+      overwrite: false,
+      exclude: [],
+    });
+
+    spinner.succeed('Template files downloaded');
+
+    // Apply variable substitutions
+    spinner.start('Applying variable substitutions...');
+    await substituteVariablesInDirectory(cwd, variables);
+    spinner.succeed('Variables applied');
+
+    // Show success message
+    console.log(chalk.gray('\n─'.repeat(75)));
+    console.log(chalk.green.bold('\n  ✓ Shell monorepo created!\n'));
+
+    console.log(chalk.white('Next steps:'));
+    console.log(chalk.gray('  1. Run: ') + chalk.cyan('pnpm install'));
+    console.log(chalk.gray('  2. Configure Firebase in ') + chalk.cyan('packages/shell/src/core/lib/firebase.ts'));
+    console.log(chalk.gray('  3. Run: ') + chalk.cyan('pnpm --filter shell dev'));
+    console.log(chalk.gray('  4. Add features with: ') + chalk.cyan('stacksolo add feature-module --name <name>'));
+    console.log();
+  } catch (error) {
+    spinner.fail('Failed to create shell project');
+    console.error(chalk.red(`\n  ${error instanceof Error ? error.message : String(error)}\n`));
+  }
+}
+
 /**
  * Handle remote template initialization
  */
@@ -933,10 +1032,15 @@ export const initCommand = new Command('init')
     if (options.listTemplates) {
       const spinner = ora('Fetching available templates...').start();
       try {
-        const templates = await listTemplates();
+        const [templates, microTemplates] = await Promise.all([
+          listTemplates(),
+          listMicroTemplates(),
+        ]);
         spinner.stop();
 
-        if (templates.length === 0) {
+        const shellTemplates = microTemplates.filter((t) => t.type === 'shell');
+
+        if (templates.length === 0 && shellTemplates.length === 0) {
           console.log(chalk.yellow('\n  No remote templates available yet.\n'));
           console.log(chalk.gray('  Use built-in templates: function-api, container-api, ui-api, ui-only\n'));
           return;
@@ -945,11 +1049,26 @@ export const initCommand = new Command('init')
         console.log(chalk.bold('\n  Available Templates\n'));
         console.log(chalk.gray('─'.repeat(75)));
 
-        for (const template of templates) {
-          console.log('');
-          console.log(chalk.cyan(`  ${template.name}`) + chalk.gray(` (${template.id})`));
-          console.log(chalk.white(`    ${template.description}`));
-          console.log(chalk.gray(`    Difficulty: ${template.difficulty} | Tags: ${template.tags.join(', ')}`));
+        // Show shell templates first (monorepo foundations)
+        if (shellTemplates.length > 0) {
+          console.log(chalk.magenta.bold('\n  Shells (Monorepo Foundations)'));
+          for (const template of shellTemplates) {
+            console.log('');
+            console.log(chalk.magenta(`  ${template.name}`) + chalk.gray(` (${template.id})`));
+            console.log(chalk.white(`    ${template.description}`));
+            console.log(chalk.gray(`    Tags: ${template.tags.join(', ')}`));
+          }
+        }
+
+        // Show full templates
+        if (templates.length > 0) {
+          console.log(chalk.cyan.bold('\n  Full Stack Templates'));
+          for (const template of templates) {
+            console.log('');
+            console.log(chalk.cyan(`  ${template.name}`) + chalk.gray(` (${template.id})`));
+            console.log(chalk.white(`    ${template.description}`));
+            console.log(chalk.gray(`    Difficulty: ${template.difficulty} | Tags: ${template.tags.join(', ')}`));
+          }
         }
 
         console.log(chalk.gray('\n─'.repeat(75)));
@@ -960,6 +1079,20 @@ export const initCommand = new Command('init')
         console.log(chalk.red(`\n  ${message}\n`));
       }
       return;
+    }
+
+    // =========================================
+    // Handle shell micro-templates (app-shell, etc.)
+    // =========================================
+    if (options.template) {
+      const microTemplates = await listMicroTemplates();
+      const shellTemplate = microTemplates.find(
+        (t) => t.id === options.template && t.type === 'shell'
+      );
+
+      if (shellTemplate) {
+        return await handleShellTemplate(cwd, shellTemplate, options);
+      }
     }
 
     // =========================================

@@ -156,6 +156,51 @@ See [CLI Reference](https://stacksolo.dev/reference/cli/) for details.
 
 ---
 
+## Templates & Micro-Templates
+
+Start with production-ready templates or mix-and-match micro-templates:
+
+```bash
+# Start from a template
+stacksolo init --template firebase-app
+stacksolo init --template saas-starter
+stacksolo init --template ai-chat
+
+# List all templates
+stacksolo init --list-templates
+
+# Add micro-templates to existing projects
+stacksolo add stripe-webhook
+stacksolo add auth-pages
+```
+
+### Modular App Shell
+
+For larger applications, use the app-shell template for a feature-based monorepo:
+
+```bash
+# Create a modular monorepo
+stacksolo init --template app-shell --name myorg
+
+# Add feature packages
+stacksolo add feature-module --name inventory
+stacksolo add feature-module --name reports
+stacksolo add feature-module --name settings
+
+# Install and run
+pnpm install
+pnpm --filter shell dev
+```
+
+This creates a pnpm workspace with:
+- **shell/** - Core Vue 3 app with Firebase Auth and routing
+- **shared/** - Shared components and stores
+- **feature-*/** - Independent feature packages
+
+See [Micro-Templates Guide](https://stacksolo.dev/guides/micro-templates/) for details.
+
+---
+
 ## Plugin Architecture
 
 StackSolo is extensible via plugins. Add new cloud providers or resource types:

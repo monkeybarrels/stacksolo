@@ -27,8 +27,10 @@ import {
   listMicroTemplates,
   getMicroTemplateMetadata,
   applyMicroTemplate,
+  applyFeatureTemplate,
   type MicroTemplateInfo,
   type MicroTemplateConfig,
+  type MicroTemplateMetadata,
 } from '../../services/micro-template.service';
 import {
   downloadDirectory,
@@ -519,8 +521,30 @@ async function displayAllTemplates(
     console.log(chalk.cyan('\nMicro-Templates (single component):\n'));
 
     // Group by type
+    const shells = microTemplates.filter((t) => t.type === 'shell');
+    const features = microTemplates.filter((t) => t.type === 'feature');
     const functions = microTemplates.filter((t) => t.type === 'function');
     const uis = microTemplates.filter((t) => t.type === 'ui');
+
+    if (shells.length > 0) {
+      console.log(chalk.white('  Shells (monorepo foundations):'));
+      for (const mt of shells) {
+        console.log(`    ${chalk.magenta(mt.id)}`);
+        console.log(`      ${chalk.gray(mt.description)}`);
+        console.log(`      ${chalk.gray(mt.tags.join(', '))}`);
+        console.log();
+      }
+    }
+
+    if (features.length > 0) {
+      console.log(chalk.white('  Features (add to existing shell):'));
+      for (const mt of features) {
+        console.log(`    ${chalk.cyan(mt.id)}`);
+        console.log(`      ${chalk.gray(mt.description)}`);
+        console.log(`      ${chalk.gray(mt.tags.join(', '))}`);
+        console.log();
+      }
+    }
 
     if (functions.length > 0) {
       console.log(chalk.white('  Functions:'));
@@ -580,6 +604,38 @@ export const addCommand = new Command('add')
       const existing = await loadExistingConfig(cwd);
       spinner.stop();
 
+      // Check if it's a feature template (which needs packages/shell instead of stacksolo config)
+      spinner.start(`Looking up: ${templateId}...`);
+      const [templates, microTemplates] = await Promise.all([listTemplates(), listMicroTemplates()]);
+
+      const microTemplate = microTemplates.find((t) => t.id === templateId);
+      const fullTemplate = templates.find((t) => t.id === templateId);
+
+      if (!microTemplate && !fullTemplate) {
+        spinner.fail(`Template not found: ${templateId}`);
+        console.log(chalk.gray('\n  Run `stacksolo add --list` to see available templates.\n'));
+        process.exit(1);
+      }
+
+      // Feature templates require an existing shell monorepo (with packages/shell)
+      if (microTemplate?.type === 'feature') {
+        spinner.succeed(`Found feature template: ${microTemplate.name}`);
+        const metadata = await getMicroTemplateMetadata(microTemplate.id);
+        if (!metadata) {
+          throw new Error(`Could not fetch micro-template metadata`);
+        }
+        await handleFeatureTemplate(microTemplate, metadata, cwd, options, spinner);
+        return;
+      }
+
+      // Shell templates should be added via `stacksolo init --template app-shell`
+      if (microTemplate?.type === 'shell') {
+        spinner.fail(`Shell templates should be used with init, not add`);
+        console.log(chalk.gray(`\n  Use: stacksolo init --template ${templateId}\n`));
+        process.exit(1);
+      }
+
+      // All other templates require an existing StackSolo project
       if (!existing) {
         console.log(chalk.red('\n✗ No StackSolo project found in current directory.'));
         console.log(chalk.gray('  Run `stacksolo init` first to create a project.\n'));
@@ -587,13 +643,6 @@ export const addCommand = new Command('add')
       }
 
       const { config: existingConfig, configPath } = existing;
-
-      // Check if it's a micro-template first
-      spinner.start(`Looking up: ${templateId}...`);
-      const [templates, microTemplates] = await Promise.all([listTemplates(), listMicroTemplates()]);
-
-      const microTemplate = microTemplates.find((t) => t.id === templateId);
-      const fullTemplate = templates.find((t) => t.id === templateId);
 
       if (microTemplate) {
         // Handle micro-template
@@ -603,10 +652,6 @@ export const addCommand = new Command('add')
         // Handle full template
         spinner.succeed(`Found template: ${fullTemplate.name}`);
         await handleFullTemplate(fullTemplate, existingConfig, configPath, cwd, options, spinner);
-      } else {
-        spinner.fail(`Template not found: ${templateId}`);
-        console.log(chalk.gray('\n  Run `stacksolo add --list` to see available templates.\n'));
-        process.exit(1);
       }
     } catch (error) {
       spinner.fail('Error adding template');
@@ -629,6 +674,18 @@ async function handleMicroTemplate(
   const metadata = await getMicroTemplateMetadata(microTemplate.id);
   if (!metadata) {
     throw new Error(`Could not fetch micro-template metadata`);
+  }
+
+  // Handle feature templates differently
+  if (microTemplate.type === 'feature') {
+    await handleFeatureTemplate(microTemplate, metadata, cwd, options, spinner);
+    return;
+  }
+
+  // Handle shell templates (just copy files, no config merge needed)
+  if (microTemplate.type === 'shell') {
+    await handleShellTemplate(microTemplate, metadata, cwd, options, spinner);
+    return;
   }
 
   // Get variables from existing config
@@ -862,3 +919,128 @@ async function handleFullTemplate(
   }
   console.log();
 }
+
+/**
+ * Handle adding a feature template to an app-shell monorepo
+ */
+async function handleFeatureTemplate(
+  microTemplate: MicroTemplateInfo,
+  metadata: MicroTemplateMetadata,
+  cwd: string,
+  options: { name?: string; dryRun?: boolean; yes?: boolean },
+  spinner: ReturnType<typeof ora>
+): Promise<void> {
+  // Feature templates require --name option
+  if (!options.name) {
+    console.log(chalk.red('\n✗ Feature templates require --name option.'));
+    console.log(chalk.gray('  Usage: stacksolo add feature-module --name <feature-name>\n'));
+    console.log(chalk.gray('  Example: stacksolo add feature-module --name inventory\n'));
+    process.exit(1);
+  }
+
+  const featureName = options.name;
+  const FeatureName = featureName.charAt(0).toUpperCase() + featureName.slice(1);
+
+  // Build variables
+  const variables: Record<string, string> = {
+    name: featureName,
+    Name: FeatureName,
+    org: 'myorg', // Default, could be made configurable
+  };
+
+  // Try to detect org from existing shell package.json
+  const shellPackageJsonPath = path.join(cwd, 'packages/shell/package.json');
+  if (existsSync(shellPackageJsonPath)) {
+    try {
+      const shellPkg = JSON.parse(await fs.readFile(shellPackageJsonPath, 'utf-8'));
+      // Extract org from package name like "@myorg/shell"
+      const match = shellPkg.name?.match(/^@([\w-]+)\//);
+      if (match) {
+        variables.org = match[1];
+      }
+    } catch {
+      // Use default
+    }
+  }
+
+  // Display what will be added
+  console.log(chalk.cyan(`\nAdding feature: ${FeatureName}`));
+  console.log(chalk.gray('━'.repeat(50)));
+
+  const targetDir = `packages/feature-${featureName}`;
+  console.log(chalk.white('\nFiles to create:'));
+  console.log(chalk.green(`  + ${targetDir}/`));
+
+  console.log(chalk.white('\nShell updates:'));
+  console.log(chalk.green(`  + Add @${variables.org}/feature-${featureName} to shell dependencies`));
+  console.log(chalk.green(`  + Import routes in shell router`));
+
+  // Dry run mode
+  if (options.dryRun) {
+    console.log(chalk.yellow('\n[Dry run] No changes applied.\n'));
+    return;
+  }
+
+  // Check if feature already exists
+  const featurePath = path.join(cwd, targetDir);
+  if (existsSync(featurePath)) {
+    console.log(chalk.red(`\n✗ Feature already exists: ${targetDir}\n`));
+    process.exit(1);
+  }
+
+  // Confirm unless --yes
+  if (!options.yes) {
+    console.log();
+    const { proceed } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'proceed',
+        message: `Create feature package ${featureName}?`,
+        default: true,
+      },
+    ]);
+
+    if (!proceed) {
+      console.log(chalk.gray('\nCancelled.\n'));
+      return;
+    }
+  }
+
+  // Apply feature template
+  console.log();
+  spinner.start('Creating feature package...');
+
+  const { filesAdded, shellUpdated } = await applyFeatureTemplate(
+    cwd,
+    microTemplate.id,
+    variables,
+    (msg) => {
+      spinner.text = msg;
+    }
+  );
+  spinner.stop();
+
+  // Success message
+  console.log(chalk.green('\n✓ Feature added successfully!\n'));
+
+  if (filesAdded.length > 0) {
+    console.log(chalk.white('Created:'));
+    for (const file of filesAdded) {
+      console.log(chalk.green(`  + ${file}`));
+    }
+  }
+
+  if (shellUpdated) {
+    console.log(chalk.white('\nShell updated:'));
+    console.log(chalk.green(`  + Added dependency`));
+    console.log(chalk.green(`  + Updated router imports`));
+  }
+
+  // Show next steps
+  console.log(chalk.white('\nNext steps:'));
+  console.log(chalk.gray('  1. Run: pnpm install'));
+  console.log(chalk.gray('  2. Run: pnpm --filter shell dev'));
+  console.log(chalk.gray(`  3. Visit /${featureName} in your app`));
+  console.log();
+}
+
