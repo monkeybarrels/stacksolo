@@ -176,7 +176,7 @@ stacksolo scaffold [options]
 
 ### `stacksolo add`
 
-Add template resources to an existing StackSolo project without re-initializing.
+Add template or micro-template resources to an existing StackSolo project without re-initializing.
 
 ```bash
 stacksolo add <template> [options]
@@ -186,7 +186,7 @@ stacksolo add <template> [options]
 
 | Argument | Description |
 |----------|-------------|
-| `template` | Template ID to add (e.g., `pdf-extractor`) |
+| `template` | Template or micro-template ID (e.g., `pdf-extractor`, `stripe-webhook`) |
 
 **Options:**
 
@@ -194,52 +194,70 @@ stacksolo add <template> [options]
 |--------|-------------|
 | `--name <prefix>` | Prefix for added resource names (avoids conflicts) |
 | `--dry-run` | Preview changes without applying |
-| `--list` | List available templates |
+| `--list` | List available templates and micro-templates |
 | `-y, --yes` | Skip confirmation prompts |
 
 **What it does:**
 1. Loads your existing `stacksolo.config.json`
-2. Fetches the template configuration from the remote repository
-3. Merges template resources (buckets, functions, etc.) into your config
-4. Copies source files to the appropriate directories
-5. Detects and warns about naming conflicts
+2. Fetches template/micro-template from the remote repository
+3. Merges resources into your config
+4. Copies source files to appropriate directories (`functions/`, `apps/`)
+5. Shows required secrets and next steps
+
+**Templates vs Micro-Templates:**
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Templates** | Full feature sets with multiple resources | `pdf-extractor` |
+| **Micro-Templates** | Single-purpose components | `stripe-webhook`, `auth-pages` |
 
 **Examples:**
 
 ```bash
-# List available templates
+# List all available templates and micro-templates
 stacksolo add --list
 
-# Add PDF extractor to your project
+# Add a full template
 stacksolo add pdf-extractor
 
-# Add with a name prefix (creates "docs-uploads", "docs-processed", etc.)
-stacksolo add pdf-extractor --name docs
+# Add a micro-template (single function)
+stacksolo add stripe-webhook
+
+# Add a micro-template (UI pages)
+stacksolo add auth-pages
+
+# Add with a name prefix (avoids conflicts)
+stacksolo add auth-pages --name admin
 
 # Preview changes without applying
-stacksolo add pdf-extractor --dry-run
-
-# Add without confirmation prompts
-stacksolo add pdf-extractor -y
+stacksolo add stripe-webhook --dry-run
 ```
+
+**Available Micro-Templates:**
+
+| ID | Type | Description |
+|----|------|-------------|
+| `stripe-webhook` | function | Stripe webhook handler |
+| `stripe-checkout` | function | Checkout sessions and portal |
+| `firebase-auth-api` | function | Auth middleware + profile |
+| `chat-api` | function | AI chat with streaming |
+| `landing-page` | ui | Marketing landing page |
+| `auth-pages` | ui | Login/signup pages |
+| `dashboard-layout` | ui | Dashboard with sidebar |
 
 **Using Name Prefix:**
 
 When adding a template to a project that already has resources with similar names, use `--name` to prefix all added resources:
 
 ```bash
-# First PDF processor for invoices
-stacksolo add pdf-extractor --name invoice
+# Admin auth pages (creates apps/admin-auth/)
+stacksolo add auth-pages --name admin
 
-# Second PDF processor for contracts
-stacksolo add pdf-extractor --name contract
+# User auth pages (creates apps/user-auth/)
+stacksolo add auth-pages --name user
 ```
 
-This creates separate buckets and functions for each use case:
-- `invoice-uploads`, `invoice-processed`, `invoice-pdf-processor`
-- `contract-uploads`, `contract-processed`, `contract-pdf-processor`
-
-**See also:** [Templates](/reference/templates/)
+**See also:** [Micro-Templates Guide](/guides/micro-templates/), [Templates](/templates/overview/)
 
 ## Infrastructure Commands
 

@@ -43,6 +43,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Configuration', slug: 'guides/configuration' },
 						{ label: 'Secrets Management', slug: 'guides/secrets' },
+						{ label: 'Micro-Templates', slug: 'guides/micro-templates' },
 					],
 				},
 				{
