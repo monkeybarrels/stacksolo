@@ -44,6 +44,7 @@ export default defineConfig({
 						{ label: 'Configuration', slug: 'guides/configuration' },
 						{ label: 'Secrets Management', slug: 'guides/secrets' },
 						{ label: 'Micro-Templates', slug: 'guides/micro-templates' },
+						{ label: 'Tutorial: Build a Task Manager', slug: 'guides/building-modular-apps' },
 					],
 				},
 				{

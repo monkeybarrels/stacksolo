@@ -561,6 +561,6 @@ micro-templates/<id>/
 
 ## See Also
 
-- [Templates Overview](/templates/overview) - Full project templates
-- [CLI Reference](/reference/cli) - All CLI commands
-- [Firebase Auth Guide](/guides/firebase-auth) - Authentication setup
+- [Tutorial: Build a Task Manager](/guides/building-modular-apps/) - Step-by-step guide using shell and features
+- [Templates Overview](/templates/overview/) - Full project templates
+- [CLI Reference](/reference/cli/) - All CLI commands
