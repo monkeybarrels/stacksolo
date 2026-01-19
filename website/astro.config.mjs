@@ -27,7 +27,7 @@ export default defineConfig({
 				{
 					label: 'Templates',
 					items: [
-						{ label: 'Overview', slug: 'templates/index' },
+						{ label: 'Overview', slug: 'templates/overview' },
 						{ label: 'SaaS Starter', slug: 'templates/saas-starter' },
 						{ label: 'AI Chat', slug: 'templates/ai-chat' },
 						{ label: 'API Gateway', slug: 'templates/api-gateway' },
