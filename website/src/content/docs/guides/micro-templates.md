@@ -563,6 +563,75 @@ Check that your feature's routes have the correct meta:
 
 ---
 
+## Deploying Shell Apps
+
+Shell templates create pure frontend monorepos without StackSolo infrastructure config. You have two deployment options:
+
+### Option 1: Deploy Manually (Vercel, Netlify, etc.)
+
+Build and deploy to any static hosting:
+
+```bash
+cd my-app
+pnpm install
+pnpm --filter shell build
+
+# Deploy packages/shell/dist to Vercel, Netlify, Firebase Hosting, etc.
+```
+
+### Option 2: Deploy via StackSolo
+
+To deploy your shell app with StackSolo infrastructure (Cloud Run, load balancer, custom domain):
+
+**Step 1:** Initialize StackSolo in your project:
+
+```bash
+cd my-app
+stacksolo init
+```
+
+This creates `.stacksolo/stacksolo.config.json`. You'll be prompted for GCP project and region.
+
+**Step 2:** Add your shell as a UI resource. Edit `.stacksolo/stacksolo.config.json`:
+
+```json
+{
+  "project": {
+    "name": "my-app",
+    "gcpProjectId": "your-gcp-project",
+    "region": "us-central1"
+  },
+  "networks": [
+    {
+      "name": "main",
+      "uis": [
+        {
+          "name": "shell",
+          "framework": "react",
+          "sourceDir": "./packages/shell"
+        }
+      ],
+      "loadBalancer": {
+        "name": "gateway",
+        "routes": [
+          { "path": "/*", "backend": "shell" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+**Step 3:** Deploy:
+
+```bash
+stacksolo deploy
+```
+
+Your shell app is now running on Cloud Run with a load balancer.
+
+---
+
 ## Creating Custom Micro-Templates
 
 Micro-templates live in the [stacksolo-architectures](https://github.com/monkeybarrels/stacksolo-architectures) repository.
