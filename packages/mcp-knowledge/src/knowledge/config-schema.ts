@@ -92,13 +92,18 @@ Static site hosting:
 
 ## Load Balancer Configuration
 
-HTTP(S) load balancer:
+HTTP(S) load balancer with optional multi-domain and host-based routing:
 
 \`\`\`json
 {
   "name": "string (required) - Load balancer name",
+  "domain": "string (optional) - Single custom domain for HTTPS",
+  "domains": "array (optional) - Multiple domains for HTTPS (single SSL cert with SANs)",
+  "enableHttps": "boolean (optional) - Enable HTTPS with managed SSL certificate",
+  "redirectHttpToHttps": "boolean (optional) - Redirect HTTP to HTTPS",
   "routes": [
     {
+      "host": "string (optional) - Hostname for host-based routing",
       "path": "string (required) - URL path pattern (e.g., /api/*)",
       "backend": "string (required) - Backend service name"
     }
@@ -106,6 +111,33 @@ HTTP(S) load balancer:
   "defaultBackend": "string (optional) - Default backend if no route matches"
 }
 \`\`\`
+
+### Multi-Domain Load Balancer (Cost-Effective)
+
+Use a single load balancer with multiple domains instead of creating separate load balancers. This saves ~$18/month per additional domain.
+
+\`\`\`json
+{
+  "loadBalancer": {
+    "name": "gateway",
+    "domains": ["example.com", "api.example.com"],
+    "enableHttps": true,
+    "redirectHttpToHttps": true,
+    "routes": [
+      { "host": "api.example.com", "path": "/*", "backend": "api" },
+      { "host": "example.com", "path": "/api/*", "backend": "bff" },
+      { "host": "example.com", "path": "/*", "backend": "web" }
+    ]
+  }
+}
+\`\`\`
+
+Key points:
+- Use \`domains\` array for multiple domains (or \`domain\` for single domain)
+- Use \`host\` in routes for host-based routing
+- Routes without \`host\` apply to all domains
+- Single SSL certificate covers all domains (SANs)
+- Routes are evaluated in order - more specific paths should come first
 
 ## Bucket Configuration
 
@@ -283,4 +315,45 @@ When you have multiple projects sharing infrastructure:
 \`\`\`
 
 Note: The network name must match the original project's network name prefixed with the project name.
+
+## Multi-Domain App (Cost-Effective)
+
+Serve multiple domains from a single load balancer (~$18/month vs ~$36/month for two):
+
+\`\`\`json
+{
+  "project": {
+    "name": "my-saas",
+    "gcpProjectId": "my-gcp-project",
+    "region": "us-central1",
+    "networks": [{
+      "name": "main",
+      "containers": [
+        { "name": "api", "port": 3000, "allowUnauthenticated": true },
+        { "name": "bff", "port": 3001, "allowUnauthenticated": true }
+      ],
+      "uis": [
+        { "name": "web", "buildCommand": "npm run build", "outputDir": "dist" }
+      ],
+      "loadBalancer": {
+        "name": "gateway",
+        "domains": ["myapp.com", "api.myapp.com"],
+        "enableHttps": true,
+        "redirectHttpToHttps": true,
+        "routes": [
+          { "host": "api.myapp.com", "path": "/*", "backend": "api" },
+          { "host": "myapp.com", "path": "/api/*", "backend": "bff" },
+          { "host": "myapp.com", "path": "/*", "backend": "web" }
+        ]
+      }
+    }]
+  }
+}
+\`\`\`
+
+This configuration:
+- Uses a single SSL certificate for both domains
+- Routes api.myapp.com traffic to the dedicated API service
+- Routes myapp.com/api/* to a BFF (backend-for-frontend)
+- Routes all other myapp.com traffic to the web UI
 `;

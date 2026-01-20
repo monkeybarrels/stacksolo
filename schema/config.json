@@ -380,12 +380,18 @@
         },
         "domain": {
           "type": "string",
-          "description": "Custom domain for HTTPS (required for IAP). DNS must point to load balancer IP after deployment.",
+          "description": "Primary domain for HTTPS. For multiple domains, use 'domains' array instead. DNS must point to load balancer IP after deployment.",
           "examples": ["app.example.com", "api.myproject.dev"]
+        },
+        "domains": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Multiple domains for HTTPS (single SSL cert with SANs). Use with host-based routing. DNS for all domains must point to load balancer IP.",
+          "examples": [["example.com", "api.example.com", "admin.example.com"]]
         },
         "enableHttps": {
           "type": "boolean",
-          "description": "Enable HTTPS with Google-managed SSL certificate (requires domain). Required for IAP.",
+          "description": "Enable HTTPS with Google-managed SSL certificate (requires domain or domains). Required for IAP.",
           "default": false
         },
         "redirectHttpToHttps": {
@@ -407,13 +413,21 @@
         "required": ["enableHttps"]
       },
       "then": {
-        "required": ["domain"],
-        "errorMessage": "When enableHttps is true, domain is required"
+        "anyOf": [
+          { "required": ["domain"] },
+          { "required": ["domains"] }
+        ],
+        "errorMessage": "When enableHttps is true, domain or domains is required"
       }
     },
     "LoadBalancerRouteConfig": {
       "type": "object",
       "properties": {
+        "host": {
+          "type": "string",
+          "description": "Hostname for host-based routing. If omitted, route applies to all hosts.",
+          "examples": ["api.example.com", "admin.example.com"]
+        },
         "path": {
           "type": "string",
           "description": "URL path pattern",

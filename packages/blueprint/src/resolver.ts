@@ -1164,6 +1164,7 @@ function resolveCdktfConfig(
     const isGcsUI = gcsUis.some(ui => ui.name === r.backend);
     if (isGcsUI) {
       return {
+        host: r.host,  // Pass through host for host-based routing
         path: r.path,
         uiName: `${projectInfo.name}-${r.backend}`,
       };
@@ -1172,12 +1173,14 @@ function resolveCdktfConfig(
     const isContainer = containers.some(c => c.name === r.backend);
     if (isContainer) {
       return {
+        host: r.host,  // Pass through host for host-based routing
         path: r.path,
         containerName: `${projectInfo.name}-${r.backend}`,
       };
     }
     // Otherwise it's a function
     return {
+      host: r.host,  // Pass through host for host-based routing
       path: r.path,
       functionName: `${projectInfo.name}-${r.backend}`,
     };
@@ -1186,7 +1189,7 @@ function resolveCdktfConfig(
   // Only create load balancer if we have routes
   if (routes.length > 0) {
     // Get HTTPS configuration from loadBalancer config
-    const lbHttpsConfig = network.loadBalancer as { domain?: string; enableHttps?: boolean; redirectHttpToHttps?: boolean } | undefined;
+    const lbHttpsConfig = network.loadBalancer as { domain?: string; domains?: string[]; enableHttps?: boolean; redirectHttpToHttps?: boolean } | undefined;
 
     resources.push({
       id: loadBalancerId,
@@ -1200,6 +1203,7 @@ function resolveCdktfConfig(
         functionName: functionNames.length > 0 ? functionNames[0] : undefined,
         // HTTPS configuration
         domain: lbHttpsConfig?.domain,
+        domains: lbHttpsConfig?.domains,
         enableHttps: lbHttpsConfig?.enableHttps,
         redirectHttpToHttps: lbHttpsConfig?.redirectHttpToHttps,
       },

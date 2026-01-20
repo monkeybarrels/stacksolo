@@ -289,6 +289,8 @@ export interface FirewallRuleConfig {
 }
 
 export interface LoadBalancerRouteConfig {
+  /** Hostname for host-based routing (e.g., "api.example.com"). If omitted, route applies to all hosts. */
+  host?: string;
   path: string;
   backend: string;
 }
@@ -298,7 +300,9 @@ export interface LoadBalancerConfig {
   routes?: LoadBalancerRouteConfig[];
   /** Custom domain for HTTPS (requires DNS to point to load balancer IP) */
   domain?: string;
-  /** Enable HTTPS with managed SSL certificate (requires domain) */
+  /** Multiple domains for HTTPS (single SSL cert with SANs). Use with host-based routing. */
+  domains?: string[];
+  /** Enable HTTPS with managed SSL certificate (requires domain or domains) */
   enableHttps?: boolean;
   /** Redirect all HTTP traffic to HTTPS */
   redirectHttpToHttps?: boolean;

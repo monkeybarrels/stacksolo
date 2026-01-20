@@ -6,6 +6,7 @@ function toVariableName(name: string): string {
 }
 
 interface RouteConfig {
+  host?: string;            // For host-based routing (e.g., "api.example.com")
   path: string;
   functionName?: string;    // For Cloud Function backend
   containerName?: string;   // For Cloud Run backend
@@ -122,6 +123,7 @@ export const loadBalancer = defineResource({
       functionName?: string;
       routes?: RouteConfig[];
       domain?: string;
+      domains?: string[];        // Multiple domains for single SSL cert
       enableHttps?: boolean;
       redirectHttpToHttps?: boolean;
       iap?: IapConfig[];
@@ -130,6 +132,9 @@ export const loadBalancer = defineResource({
       cloudflareZoneId?: string;  // Can be passed from project-level config
       projectName?: string;
     };
+
+    // Normalize domains - use domains array if provided, otherwise use domain
+    const allDomains = lbConfig.domains || (lbConfig.domain ? [lbConfig.domain] : []);
 
     const projectName = lbConfig.projectName || '${var.project_name}';
     const labelsCode = generateLabelsCode(projectName, RESOURCE_TYPES.LOAD_BALANCER);
@@ -263,18 +268,94 @@ const ${containerVar}Backend = new ComputeBackendService(this, '${containerName}
     }
 
     // Generate path matchers for non-default routes
-    const nonDefaultRoutes = routes.filter(r => r.path !== '/*');
+    const nonDefaultRoutes = routes.filter(r => r.path !== '/*' || r.host);
+
+    // Check if we have host-based routing
+    const hasHostRouting = routes.some(r => r.host);
 
     let urlMapConfig: string;
-    if (nonDefaultRoutes.length === 0) {
+    if (nonDefaultRoutes.length === 0 && !hasHostRouting) {
       // Simple case: just one default route
       urlMapConfig = `// URL Map (Load Balancer routing)
 const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
   name: '${config.name}',
   defaultService: ${defaultBackendRef},
 });`;
+    } else if (hasHostRouting) {
+      // Host-based routing: group routes by host
+      const routesByHost = new Map<string, RouteConfig[]>();
+
+      for (const route of routes) {
+        const host = route.host || '*';
+        if (!routesByHost.has(host)) {
+          routesByHost.set(host, []);
+        }
+        routesByHost.get(host)!.push(route);
+      }
+
+      // Generate host rules and path matchers
+      const hostRulesCode: string[] = [];
+      const pathMatchersCode: string[] = [];
+
+      for (const [host, hostRoutes] of routesByHost) {
+        const matcherName = host === '*' ? 'default-paths' : `${host.replace(/[^a-zA-Z0-9]/g, '-')}-paths`;
+
+        // Find default backend for this host
+        const hostDefaultRoute = hostRoutes.find(r => r.path === '/*');
+        const hostDefaultBackend = hostDefaultRoute ? getBackendRef(hostDefaultRoute) : defaultBackendRef;
+
+        hostRulesCode.push(`    {
+      hosts: ['${host}'],
+      pathMatcher: '${matcherName}',
+    }`);
+
+        // Generate path rules for non-default paths
+        const nonDefaultHostRoutes = hostRoutes.filter(r => r.path !== '/*');
+        const pathRulesCode = nonDefaultHostRoutes.map((route) => {
+          const backendRef = getBackendRef(route);
+          const paths = [route.path];
+          if (route.path.endsWith('/*')) {
+            const basePath = route.path.slice(0, -2);
+            if (basePath) {
+              paths.unshift(basePath);
+            }
+          }
+          const pathsStr = paths.map(p => `'${p}'`).join(', ');
+          return `        {
+          paths: [${pathsStr}],
+          service: ${backendRef},
+        }`;
+        }).join(',\n');
+
+        if (nonDefaultHostRoutes.length > 0) {
+          pathMatchersCode.push(`    {
+      name: '${matcherName}',
+      defaultService: ${hostDefaultBackend},
+      pathRule: [
+${pathRulesCode},
+      ],
+    }`);
+        } else {
+          pathMatchersCode.push(`    {
+      name: '${matcherName}',
+      defaultService: ${hostDefaultBackend},
+    }`);
+        }
+      }
+
+      urlMapConfig = `// URL Map with host-based routing
+const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
+  name: '${config.name}',
+  defaultService: ${defaultBackendRef},
+  hostRule: [
+${hostRulesCode.join(',\n')},
+  ],
+  pathMatcher: [
+${pathMatchersCode.join(',\n')},
+  ],
+});`;
     } else {
-      // Complex case: path-based routing
+      // Path-based routing only (no host specified)
       // GCP URL maps require ONE path_matcher per host_rule, with all path rules inside
       const pathRulesCode = nonDefaultRoutes.map((route) => {
         const backendRef = getBackendRef(route);
@@ -313,7 +394,7 @@ ${pathRulesCode},
     }
 
     // Determine if HTTPS should be enabled
-    const enableHttps = lbConfig.enableHttps && lbConfig.domain;
+    const enableHttps = lbConfig.enableHttps && allDomains.length > 0;
     const redirectHttpToHttps = lbConfig.redirectHttpToHttps && enableHttps;
 
     // Generate IAP configuration code if specified
@@ -348,16 +429,20 @@ const iapApi = new ProjectService(this, '${config.name}-iap-api', {
         "import { ComputeTargetHttpsProxy } from '@cdktf/provider-google/lib/compute-target-https-proxy';",
       );
 
+      // Generate domains array for SSL cert
+      const sslDomainsCode = allDomains.map(d => `'${d}'`).join(', ');
+
       httpsCode = `
 // =============================================================================
 // HTTPS Configuration with Managed SSL Certificate
 // =============================================================================
 
 // Managed SSL Certificate (auto-provisioned by Google)
+// Supports up to 100 domains per certificate
 const ${varName}SslCert = new ComputeManagedSslCertificate(this, '${config.name}-ssl-cert', {
   name: '${config.name}-ssl-cert',
   managed: {
-    domains: ['${lbConfig.domain}'],
+    domains: [${sslDomainsCode}],
   },
 });
 
@@ -432,24 +517,22 @@ new ComputeGlobalForwardingRule(this, '${config.name}-http-rule', {
       );
     }
 
-    // Generate Cloudflare DNS record if configured
+    // Generate Cloudflare DNS records if configured
     let dnsCode = '';
-    if (lbConfig.dns?.provider === 'cloudflare' && lbConfig.domain) {
+    if (lbConfig.dns?.provider === 'cloudflare' && allDomains.length > 0) {
       const zoneId = lbConfig.dns.zoneId || lbConfig.cloudflareZoneId;
       if (zoneId) {
         const proxied = lbConfig.dns.proxied ?? true;
-        // Extract subdomain from domain (e.g., "app.example.com" -> "app")
-        const domainParts = lbConfig.domain.split('.');
-        const recordName = domainParts.length > 2 ? domainParts[0] : '@';
 
-        dnsCode = `
+        // Generate a DNS record for each domain
+        const dnsRecords = allDomains.map((domain, index) => {
+          // Extract subdomain from domain (e.g., "app.example.com" -> "app")
+          const domainParts = domain.split('.');
+          const recordName = domainParts.length > 2 ? domainParts[0] : '@';
+          const recordVar = index === 0 ? `${varName}DnsRecord` : `${varName}DnsRecord${index + 1}`;
 
-// =============================================================================
-// Cloudflare DNS Record
-// =============================================================================
-
-// DNS record pointing ${lbConfig.domain} to load balancer IP
-const ${varName}DnsRecord = new CloudflareRecord(this, '${config.name}-dns', {
+          return `// DNS record pointing ${domain} to load balancer IP
+const ${recordVar} = new CloudflareRecord(this, '${config.name}-dns${index > 0 ? `-${index + 1}` : ''}', {
   zoneId: '${zoneId}',
   name: '${recordName}',
   type: 'A',
@@ -457,6 +540,15 @@ const ${varName}DnsRecord = new CloudflareRecord(this, '${config.name}-dns', {
   proxied: ${proxied},
   ttl: 1,
 });`;
+        }).join('\n\n');
+
+        dnsCode = `
+
+// =============================================================================
+// Cloudflare DNS Records
+// =============================================================================
+
+${dnsRecords}`;
         imports.push(
           "import { Record as CloudflareRecord } from '@cdktf/provider-cloudflare/lib/record';",
         );
@@ -479,9 +571,9 @@ ${httpsCode}${httpRedirectCode}${httpOnlyCode}${dnsCode}`;
       `export const ${varName}LoadBalancerIp = ${varName}Ip.address;`,
     ];
 
-    if (enableHttps && lbConfig.domain) {
+    if (enableHttps && allDomains.length > 0) {
       outputs.push(
-        `// HTTPS URL: https://${lbConfig.domain}`,
+        `// HTTPS URLs: ${allDomains.map(d => `https://${d}`).join(', ')}`,
         `// Note: SSL certificate provisioning may take 15-60 minutes`,
       );
       if (lbConfig.dns?.provider === 'cloudflare') {
@@ -490,7 +582,7 @@ ${httpsCode}${httpRedirectCode}${httpOnlyCode}${dnsCode}`;
         );
       } else {
         outputs.push(
-          `// DNS must point ${lbConfig.domain} to the load balancer IP`,
+          `// DNS must point ${allDomains.join(', ')} to the load balancer IP`,
         );
       }
     }

@@ -69,9 +69,11 @@ The `stacksolo.config.json` file (located in `.stacksolo/`) defines your entire 
       "loadBalancer": {
         "name": "string",
         "domain": "string",
+        "domains": ["string"],
         "enableHttps": true,
         "redirectHttpToHttps": true,
         "routes": [{
+          "host": "string",
           "path": "string",
           "backend": "string"
         }]
@@ -619,7 +621,7 @@ Port the container listens on.
 
 ## Load Balancer
 
-HTTP(S) load balancer with path-based routing and optional HTTPS/SSL support.
+HTTP(S) load balancer with path-based and host-based routing, supporting multiple domains with a single SSL certificate.
 
 ### loadBalancer.name
 **Type:** `string` (required)
@@ -627,14 +629,29 @@ HTTP(S) load balancer with path-based routing and optional HTTPS/SSL support.
 Load balancer name.
 
 ### loadBalancer.domain
-**Type:** `string` (optional, **required for IAP**)
+**Type:** `string` (optional)
 
-Custom domain for HTTPS. DNS must point to the load balancer IP after deployment.
+Single custom domain for HTTPS. DNS must point to the load balancer IP after deployment. Use `domains` for multiple domains.
+
+### loadBalancer.domains
+**Type:** `string[]` (optional)
+
+Multiple domains for HTTPS with a single SSL certificate (using Subject Alternative Names). This is more cost-effective than creating separate load balancers for each domain.
+
+```json
+{
+  "domains": ["example.com", "api.example.com", "admin.example.com"]
+}
+```
+
+:::tip[Cost Savings]
+Using `domains` with a single load balancer costs ~$18/month regardless of how many domains. Creating separate load balancers for each domain would cost ~$18/month per domain.
+:::
 
 ### loadBalancer.enableHttps
 **Type:** `boolean` (default: `false`, **required for IAP**)
 
-Enable HTTPS with a Google-managed SSL certificate. Requires `domain` to be set.
+Enable HTTPS with a Google-managed SSL certificate. Requires `domain` or `domains` to be set.
 
 ### loadBalancer.redirectHttpToHttps
 **Type:** `boolean` (default: `false`)
@@ -654,7 +671,12 @@ Automatic DNS configuration. Requires `@stacksolo/plugin-cloudflare`.
 ### loadBalancer.routes
 **Type:** `Route[]` (required)
 
-Path-based routing rules.
+Path-based and host-based routing rules. Routes are evaluated in order.
+
+#### route.host
+**Type:** `string` (optional)
+
+Hostname for host-based routing. If omitted, the route applies to all hosts. Use this to route different domains to different backends.
 
 #### route.path
 **Type:** `string` (required)
@@ -696,6 +718,42 @@ Backend service name (must match a function, ui, or container name).
   }
 }
 ```
+
+### Multi-Domain Example (Cost-Effective)
+
+Serve multiple domains from a single load balancer using host-based routing. This is ideal for cost-conscious deployments where you need both an API subdomain and a main app domain.
+
+```json
+{
+  "loadBalancer": {
+    "name": "gateway",
+    "domains": ["myapp.com", "api.myapp.com"],
+    "enableHttps": true,
+    "redirectHttpToHttps": true,
+    "routes": [
+      { "host": "api.myapp.com", "path": "/*", "backend": "api" },
+      { "host": "myapp.com", "path": "/api/*", "backend": "bff" },
+      { "host": "myapp.com", "path": "/*", "backend": "web" }
+    ]
+  }
+}
+```
+
+**How it works:**
+- Single SSL certificate covers both `myapp.com` and `api.myapp.com`
+- `api.myapp.com/*` requests → `api` service (dedicated API)
+- `myapp.com/api/*` requests → `bff` service (backend-for-frontend)
+- `myapp.com/*` requests → `web` service (static UI)
+
+**Cost comparison:**
+| Setup | Monthly Cost |
+|-------|-------------|
+| Single load balancer with `domains` | ~$18 |
+| Two separate load balancers | ~$36 |
+
+:::note[Route Order Matters]
+Routes are evaluated in order. Place more specific paths before catch-all paths (e.g., `/api/*` before `/*`).
+:::
 
 ### With Automatic Cloudflare DNS
 

@@ -134,21 +134,26 @@ export const resources: ResourceInfo[] = [
   {
     id: 'load-balancer',
     name: 'HTTP(S) Load Balancer',
-    description: 'Global load balancer for routing traffic to backends',
+    description: 'Global load balancer for routing traffic to backends. Supports multi-domain hosting with host-based routing for cost-effective setups.',
     configKey: 'loadBalancer',
     requiredFields: ['name', 'routes'],
     optionalFields: {
+      domain: 'Single custom domain for HTTPS',
+      domains: 'Multiple domains for HTTPS (single SSL cert with SANs)',
+      enableHttps: 'Enable HTTPS with managed SSL certificate (default: false)',
+      redirectHttpToHttps: 'Redirect all HTTP traffic to HTTPS (default: false)',
       defaultBackend: 'Default backend if no route matches',
-      ssl: 'SSL configuration for HTTPS',
     },
     example: `{
   "name": "gateway",
+  "domains": ["example.com", "api.example.com"],
+  "enableHttps": true,
+  "redirectHttpToHttps": true,
   "routes": [
-    { "path": "/api/*", "backend": "api" },
-    { "path": "/admin/*", "backend": "admin" },
-    { "path": "/*", "backend": "web" }
-  ],
-  "defaultBackend": "web"
+    { "host": "api.example.com", "path": "/*", "backend": "api" },
+    { "host": "example.com", "path": "/api/*", "backend": "bff" },
+    { "host": "example.com", "path": "/*", "backend": "web" }
+  ]
 }`,
   },
   {
