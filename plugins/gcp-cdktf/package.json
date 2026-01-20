@@ -1,6 +1,6 @@
 {
   "name": "@stacksolo/plugin-gcp-cdktf",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "GCP CDKTF plugin for StackSolo - provides Google Cloud Platform resource definitions using CDK for Terraform",
   "type": "module",
   "main": "./dist/index.js",
