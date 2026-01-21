@@ -370,6 +370,17 @@ const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
             priority++;
           }
 
+          // index.html - serve as-is (prevent rewrite loop)
+          routeRulesCode.push(`        // index.html - serve as-is to prevent rewrite loop
+        {
+          priority: ${priority},
+          matchRules: [{
+            fullPathMatch: '/index.html',
+          }],
+          service: ${hostDefaultBackend},
+        }`);
+          priority++;
+
           // Common root-level static files (favicon, robots, etc.)
           const staticFiles = ['/favicon.ico', '/robots.txt', '/sitemap.xml', '/site.webmanifest'];
           for (const staticFile of staticFiles) {
@@ -473,6 +484,17 @@ ${pathMatchersCode.join(',\n')},
       }`);
           priority++;
         }
+
+        // index.html - serve as-is (prevent rewrite loop)
+        routeRulesCode.push(`      // index.html - serve as-is to prevent rewrite loop
+      {
+        priority: ${priority},
+        matchRules: [{
+          fullPathMatch: '/index.html',
+        }],
+        service: ${defaultBackendRef},
+      }`);
+        priority++;
 
         // Common root-level static files
         const staticFiles = ['/favicon.ico', '/robots.txt', '/sitemap.xml', '/site.webmanifest'];
