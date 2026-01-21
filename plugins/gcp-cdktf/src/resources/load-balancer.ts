@@ -303,6 +303,7 @@ const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
         // Find default backend for this host
         const hostDefaultRoute = hostRoutes.find(r => r.path === '/*');
         const hostDefaultBackend = hostDefaultRoute ? getBackendRef(hostDefaultRoute) : defaultBackendRef;
+        const isDefaultRouteUI = hostDefaultRoute?.uiName;
 
         hostRulesCode.push(`    {
       hosts: ['${host}'],
@@ -327,7 +328,67 @@ const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
         }`;
         }).join(',\n');
 
-        if (nonDefaultHostRoutes.length > 0) {
+        // For UI backends (SPAs), we need routeRules with URL rewriting
+        // When a host has a UI as the default backend, use routeRules for proper SPA routing
+        if (isDefaultRouteUI) {
+          // Mixed host with SPA default - use routeRules for all paths
+          // This enables URL rewriting for the SPA while routing other paths normally
+          const routeRulesCode: string[] = [];
+          let priority = 1;
+
+          // First, add rules for specific paths (APIs, admin, etc.)
+          for (const route of nonDefaultHostRoutes) {
+            const backendRef = getBackendRef(route);
+            // Convert path pattern to prefixMatch (remove trailing /*)
+            const prefixPath = route.path.endsWith('/*')
+              ? route.path.slice(0, -2)
+              : route.path;
+
+            routeRulesCode.push(`        {
+          priority: ${priority},
+          matchRules: [{
+            prefixMatch: '${prefixPath}',
+          }],
+          service: ${backendRef},
+        }`);
+            priority++;
+          }
+
+          // Then add rules for the UI (SPA default)
+          // Static assets - serve as-is (files with extensions like .js, .css, .svg, .png, etc.)
+          routeRulesCode.push(`        // Static assets - serve as-is
+        {
+          priority: ${priority},
+          matchRules: [{
+            regexMatch: '.*\\\\.[a-zA-Z0-9]+$',
+          }],
+          service: ${hostDefaultBackend},
+        }`);
+          priority++;
+
+          // All other paths - rewrite to /index.html for SPA client-side routing
+          routeRulesCode.push(`        // SPA routing - rewrite non-asset paths to /index.html
+        {
+          priority: ${priority},
+          matchRules: [{
+            prefixMatch: '/',
+          }],
+          service: ${hostDefaultBackend},
+          routeAction: {
+            urlRewrite: {
+              pathPrefixRewrite: '/index.html',
+            },
+          },
+        }`);
+
+          pathMatchersCode.push(`    {
+      name: '${matcherName}',
+      defaultService: ${hostDefaultBackend},
+      routeRules: [
+${routeRulesCode.join(',\n')},
+      ],
+    }`);
+        } else if (nonDefaultHostRoutes.length > 0) {
           pathMatchersCode.push(`    {
       name: '${matcherName}',
       defaultService: ${hostDefaultBackend},
@@ -356,26 +417,93 @@ ${pathMatchersCode.join(',\n')},
 });`;
     } else {
       // Path-based routing only (no host specified)
-      // GCP URL maps require ONE path_matcher per host_rule, with all path rules inside
-      const pathRulesCode = nonDefaultRoutes.map((route) => {
-        const backendRef = getBackendRef(route);
-        // For paths like /admin/*, also include /admin (without trailing slash)
-        // to ensure both /admin and /admin/* are routed correctly
-        const paths = [route.path];
-        if (route.path.endsWith('/*')) {
-          const basePath = route.path.slice(0, -2); // Remove /*
-          if (basePath) {
-            paths.unshift(basePath); // Add base path first
-          }
+      // Check if the default route is a UI (SPA)
+      const isDefaultUI = defaultRoute?.uiName;
+
+      if (isDefaultUI) {
+        // SPA routing - use routeRules with URL rewriting
+        const routeRulesCode: string[] = [];
+        let priority = 1;
+
+        // First, add rules for specific paths (APIs, etc.)
+        for (const route of nonDefaultRoutes) {
+          const backendRef = getBackendRef(route);
+          const prefixPath = route.path.endsWith('/*')
+            ? route.path.slice(0, -2)
+            : route.path;
+
+          routeRulesCode.push(`      {
+        priority: ${priority},
+        matchRules: [{
+          prefixMatch: '${prefixPath}',
+        }],
+        service: ${backendRef},
+      }`);
+          priority++;
         }
-        const pathsStr = paths.map(p => `'${p}'`).join(', ');
-        return `      {
+
+        // Static assets - serve as-is
+        routeRulesCode.push(`      // Static assets - serve as-is
+      {
+        priority: ${priority},
+        matchRules: [{
+          regexMatch: '.*\\\\.[a-zA-Z0-9]+$',
+        }],
+        service: ${defaultBackendRef},
+      }`);
+        priority++;
+
+        // All other paths - rewrite to /index.html for SPA
+        routeRulesCode.push(`      // SPA routing - rewrite non-asset paths to /index.html
+      {
+        priority: ${priority},
+        matchRules: [{
+          prefixMatch: '/',
+        }],
+        service: ${defaultBackendRef},
+        routeAction: {
+          urlRewrite: {
+            pathPrefixRewrite: '/index.html',
+          },
+        },
+      }`);
+
+        urlMapConfig = `// URL Map with path-based routing and SPA support
+const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
+  name: '${config.name}',
+  defaultService: ${defaultBackendRef},
+  hostRule: [{
+    hosts: ['*'],
+    pathMatcher: 'all-paths',
+  }],
+  pathMatcher: [{
+    name: 'all-paths',
+    defaultService: ${defaultBackendRef},
+    routeRules: [
+${routeRulesCode.join(',\n')},
+    ],
+  }],
+});`;
+      } else {
+        // Non-SPA routing - use pathRule
+        const pathRulesCode = nonDefaultRoutes.map((route) => {
+          const backendRef = getBackendRef(route);
+          // For paths like /admin/*, also include /admin (without trailing slash)
+          const paths = [route.path];
+          if (route.path.endsWith('/*')) {
+            const basePath = route.path.slice(0, -2);
+            if (basePath) {
+              paths.unshift(basePath);
+            }
+          }
+          const pathsStr = paths.map(p => `'${p}'`).join(', ');
+          return `      {
         paths: [${pathsStr}],
         service: ${backendRef},
       }`;
-      }).join(',\n');
+        }).join(',\n');
 
-      urlMapConfig = `// URL Map with path-based routing
+        urlMapConfig = `// URL Map with path-based routing
 const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
   name: '${config.name}',
   defaultService: ${defaultBackendRef},
@@ -391,6 +519,7 @@ ${pathRulesCode},
     ],
   }],
 });`;
+      }
     }
 
     // Determine if HTTPS should be enabled
