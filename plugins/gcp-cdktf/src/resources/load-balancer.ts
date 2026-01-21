@@ -355,16 +355,34 @@ const ${varName}UrlMap = new ComputeUrlMap(this, '${config.name}-urlmap', {
           }
 
           // Then add rules for the UI (SPA default)
-          // Static assets - serve as-is (files with extensions like .js, .css, .svg, .png, etc.)
-          routeRulesCode.push(`        // Static assets - serve as-is
+          // Static assets - serve common asset directories as-is
+          // Note: GCP URL Maps don't support regex, so we use prefix matching for known asset paths
+          const assetPaths = ['/assets', '/static', '/_app', '/build'];
+          for (const assetPath of assetPaths) {
+            routeRulesCode.push(`        // Static assets from ${assetPath}/ - serve as-is
         {
           priority: ${priority},
           matchRules: [{
-            regexMatch: '.*\\\\.[a-zA-Z0-9]+$',
+            prefixMatch: '${assetPath}/',
           }],
           service: ${hostDefaultBackend},
         }`);
-          priority++;
+            priority++;
+          }
+
+          // Common root-level static files (favicon, robots, etc.)
+          const staticFiles = ['/favicon.ico', '/robots.txt', '/sitemap.xml', '/site.webmanifest'];
+          for (const staticFile of staticFiles) {
+            routeRulesCode.push(`        // Static file ${staticFile} - serve as-is
+        {
+          priority: ${priority},
+          matchRules: [{
+            fullPathMatch: '${staticFile}',
+          }],
+          service: ${hostDefaultBackend},
+        }`);
+            priority++;
+          }
 
           // All other paths - rewrite to /index.html for SPA client-side routing
           routeRulesCode.push(`        // SPA routing - rewrite non-asset paths to /index.html
@@ -442,16 +460,33 @@ ${pathMatchersCode.join(',\n')},
           priority++;
         }
 
-        // Static assets - serve as-is
-        routeRulesCode.push(`      // Static assets - serve as-is
+        // Static assets - serve common asset directories as-is
+        const assetPaths = ['/assets', '/static', '/_app', '/build'];
+        for (const assetPath of assetPaths) {
+          routeRulesCode.push(`      // Static assets from ${assetPath}/ - serve as-is
       {
         priority: ${priority},
         matchRules: [{
-          regexMatch: '.*\\\\.[a-zA-Z0-9]+$',
+          prefixMatch: '${assetPath}/',
         }],
         service: ${defaultBackendRef},
       }`);
-        priority++;
+          priority++;
+        }
+
+        // Common root-level static files
+        const staticFiles = ['/favicon.ico', '/robots.txt', '/sitemap.xml', '/site.webmanifest'];
+        for (const staticFile of staticFiles) {
+          routeRulesCode.push(`      // Static file ${staticFile} - serve as-is
+      {
+        priority: ${priority},
+        matchRules: [{
+          fullPathMatch: '${staticFile}',
+        }],
+        service: ${defaultBackendRef},
+      }`);
+          priority++;
+        }
 
         // All other paths - rewrite to /index.html for SPA
         routeRulesCode.push(`      // SPA routing - rewrite non-asset paths to /index.html
