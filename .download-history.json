@@ -54,6 +54,12 @@
       "weekly": 20,
       "monthly": 89,
       "total": 2016
+    },
+    {
+      "date": "2026-03-23",
+      "weekly": 1,
+      "monthly": 60,
+      "total": 2017
     }
   ]
 }
