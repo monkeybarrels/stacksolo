@@ -60,6 +60,12 @@
       "weekly": 1,
       "monthly": 60,
       "total": 2017
+    },
+    {
+      "date": "2026-03-30",
+      "weekly": 20,
+      "monthly": 78,
+      "total": 2039
     }
   ]
 }
