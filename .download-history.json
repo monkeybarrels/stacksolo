@@ -78,6 +78,12 @@
       "weekly": 7,
       "monthly": 42,
       "total": 2060
+    },
+    {
+      "date": "2026-04-20",
+      "weekly": 6,
+      "monthly": 47,
+      "total": 2066
     }
   ]
 }
