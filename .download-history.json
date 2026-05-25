@@ -108,6 +108,12 @@
       "weekly": 12,
       "monthly": 96,
       "total": 2161
+    },
+    {
+      "date": "2026-05-25",
+      "weekly": 44,
+      "monthly": 131,
+      "total": 2205
     }
   ]
 }
