@@ -168,6 +168,12 @@
       "weekly": 3,
       "monthly": 59,
       "total": 2381
+    },
+    {
+      "date": "2026-08-03",
+      "weekly": 1,
+      "monthly": 39,
+      "total": 2382
     }
   ]
 }
