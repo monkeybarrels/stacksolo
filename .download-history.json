@@ -180,6 +180,12 @@
       "weekly": 1,
       "monthly": 22,
       "total": 2383
+    },
+    {
+      "date": "2026-08-17",
+      "weekly": 15,
+      "monthly": 36,
+      "total": 2399
     }
   ]
 }
