@@ -210,6 +210,12 @@
       "weekly": 2,
       "monthly": 50,
       "total": 2448
+    },
+    {
+      "date": "2026-09-21",
+      "weekly": 0,
+      "monthly": 49,
+      "total": 2450
     }
   ]
 }
