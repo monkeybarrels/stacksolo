@@ -252,6 +252,12 @@
       "weekly": 2,
       "monthly": 22,
       "total": 2581
+    },
+    {
+      "date": "2026-11-09",
+      "weekly": 7,
+      "monthly": 28,
+      "total": 2605
     }
   ]
 }
